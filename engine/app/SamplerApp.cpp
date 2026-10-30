@@ -10,7 +10,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -66,10 +66,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][7] = {{P_HOME, P_ENV, P_LFO, P_ARP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
+    static const Page p[kModes][7] = {{P_HOME, P_ENV, P_LFO, P_ARP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
     return p[m & 3];
 }
-int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 7 : 4; }
+int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 7 : (m & 3) == 2 ? 5 : 4; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -98,7 +98,7 @@ SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
     };
     byLabel("Tape Key", 0); byLabel("Acoustic", 1); byLabel("Shiny", 2); byLabel("TrapKit", 3); (void)first;
     for (int t = 0; t < kTracks; t++) { applyMix(t); applyPattern(t); }
-    applyMasterFx(); applyTempo();
+    applyMasterFx(); applyTempo(); applyTomb();
     if (ts_[0].entry >= 0) libCursor_ = ts_[0].entry;
 }
 
@@ -192,7 +192,9 @@ void SamplerApp::applyTempo() {
     s_.setQuantize(seqGrid_);
     s_.setInputQuant(liveGrid_);
     s_.setCountIn(countIn_);
+    s_.setSwing(0.5f + 0.25f * swing_);
 }
+void SamplerApp::applyTomb() { s_.tombolaSet((tSpin_ - 0.5f) * 14.f, tGrav_, tMass_, tShape_); }
 void SamplerApp::applyTrackFx(int t) {
     const TrackState& x = ts_[t];
     FxParams p; p.filter = x.tfDj; p.chorus = x.tfChorus; p.crush = x.tfCrush; p.gate = x.tfGate;
@@ -394,6 +396,14 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[0] = choice("LIVE QUANTIZE", &liveGrid_, grids, [=] { applyTempo(); });
         k[1] = choice("SEQ QUANTIZE", &seqGrid_, grids, [=] { applyTempo(); });
         k[2] = choice("COUNT-IN", &countIn_, {kCountIn[0], kCountIn[1], kCountIn[2]}, [=] { applyTempo(); });
+        k[3] = cont("SWING", &swing_, [](float v) { return v < 0.02f ? std::string("OFF") : fmt("%.0f PCT", 50.f + 25.f * v); }, [=] { applyTempo(); }, 0.02f);
+        break;
+    }
+    case P_TOMB: {   // balls bounce in a turning drum and play their notes when they hit the wall: play keys to drop balls
+        k[0] = cont("SPIN", &tSpin_, [](float v) { return fmt("%+.1f", (v - 0.5f) * 14.f); }, [=] { applyTomb(); }, 0.01f);
+        k[1] = cont("GRAVITY", &tGrav_, [](float v) { return pct(v); }, [=] { applyTomb(); });
+        k[2] = cont("SHAPE", &tShape_, [](float v) { return fmt("%.0f SIDES", 3.0 + std::round(v * 5.0)); }, [=] { applyTomb(); }, 0.2f);
+        k[3] = cont("MASS", &tMass_, [](float v) { return pct(v); }, [=] { applyTomb(); });
         break;
     }
     case P_TEMPO: {
@@ -441,6 +451,13 @@ void SamplerApp::seqBounce() {
 }
 void SamplerApp::seqToggleAt(int tick, int note, int len) { s_.seqToggle(track_, tick, len > 0 ? len : stepTicks(), note, 100); }
 // the dice: a new random pattern in the current scale (one undo step); denser on the beats, sometimes a long note
+void SamplerApp::tombolaDrop() {
+    int sc[12]; int n = scaleSteps(scale_.scale, sc);
+    if (n == 0) { static const int pent[] = {0, 3, 5, 7, 10}; std::copy(pent, pent + 5, sc); n = 5; }
+    uint32_t r = nowMs_ * 2654435761u + 777u; r = r * 1664525u + 1013904223u;
+    const int deg = (int)((r >> 8) % (uint32_t)(n * 2));
+    s_.tombolaAdd(track_, std::min(127, 48 + scale_.root + 12 * (deg / n) + sc[deg % n] + 12 * scale_.octave));
+}
 void SamplerApp::seqDice() {
     int sc[12]; int n = scaleSteps(scale_.scale, sc);
     if (n == 0) { static const int pent[] = {0, 3, 5, 7, 10}; std::copy(pent, pent + 5, sc); n = 5; }
@@ -512,7 +529,7 @@ void SamplerApp::keyEvent(int raw, bool down) {   // a key of the FM-1 (chromati
 }
 void SamplerApp::playNote(int note, bool down) {
     if (note < 0 || note > 127) return;
-    if (down) { heldNote_[note] = track_; s_.noteOn(track_, note, 100); }
+    if (down) { heldNote_[note] = track_; s_.noteOn(track_, note, 100); if (page_ == P_TOMB) s_.tombolaAdd(track_, note); }
     else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
 }
 std::vector<float> SamplerApp::peaks(int t, int bins) {

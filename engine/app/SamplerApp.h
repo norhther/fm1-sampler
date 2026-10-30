@@ -23,7 +23,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -78,6 +78,10 @@ public:
     void seqBounce();                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
     void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
     void seqToggleAt(int tick, int note, int len = 0);   // touch: add / remove a note (length in ticks, 0 = one step)
+    void tombolaDrop();                                   // a ball with a random note of the scale
+    void tombolaReverse() { tSpin_ = 1.f - tSpin_; applyTomb(); }
+    void tombolaClear() { s_.tombolaClear(); }
+    int tombolaSides() const { return 3 + (int)std::lround(tShape_ * 5.f); }
     void seqDice();                                       // a random pattern in the current scale
     void seqResizeAt(int tick, int note, int len);        // touch: stretch the note that starts at `tick`
     int stepTicks() const { const int g = gridTicks(seqGrid_); return g ? g : kPpq / 4; }
@@ -146,7 +150,7 @@ private:
     void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
     void applyFx();
     void applyMasterFx();
-    void applyTempo();
+    void applyTempo(); void applyTomb();
     void applyPattern(int t);
     void applyTrackFx(int t);
     void setTempo(float bpm);
@@ -166,7 +170,8 @@ private:
     float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
     float flanger_ = 0.f, drive_ = 0.f, eqLow_ = 0.5f, eqMid_ = 0.5f, eqHigh_ = 0.5f, tremolo_ = 0.f, wah_ = 0.f, ringmod_ = 0.f, tapeStop_ = 0.f;
     int reverse_ = 0, freeze_ = 0;
-    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 4, liveGrid_ = 0, countIn_ = 0;   // the pattern plays on a 1/16 grid unless told otherwise
+    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 4, liveGrid_ = 0, countIn_ = 0;
+    float swing_ = 0.f, tSpin_ = 0.557f, tGrav_ = 0.55f, tMass_ = 0.72f, tShape_ = 0.6f;   // swing 0..1 = 50..75 %, tombola knobs   // the pattern plays on a 1/16 grid unless told otherwise
     float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;
     float exciter_ = 0.f, lofi_ = 0.f, wobble_ = 0.f, loopSpeed_ = 2.f / 3.f, micThr_ = 0.452f;   // loop speed is global
     uint32_t repaintAt_ = 0; int repaintCount_ = 0;

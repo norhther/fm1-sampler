@@ -45,6 +45,7 @@ private:
     void pagePanel(Rect r);
     void librarySheet();
     void sequencerView(Rect r);
+    void tombolaView(Rect r);
 
     SamplerApp& app_;
     float W_ = 860, H_ = 400, top_ = 0, bottom_ = 0;
@@ -62,7 +63,7 @@ private:
     // a finger on the grid: a new note being stretched, or an existing one being resized (tap = remove)
     struct NoteDrag { bool on = false, existing = false, moved = false; int tick = 0, note = 0, len = 0, origLen = 0; } drag_;
     int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
-    float rulerDownX_ = 0, rulerStartScroll_ = 0;   // piano roll zoom: how many times the pattern is stretched in time, how many pitch rows are shown
+    float rulerDownX_ = 0, rulerStartScroll_ = 0, drumLastAngle_ = 0;   // piano roll zoom: how many times the pattern is stretched in time, how many pitch rows are shown
     // the roll of the last frame (for the pinch) and the state of a pinch in progress
     bool rollOn_ = false, pinchOn_ = false; float rollX0_ = 0, rollY0_ = 0, rollW_ = 1, rollH_ = 1; int rollPt_ = 1, rollMinVisible_ = 1;
     float pinchDx0_ = 1, pinchDy0_ = 1, pinchZoom0_ = 1, pinchRows0_ = 12, pinchBase0_ = 54, pinchTick0_ = 0, pinchNote0_ = 60, pinchYFrac0_ = 0.5f;
