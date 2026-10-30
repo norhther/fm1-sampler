@@ -74,6 +74,8 @@ struct Session::Impl {
     // beat clock, metronome, sequencer
     double freeBeat = 0;   // beat position while the transport is stopped
     bool metroOn = false; float metroVol = 0.6f, clickEnv = 0, clickFreq = 1000, clickPh = 0;
+    int duckSrc = -1; float duckAmt[kTracks] = {}, duckRel = 0.25f, duckEnv = 0.f; bool duckTrig = false;   // sidechain: a note of the source track pushes the other tracks down
+    bool limOn = false; float limCeil = 0.9f, limG = 1.f; std::atomic<int> a_clip{0};   // master limiter; the clip light
     bool resampling = false; std::vector<float> resBuf; int64_t resLeft = 0;   // the master output being recorded into a sample
     uint32_t rngState = 99; uint32_t tombolaSeed = 1; float swing = 0.5f; std::atomic<int> busy{0};   // file jobs in flight (project save / load)
     int takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
@@ -601,6 +603,7 @@ struct Session::Impl {
         if (loopSamples > 0) tapePos = !tl ? (double)(p0 % loopSamples) : locked ? (double)((p0 + n) % loopSamples) : std::fmod(tb + n * spd, (double)loopSamples);
         bool anyEvents;
         std::vector<Arp::Ev> evs;
+        const float duckEnv0 = duckEnv; duckTrig = false;
         for (int ti = 0; ti < kTracks; ti++) {
             Track& t = *tracks[(size_t)ti];
             if (!t.sampler && !t.clipHas && !t.clipRec && t.pending.empty() && t.nDelayed == 0) { t.peak.store(t.peak.load() * 0.9f); a_voiceN[ti].store(0); continue; }
@@ -638,7 +641,7 @@ struct Session::Impl {
                 for (auto& e : evs) {
                     const int off = std::min(n, std::max(cur, e.offset));
                     if (off > cur) { t.sampler->render(bus.data() + 2 * cur, off - cur); cur = off; }
-                    if (e.vel) t.sampler->noteOn(e.note, e.vel); else t.sampler->noteOff(e.note);
+                    if (e.vel) { t.sampler->noteOn(e.note, e.vel); if (ti == duckSrc) duckTrig = true; } else t.sampler->noteOff(e.note);
                 }
                 if (cur < n) t.sampler->render(bus.data() + 2 * cur, n - cur);
                 float vp[kVoiceMax]; const int vn = t.sampler->voicePositions(vp, kVoiceMax);
@@ -692,18 +695,22 @@ struct Session::Impl {
             }
             t.tape.process(bus.data(), n);
             if (t.fx->active()) t.fx->process(bus.data(), n, beat0, 1.0 / spb); else t.fx->feedOnly(bus.data(), n);
+            const float dkR = std::exp(-1.f / (std::max(0.02f, duckRel) * (float)sr)); float de = std::max(duckEnv0, duckTrig && ti != duckSrc ? 1.f : 0.f);
+            const float da = ti == duckSrc ? 0.f : duckAmt[ti];
             const float g = t.vol * lfoGain;
             const float ang = (clampf(t.pan + lfoPan, -1.f, 1.f) * 0.5f + 0.5f) * 1.5707963f;
             const float gl = g * std::cos(ang) * 1.4142f, gr = g * std::sin(ang) * 1.4142f;
             float pk = 0.f;
             for (int i = 0; i < n; i++) {
-                const float l = bus[2 * i] * gl, r = bus[2 * i + 1] * gr;
+                const float dg = da > 0.f ? 1.f - da * de : 1.f; de *= dkR;
+                const float l = bus[2 * i] * gl * dg, r = bus[2 * i + 1] * gr * dg;
                 out[2 * i] += l; out[2 * i + 1] += r;
                 for (int sd = 0; sd < 2; sd++) if (t.send[sd] > 0.f) { sendBus[sd][2 * i] += l * t.send[sd]; sendBus[sd][2 * i + 1] += r * t.send[sd]; }
                 pk = std::max(pk, std::max(std::fabs(l), std::fabs(r)));
             }
             t.peak.store(std::max(pk, t.peak.load() * 0.92f));
         }
+        duckEnv = std::max(duckEnv0, duckTrig ? 1.f : 0.f) * std::exp(-(float)n / (std::max(0.02f, duckRel) * (float)sr));
         (void)anyEvents;
         a_clipPos.store(loopSamples > 0 ? (float)(tapePos / loopSamples) : 0.f);
         reverb.process(sendBus[0].data(), wet.data(), n);
@@ -724,6 +731,15 @@ struct Session::Impl {
             }
         }
         float mp = 0.f;
+        if (limOn) {   // master limiter: the gain drops at once when a sample would pass the ceiling, and comes back over about 100 ms
+            const float rel = 1.f - std::exp(-1.f / (0.1f * (float)sr));
+            for (int i = 0; i < n; i++) {
+                const float pk = std::max(std::fabs(out[2 * i]), std::fabs(out[2 * i + 1])) * masterVol;
+                if (pk * limG > limCeil) limG = limCeil / pk; else limG += (1.f - limG) * rel;
+                out[2 * i] *= limG; out[2 * i + 1] *= limG;
+            }
+        } else limG = 1.f;
+        { float pre = 0.f; for (int i = 0; i < n * 2; i++) pre = std::max(pre, std::fabs(out[i]) * masterVol); if (pre > 1.1f) a_clip.store(40); else if (a_clip.load() > 0) a_clip.store(a_clip.load() - 1); }
         for (int i = 0; i < n * 2; i++) { const float v = std::tanh(out[i] * masterVol); out[i] = v; mp = std::max(mp, std::fabs(v)); }
         a_master.store(std::max(mp, a_master.load() * 0.92f));
         if (resampling) {   // RESAMPLE: what you hear becomes a sample
@@ -1059,6 +1075,9 @@ void Session::setSliceStarts(int t, const std::vector<float>& pts) {
     });
 }
 void Session::setSampleLevel(int t, float level, float fineCents) { if (t >= 0 && t < kTracks) d->post([=] { if (d->tracks[(size_t)t]->sampler) { d->tracks[(size_t)t]->sampler->setLevel(level); d->tracks[(size_t)t]->sampler->setFine(fineCents); } }); }
+void Session::setLimiter(bool on, float ceilingDb) { d->post([=] { d->limOn = on; d->limCeil = std::pow(10.f, clampf(ceilingDb, -12.f, 0.f) / 20.f); }); }
+void Session::setDuck(int sourceTrack, float release) { d->post([=] { d->duckSrc = sourceTrack; d->duckRel = clampf(release, 0.02f, 1.5f); }); }
+void Session::setDuckAmount(int t, float amount) { if (t >= 0 && t < kTracks) d->post([=] { d->duckAmt[t] = clampf(amount, 0.f, 1.f); }); }
 void Session::unloadSample(int t) {
     if (t < 0 || t >= kTracks) return;
     d->post([this, t] {
@@ -1157,6 +1176,7 @@ int Session::sampleRate() const { return d->sr; }
 Session::Status Session::status() const {
     Status s{};
     s.playing = d->a_playing; s.pos = d->a_pos; s.loopSamples = d->a_loop;
+    s.clip = d->a_clip.load() > 0;
     s.bpm = d->a_bpm; s.loopBars = d->a_bars; s.master_peak = d->a_master; s.cpu_permille = d->a_cpu;
     const uint32_t cm = d->a_clip_mask, rm = d->a_cliprec_mask;
     for (int i = 0; i < kTracks; i++) {

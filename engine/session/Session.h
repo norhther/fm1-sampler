@@ -24,7 +24,8 @@ public:
         double loopSamples;      // 0 = no loop yet
         float bpm;
         int loopBars;
-        float master_peak;
+        float master_peak; bool clip;   // clip: the master was pushed past full level a moment ago
+
         float track_peak[kTracks];
         bool track_has_clip[kTracks], track_clip_rec[kTracks];
         uint32_t cpu_permille;   // audio block time / block duration, smoothed
@@ -92,6 +93,9 @@ public:
     void setPan(int track, float p);      // -1..1
     void setSend(int track, int which /*0 reverb 1 delay*/, float level);
     void setMasterVolume(float v);
+    void setLimiter(bool on, float ceilingDb);   // master limiter: nothing passes the ceiling (-12 .. 0 dB)
+    void setDuck(int sourceTrack, float release);   // sidechain: every note of this track (-1 = off) pushes the tracks with a duck amount down, releasing over `release` seconds
+    void setDuckAmount(int track, float amount);    // 0..1
     void setReverb(float size);           // 0..1
     void setDelay(float seconds, float feedback);
     void setRetLevel(int which, float v); // reverb / delay return gain (the effects run 100 % wet)

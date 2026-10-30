@@ -70,7 +70,7 @@ std::string SamplerApp::stateText() {
         x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
         x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
-        x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
+        x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
         x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
     };
     common(io);
@@ -84,6 +84,7 @@ std::string SamplerApp::stateText() {
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
         for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
         io.f(k + "fineN", x.fineN); io.f(k + "levelN", x.levelN);
+        io.f(k + "tfEqLow", x.tfEqLow); io.f(k + "tfEqMid", x.tfEqMid); io.f(k + "tfEqHigh", x.tfEqHigh); io.f(k + "tfComp", x.tfComp); io.f(k + "duckAmt", x.duckAmt);
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (x.entry >= 0 && x.entry < (int)lib_.size()) io.out << k << "sample=" << lib_[(size_t)x.entry].group << '|' << lib_[(size_t)x.entry].label << '\n';
@@ -104,7 +105,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
         x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
-        x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
+        x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
         x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
     };
     common(io);
@@ -142,7 +143,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         }
         s_.seqSet(t, notes.data(), (int)notes.size());
     }
-    applyFx(); applyMasterFx(); applySeq(0); applyTomb(); applyTempo(); s_.setLoopSource(loopSrc_);
+    applyFx(); applyMasterFx(); applySeq(0); applyTomb(); applyTempo(); applyMaster(); s_.setLoopSource(loopSrc_);
     setScale(scale_.scale, scale_.root, scale_.octave, scale_.mode);
     track_ = track;
     (void)bars; (void)fmtv; (void)sr;

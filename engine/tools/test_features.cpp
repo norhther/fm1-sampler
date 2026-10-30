@@ -689,6 +689,47 @@ static void testSampleEdit() {
     CHECK(app.sampleLabel(0) != before && app.sampleLabel(0).rfind("sample", 0) == 0 && s.sampleFramesOf(0) > sr, "RESAMPLE: the track plays the new sample (%s, %d frames)", app.sampleLabel(0).c_str(), s.sampleFramesOf(0));
 }
 
+static void testMixer() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_tg; mkdir -p /tmp/fm1sampler_tg");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tg"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
+    auto load = [&](int track, const char* name) { app.selectTrack(track); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == name && app.library()[(size_t)i].group == "Synths") app.loadEntry(i); };
+    wait(2.0); load(1, "Organ"); load(0, "Synth Kit 808"); wait(2.0);
+    app.gotoPage(SamplerApp::P_TEQ); CHECK(std::string(app.knobs()[0].name) == "EQ LOW" && std::string(app.knobs()[3].name) == "COMPRESSOR" && SamplerApp::modeOf(SamplerApp::P_TEQ) == 3, "MIX mode has the track EQ page");
+    app.gotoPage(SamplerApp::P_DUCK); CHECK(std::string(app.knobs()[0].name) == "DUCK FROM" && std::string(app.knobs()[3].name) == "LIMITER", "...and the duck and limiter page");
+    // track EQ: a low boost on an organ note
+    app.selectTrack(1); app.setSend(1, 0, 0.f); app.setSend(1, 1, 0.f);
+    auto held = [&](int note, double sec) { size_t m = all.size(); app.playNote(note, true); run(sec); const double r = rms(all, all.size() - (size_t)sr / 4 * 2, all.size()); app.playNote(note, false); run(0.8); (void)m; return r; };
+    const double flat = held(36, 1.0);
+    app.gotoPage(SamplerApp::P_TEQ); { auto k = app.knobs(); k[0].set(1.f); } const double boosted = held(36, 1.0);
+    CHECK(boosted > flat * 1.25, "track EQ low +12 dB lifts a low organ note (%.3f -> %.3f)", flat, boosted);
+    { auto k = app.knobs(); k[0].set(0.5f); }
+    // sidechain: track 0 (silent itself) ducks the organ on track 2
+    app.setVolume(0, 0.f); app.gotoPage(SamplerApp::P_DUCK);
+    app.selectTrack(1); { auto k = app.knobs(); k[0].set(1.f / 8.f); k[1].set(1.f); k[2].set(0.5f); }   // from track 1, push this track fully, 0.5 s release
+    app.selectTrack(1); app.gotoPage(SamplerApp::P_DUCK); { auto k = app.knobs(); (void)k; }
+    // the source is track 1 (index 0)? the knob says DUCK FROM TRACK 1 = index 0
+    app.playNote(48, true); run(1.0);
+    const double steady = rms(all, all.size() - 4800 * 2, all.size());
+    app.selectTrack(0); app.playNote(60, true); run(0.03); const double ducked = rms(all, all.size() - 480 * 2, all.size()); app.playNote(60, false); run(1.2); const double back = rms(all, all.size() - 4800 * 2, all.size());
+    CHECK(ducked < steady * 0.5 && back > steady * 0.8, "sidechain: a hit on track 1 pushes the organ down (%.3f -> %.3f) and it comes back (%.3f)", steady, ducked, back);
+    app.playNote(48, false); app.selectTrack(1); app.playNote(48, false); run(1.0);
+    { app.selectTrack(1); auto k = app.knobs(); k[0].set(0.f); }
+    // limiter
+    s.setMasterVolume(1.5f); load(2, "Super Saw"); wait(1.0); app.selectTrack(2);
+    auto peakOf = [&]() { float pk = 0.f; for (size_t i = all.size() - (size_t)sr * 2 / 2; i < all.size(); i++) pk = std::max(pk, std::fabs(all[i])); return pk; };
+    for (int n : {48, 52, 55, 60, 64, 67}) app.playNote(n, true); run(1.0); const float unl = peakOf(); const bool clip = app.status().clip;
+    app.gotoPage(SamplerApp::P_DUCK); { auto k = app.knobs(); k[3].set(1.f); } run(1.0); const float lim = peakOf();
+    for (int n : {48, 52, 55, 60, 64, 67}) app.playNote(n, false); run(1.0);
+    CHECK(unl > 0.7f && lim < 0.5f && lim < unl, "limiter -6 dB: the peak %.2f falls to %.2f", unl, lim);
+    CHECK(clip, "the clip light comes on when the master is pushed (%d)", clip);
+    s.setMasterVolume(0.9f);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -782,6 +823,7 @@ int main() {
     }
     testSynths();
     testOp1();
+    testMixer();
     testSampleEdit();
     testPads();
     testNoteEdit();

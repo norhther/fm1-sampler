@@ -10,7 +10,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -66,10 +66,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
+    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_KEY, P_SAVE, P_LEN, P_TEQ, P_DUCK}};
     return p[m & 3];
 }
-int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 ? 6 : (m & 3) == 0 ? 6 : 4; }
+int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 ? 6 : (m & 3) == 0 ? 6 : (m & 3) == 3 ? 6 : 4; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -99,7 +99,7 @@ SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
     };
     byLabel("Tape Key", 0); byLabel("Acoustic", 1); byLabel("Shiny", 2); byLabel("TrapKit", 3); (void)first;
     for (int t = 0; t < kTracks; t++) { applyMix(t); applyPattern(t); }
-    applyMasterFx(); applyTempo(); applyTomb();
+    applyMasterFx(); applyTempo(); applyTomb(); applyMaster();
     if (ts_[0].entry >= 0) libCursor_ = ts_[0].entry;
 }
 
@@ -174,6 +174,12 @@ std::string SamplerApp::padName(int pad) const {
     if (e >= 0 && e < (int)lib_.size() && lib_[(size_t)e].path.rfind("synth:", 0) == 0 && lib_[(size_t)e].kit) return n[pad & 15];
     return std::to_string(pad + 1);
 }
+void SamplerApp::applyMaster() {
+    static const float ceil[7] = {0.f, -0.3f, -1.f, -2.f, -3.f, -4.5f, -6.f};
+    s_.setLimiter(limiter_ > 0, ceil[std::min(6, std::max(0, limiter_))]);
+    s_.setDuck(duckSrc_ - 1, 0.05f + duckRel_ * 0.95f);
+    for (int t = 0; t < kTracks; t++) s_.setDuckAmount(t, ts_[t].duckAmt);
+}
 void SamplerApp::applyEdit(int t) { const TrackState& x = ts_[t]; s_.setSampleLevel(t, x.levelN * 3.f, (x.fineN - 0.5f) * 100.f); }
 void SamplerApp::resampleNow() {
     if (mic_ != 0) return;
@@ -229,7 +235,7 @@ void SamplerApp::applyTempo() {
 void SamplerApp::applyTomb() { s_.tombolaSet((tSpin_ - 0.5f) * 14.f, tGrav_, tMass_, tShape_); }
 void SamplerApp::applyTrackFx(int t) {
     const TrackState& x = ts_[t];
-    FxParams p; p.filter = x.tfDj; p.chorus = x.tfChorus; p.crush = x.tfCrush; p.gate = x.tfGate;
+    FxParams p; p.filter = x.tfDj; p.chorus = x.tfChorus; p.crush = x.tfCrush; p.gate = x.tfGate; p.eqLow = x.tfEqLow; p.eqMid = x.tfEqMid; p.eqHigh = x.tfEqHigh; p.comp = x.tfComp;
     s_.setTrackFx(t, p);
 }
 void SamplerApp::applyPattern(int t) { s_.seqSetBars(t, ts_[t].seqBars + 1); s_.seqSetState(t, ts_[t].seqState); }
@@ -446,6 +452,18 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
             k[2] = choice("SLICES", &x.sliceCount, {"4", "8", "12", "16", "24", "32"}, [=] { applyShape(t, true); });
             k[3] = cont("SLICE SENS", &x.sliceSens, [](float v) { return fmt("%.1fX", std::pow(2.f, (v - 0.5f) * 2.f)); }, [=] { applyShape(t, true); }, 0.05f);
         }
+        break;
+    case P_TEQ:   // EQ and compressor of this track
+        k[0] = cont("EQ LOW", &x.tfEqLow, [](float v) { return std::fabs(v - 0.5f) < 0.02f ? std::string("FLAT") : fmt("%+.0f DB", (v - 0.5f) * 24.f); }, [=] { applyTrackFx(t); }, 0.02f);
+        k[1] = cont("EQ MID", &x.tfEqMid, [](float v) { return std::fabs(v - 0.5f) < 0.02f ? std::string("FLAT") : fmt("%+.0f DB", (v - 0.5f) * 24.f); }, [=] { applyTrackFx(t); }, 0.02f);
+        k[2] = cont("EQ HIGH", &x.tfEqHigh, [](float v) { return std::fabs(v - 0.5f) < 0.02f ? std::string("FLAT") : fmt("%+.0f DB", (v - 0.5f) * 24.f); }, [=] { applyTrackFx(t); }, 0.02f);
+        k[3] = cont("COMPRESSOR", &x.tfComp, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
+        break;
+    case P_DUCK:   // sidechain and the master limiter
+        k[0] = choice("DUCK FROM", &duckSrc_, {"OFF", "TRACK 1", "TRACK 2", "TRACK 3", "TRACK 4", "TRACK 5", "TRACK 6", "TRACK 7", "TRACK 8"}, [=] { applyMaster(); });
+        k[1] = cont("DUCK THIS TRACK", &x.duckAmt, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMaster(); });
+        k[2] = cont("DUCK RELEASE", &duckRel_, [](float v) { return fmt("%.2fS", 0.05f + v * 0.95f); }, [=] { applyMaster(); });
+        k[3] = choice("LIMITER", &limiter_, {"OFF", "-0.3 DB", "-1 DB", "-2 DB", "-3 DB", "-4.5 DB", "-6 DB"}, [=] { applyMaster(); });
         break;
     case P_SMPED:
         if (isSynth(t)) break;   // nothing to edit in a synth

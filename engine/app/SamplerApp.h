@@ -23,7 +23,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -127,6 +127,7 @@ public:
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
         int editOp = 0; float fineN = 0.5f, levelN = 1.f / 3.f;   // SAMPLE EDIT page: the edit to apply, fine tune (+-50 cents), sample level (0..3)
+        float tfEqLow = 0.5f, tfEqMid = 0.5f, tfEqHigh = 0.5f, tfComp = 0.f, duckAmt = 0.f;   // MIX mode: track EQ and compressor, how far the sidechain pushes this track down
         float padVol[16], padPitch[16], padDecay[16]; int padGroup[16] = {}; int selPad = 0;   // per pad of a kit (PADS page)
         TrackState() { for (int i = 0; i < 16; i++) { padVol[i] = 2.f / 3.f; padPitch[i] = 0.5f; padDecay[i] = 0.5f; } }
         int seqState = 0, seqBars = 3;   // sequencer: OFF / PLAY / REC, pattern length - 1 (1..16 bars)
@@ -217,6 +218,8 @@ private:
     // master fx (FX 2, LIVE FX), tempo page, sequencer grid
     float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
     float flanger_ = 0.f, drive_ = 0.f, eqLow_ = 0.5f, eqMid_ = 0.5f, eqHigh_ = 0.5f, tremolo_ = 0.f, wah_ = 0.f, ringmod_ = 0.f, tapeStop_ = 0.f;
+    int duckSrc_ = 0, limiter_ = 0; float duckRel_ = 0.3f;   // sidechain source (0 off, 1..8) and its release, master limiter (0 off, then ceilings)
+    void applyMaster();
     int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;
     float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f;   // OP-1 FX page
     int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 4, liveGrid_ = 0, countIn_ = 0;
