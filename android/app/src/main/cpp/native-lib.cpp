@@ -143,6 +143,16 @@ FN(void, importFile)(JNIEnv* env, jclass, jlong h, jstring path) {
     { std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->importFile(c); }
     env->ReleaseStringUTFChars(path, c);
 }
+// projects: the autosave (when the app goes to the background), the restore at the start, files for the share sheet, a MIDI file to import
+FN(void, autosave)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->autosave(true); }
+FN(void, restoreLast)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->restoreLast(); }
+FN(jstring, sharePath)(JNIEnv* env, jclass, jlong h) { auto& e = *E(h); std::string p; { std::lock_guard<std::mutex> l(e.surfaceMtx); p = e.app->sharePath(); } return env->NewStringUTF(p.c_str()); }
+FN(jboolean, wantMidi)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); return e.app->wantMidi(); }
+FN(void, importMidi)(JNIEnv* env, jclass, jlong h, jstring path) {
+    auto& e = *E(h); const char* c = env->GetStringUTFChars(path, nullptr);
+    { std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->importMidi(c); }
+    env->ReleaseStringUTFChars(path, c);
+}
 FN(void, say)(JNIEnv* env, jclass, jlong h, jstring msg) {
     auto& e = *E(h); const char* c = env->GetStringUTFChars(msg, nullptr);
     { std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->say(c); }

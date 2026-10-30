@@ -10,5 +10,6 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <provider android:name=".ExportProvider" android:authorities="com.ferluht.fm1sampler.export" android:exported="false" android:grantUriPermissions="true"/>
     </application>
 </manifest>

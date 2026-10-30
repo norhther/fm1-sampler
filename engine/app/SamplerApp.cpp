@@ -10,7 +10,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -66,10 +66,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][7] = {{P_HOME, P_ENV, P_LFO, P_ARP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
+    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
     return p[m & 3];
 }
-int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 7 : (m & 3) == 2 ? 5 : 4; }
+int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 || (m & 3) == 0 ? 5 : 4; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -111,7 +111,7 @@ void SamplerApp::refreshLibrary() {
             std::string stem = file.substr(0, file.rfind('.'));
             lib_.push_back({stem, f, dir + "/" + f + "/" + file, f == "Drums"});
         }
-    for (int i = 0; i < kSynthCount; i++) lib_.push_back({kSynths[i].name, "Synths", "synth:" + std::to_string(i), false});
+    for (int i = 0; i < kSynthCount; i++) lib_.push_back({kSynths[i].name, "Synths", "synth:" + std::to_string(i), kSynths[i].kit > 0});
     for (auto& p : s_.sampleLibrary()) {
         std::string nm = p.substr(p.find_last_of('/') + 1); nm = nm.substr(0, nm.rfind('.'));
         if (nm.rfind("sample_", 0) == 0) nm = nm.substr(7);
@@ -129,7 +129,7 @@ void SamplerApp::loadEntry(int i) {
     libCursor_ = i; auditionAt_ = 0;
     const Entry& e = lib_[(size_t)i];
     TrackState& t = ts_[track_];
-    t.entry = i; t.start = 0.f; t.end = 1.f;
+    t.entry = i; t.start = 0.f; t.end = 1.f; t.rootN = 0.5f; t.sliceCount = 3; t.sliceSens = 0.5f; t.synTone = t.synBody = t.synMotion = t.synGrit = 0.5f;
     if (e.kit) t.algo = 3; else if (t.algo == 3) t.algo = 0;
     if (e.path.rfind("synth:", 0) == 0) {   // a synth patch brings its own envelope
         const SynthPatch& p = kSynths[std::atoi(e.path.c_str() + 6) % kSynthCount];
@@ -146,7 +146,21 @@ void SamplerApp::importFile(const std::string& wav) {
 
 // ---- parameters ----
 void SamplerApp::applyAll(int t) {
-    applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t);
+    applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t);
+}
+void SamplerApp::applyShape(int t, bool reslice) {
+    const TrackState& x = ts_[t];
+    s_.setSynthMacros(t, (x.synTone - 0.5f) * 2.f, (x.synBody - 0.5f) * 2.f, (x.synMotion - 0.5f) * 2.f, (x.synGrit - 0.5f) * 2.f);
+    s_.setRoot(t, 24 + (int)std::lround(x.rootN * 72.f));
+    static const int counts[6] = {4, 8, 12, 16, 24, 32};
+    if (reslice || x.sliceCount != 3 || std::fabs(x.sliceSens - 0.5f) > 0.01f) s_.setSlices(t, counts[std::min(5, std::max(0, x.sliceCount))], std::pow(2.f, (x.sliceSens - 0.5f) * 2.f));
+}
+// AUTO TUNE: the pitch of the sample becomes the root key, so every key sounds as the note it says
+void SamplerApp::autoTune() {
+    const float g = s_.rootGuessOf(track_);
+    if (g < 24.f || g > 96.f) { say("NOT A PITCHED SOUND"); return; }
+    const int root = (int)std::lround(g); ts_[track_].rootN = (root - 24) / 72.f; applyShape(track_);
+    say(std::string("ROOT KEY ") + noteName(root) + std::to_string(root / 12 - 1));
 }
 void SamplerApp::applyAlgo(int t) { s_.setMode(t, ts_[t].algo); }
 void SamplerApp::applyEnv(int t) {
@@ -183,7 +197,7 @@ void SamplerApp::applyFx() {
 }
 void SamplerApp::applyMasterFx() {
     FxParams p; p.chorus = chorus_; p.flanger = flanger_; p.phaser = phaser_; p.comp = comp_; p.width = width_; p.filter = djFilter_; p.crush = crush_; p.repeat = repeat_; p.gate = gate_;
-    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStop_; p.reverse = reverse_; p.freeze = freeze_;
+    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStopHeld_ ? 1.f : tapeStop_; p.spring = spring_; p.springDamp = springDamp_; p.phone = phone_; p.punch = punch_; p.reverse = reverse_; p.freeze = freeze_;
     s_.setMasterFx(p);
 }
 void SamplerApp::applyTempo() {
@@ -399,6 +413,28 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[3] = cont("SWING", &swing_, [](float v) { return v < 0.02f ? std::string("OFF") : fmt("%.0f PCT", 50.f + 25.f * v); }, [=] { applyTempo(); }, 0.02f);
         break;
     }
+    case P_SHAPE:
+        if (isSynth(t)) {   // the four macros of a built-in synth
+            k[0] = cont("TONE", &x.synTone, [](float v) { return fmt("%+.0f", (v - 0.5f) * 200.f); }, [=] { applyShape(t); }, 0.02f);
+            k[1] = cont("BODY", &x.synBody, [](float v) { return fmt("%+.0f", (v - 0.5f) * 200.f); }, [=] { applyShape(t); }, 0.02f);
+            k[2] = cont("MOTION", &x.synMotion, [](float v) { return fmt("%+.0f", (v - 0.5f) * 200.f); }, [=] { applyShape(t); }, 0.02f);
+            k[3] = cont("GRIT", &x.synGrit, [](float v) { return fmt("%+.0f", (v - 0.5f) * 200.f); }, [=] { applyShape(t); }, 0.02f);
+        } else {   // a sample: the key it sounds at its own pitch, auto tune, the slices of KIT mode
+            k[0] = cont("ROOT KEY", &x.rootN, [](float v) { const int n = 24 + (int)std::lround(v * 72.f); return std::string(noteName(n)) + std::to_string(n / 12 - 1); }, [=] { applyShape(t); }, 1.f / 72.f);
+            Knob a; a.name = "AUTO TUNE"; a.valid = true; a.isChoice = true;
+            const float g = s_.rootGuessOf(t); a.value = g >= 24.f && g <= 96.f ? std::string("SET ") + noteName((int)std::lround(g)) + std::to_string((int)std::lround(g) / 12 - 1) : std::string("NO PITCH");
+            a.norm = 0.f; a.step = [this](int) { autoTune(); }; a.set = [this](float) { autoTune(); };
+            k[1] = a;
+            k[2] = choice("SLICES", &x.sliceCount, {"4", "8", "12", "16", "24", "32"}, [=] { applyShape(t, true); });
+            k[3] = cont("SLICE SENS", &x.sliceSens, [](float v) { return fmt("%.1fX", std::pow(2.f, (v - 0.5f) * 2.f)); }, [=] { applyShape(t, true); }, 0.05f);
+        }
+        break;
+    case P_FX3:   // the OP-1 effects
+        k[0] = cont("SPRING", &spring_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
+        k[1] = cont("SPRING DAMP", &springDamp_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        k[2] = cont("PHONE", &phone_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
+        k[3] = cont("PUNCH", &punch_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
+        break;
     case P_TOMB: {   // balls bounce in a turning drum and play their notes when they hit the wall: play keys to drop balls
         k[0] = cont("SPIN", &tSpin_, [](float v) { return fmt("%+.1f", (v - 0.5f) * 14.f); }, [=] { applyTomb(); }, 0.01f);
         k[1] = cont("GRAVITY", &tGrav_, [](float v) { return pct(v); }, [=] { applyTomb(); });
@@ -618,6 +654,7 @@ void SamplerApp::tick(uint32_t now) {
     if (fwDirty_) { fwDirty_ = false; sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true); }
     if (repaintAt_ && now >= repaintAt_) { repaintAt_ = repaintAt_ + 2500 < now + 2500 && repaintCount_++ < 1 ? now + 2500 : 0; needClear_ = true; }
     st_ = s_.status();
+    projectTick();
     loopAny_ = false;
     for (int t = 0; t < kTracks; t++) loopAny_ |= st_.track_has_clip[t];
     for (int t = 0; t < kTracks; t++) if (st_.seqState[t] != seqSeen_[t]) { seqSeen_[t] = st_.seqState[t]; ts_[t].seqState = st_.seqState[t]; }   // the engine changed it (a bounce mutes the pattern)

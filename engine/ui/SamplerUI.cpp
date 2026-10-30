@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -88,6 +88,7 @@ void SamplerUI::frame(uint32_t now) {
     sampleArea({left + MARGIN, tb + MARGIN, W_ - left - right - 2 * MARGIN, H_ - tb - 2 * MARGIN});
     pagePanel({W_ - right, tb + MARGIN, right - MARGIN, H_ - tb - 2 * MARGIN});
     if (sheetOpen_) librarySheet();
+    if (projOpen_) projectSheet();
 }
 
 void SamplerUI::topBar(Rect r) {
@@ -118,6 +119,12 @@ void SamplerUI::topBar(Rect r) {
     text(x, cy - 6, 12, st_.freeRecording || recOn || armed ? ACCENT : TEXT, app_.loopText(), 0, true);
     text(x, cy + 11, 9.5f, DIM, std::string("LOOP SOURCE: ") + (app_.knobs(SamplerApp::P_SAVE)[1].value), 0, false);
     tap({x - 4, 0, 230, r.h}, [this] { auto k = app_.knobs(SamplerApp::P_SAVE); k[1].step(k[1].norm > 0.5f ? -1 : 1); });
+    button({W_ - 326, 6, 104, r.h - 12}, "PROJECT", projOpen_, [this] { projOpen_ = true; projSel_ = -1; projScroll_ = 0; }, 10.5f);
+    // live: hold TAPE STOP and the tape runs down, let go and it spins up
+    { Rect ts{W_ - 214, 6, 104, r.h - 12}; const bool on = app_.tapeStopHeld();
+      rrect(ts, R_CONTROL, on ? ACCENT : RAISED); if (!on) stroke(ts, R_CONTROL, OUTLINE, 1);
+      text(ts.x + ts.w / 2, cy, 10.5f, on ? ON_ACCENT : TEXT, "TAPE STOP", 1, true);
+      hit(ts, [this](float, float) { app_.tapeStopHold(true); }, nullptr, [this] { app_.tapeStopHold(false); }); }
     // link state and load
     const uint32_t lc = linkMidi_ && linkAudio_ ? TEXT : linkMidi_ ? ACCENT : DIM;
     circle(W_ - 22, cy, 5, lc);
@@ -196,6 +203,10 @@ void SamplerUI::sampleArea(Rect r) {
         rrect({w.x + i * bw + 0.5f, cy - std::max(1.f, v * (w.h / 2 - 8)), std::max(1.f, bw - 1), std::max(2.f, v * (w.h - 16))}, 0, in ? TEXT : OUTLINE);
     }
     if (pk.empty()) text(w.x + w.w / 2, cy, T_BODY, DIM, "NO SAMPLE", 1, false);
+    if (ts.algo == 3 && !app_.isSynth(t)) {   // KIT: where the pads start
+        const auto sl = app_.session().slicesOf(t);
+        for (size_t i = 0; i < sl.size(); i++) { const float sx = w.x + 2 + sl[i] * (w.w - 4); line(sx, w.y + 6, sx, w.y + w.h - 6, theme::withAlpha(ACCENT, 170), 1); text(sx + 3, w.y + w.h - 14, 8.f, ACCENT, std::to_string(i + 1), 0, false); }
+    }
     for (int j = 0; j < st_.voiceN[t]; j++) {   // where the sounding voices are reading
         const float vx = w.x + 2 + st_.voicePos[t][j] * (w.w - 4);
         line(vx, w.y + 22, vx, w.y + w.h - 10, ACCENT, 1.5f);
@@ -442,6 +453,54 @@ void SamplerUI::pagePanel(Rect r) {
         hit(hr, [this, i, hr](float x, float) { app_.knobs()[(size_t)i].set(clamp01((x - hr.x) / hr.w)); },
             [this, i, hr](float x, float) { app_.knobs()[(size_t)i].set(clamp01((x - hr.x) / hr.w)); });
     }
+}
+
+// ---- projects: save, load, export ----
+void SamplerUI::projectSheet() {
+    rrect({0, 0, W_, H_}, 0, theme::withAlpha(BG, 215));
+    tap({0, 0, W_, H_}, [this] { projOpen_ = false; });
+    const Rect box{W_ * 0.12f, 20, W_ * 0.76f, H_ - 40};
+    rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 1);
+    tap(box, [] {});
+    projList_ = app_.projectList();
+    const std::string cur = app_.currentProject();
+    text(box.x + 14, box.y + 20, T_TITLE, TEXT, "PROJECTS", 0, true);
+    text(box.x + 110, box.y + 21, T_CAPTION, DIM, cur == "autosave" ? "UNSAVED SESSION (KEPT AUTOMATICALLY)" : "OPEN: " + cur, 0, false);
+    button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { projOpen_ = false; }, 10);
+    const float colW = 196;
+    projListRect_ = {box.x + 6, box.y + 44, box.w - colW - 18, box.h - 52};
+    rrect(projListRect_, R_CONTROL, BG);
+    const float rh = 36;
+    projScroll_ = std::min(std::max(0.f, projScroll_), std::max(0.f, projList_.size() * rh - projListRect_.h));
+    clip(projListRect_);
+    if (projList_.empty()) text(projListRect_.x + projListRect_.w / 2, projListRect_.y + 40, T_BODY, DIM, "NO SAVED PROJECTS YET. SAVE AS NEW.", 1, false);
+    for (size_t i = 0; i < projList_.size(); i++) {
+        const float y = projListRect_.y + i * rh - projScroll_;
+        if (y + rh < projListRect_.y || y > projListRect_.y + projListRect_.h) continue;
+        const bool sel = (int)i == projSel_, open = projList_[i] == cur;
+        if (sel) { rrect({projListRect_.x + 2, y + 1, projListRect_.w - 4, rh - 2}, R_CONTROL, RAISED); stroke({projListRect_.x + 2, y + 1, projListRect_.w - 4, rh - 2}, R_CONTROL, ACCENT, 1); }
+        text(projListRect_.x + 12, y + rh / 2, T_BODY + 1, sel ? ACCENT : TEXT, fit(projList_[i], projListRect_.w - 90, T_BODY + 1), 0, sel);
+        if (open) text(projListRect_.x + projListRect_.w - 10, y + rh / 2, T_CAPTION, DIM, "OPEN", 2, false);
+    }
+    endClip();
+    hit(projListRect_, [this](float, float y) { projLastY_ = y; projMoved_ = 0; },
+        [this](float, float y) { projScroll_ -= y - projLastY_; projMoved_ += std::fabs(y - projLastY_); projLastY_ = y; },
+        [this, rh]() { if (projMoved_ > 8) return; const int idx = (int)((projLastY_ - projListRect_.y + projScroll_) / rh); if (idx >= 0 && idx < (int)projList_.size()) projSel_ = idx; });
+    // actions
+    const float bx = box.x + box.w - colW - 6, bw = colW;
+    float by = box.y + 44; const float bh = 34, gap = 6;
+    auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({bx, by, bw, bh}, label, on, std::move(f), 10.5f, accent); by += bh + gap; };
+    const bool haveSel = projSel_ >= 0 && projSel_ < (int)projList_.size();
+    const bool deleting = projDelAt_ && now_ - projDelAt_ < 2500;
+    b(cur == "autosave" ? "SAVE AS NEW" : "SAVE  " + cur, false, [this, cur] { app_.saveProject(cur == "autosave" ? app_.newProjectName() : cur); }, true);
+    if (cur != "autosave") b("SAVE AS NEW", false, [this] { app_.saveProject(app_.newProjectName()); });
+    b(haveSel ? "LOAD  " + projList_[(size_t)projSel_] : "LOAD (PICK ONE)", false, [this, haveSel] { if (haveSel) { app_.loadProject(projList_[(size_t)projSel_]); projOpen_ = false; } });
+    b(deleting ? "TAP AGAIN TO DELETE" : "DELETE", deleting, [this, haveSel, deleting] { if (!haveSel) return; if (deleting) { app_.deleteProject(projList_[(size_t)projSel_]); projSel_ = -1; projDelAt_ = 0; } else projDelAt_ = now_; });
+    b("EXPORT MIDI (PATTERNS)", false, [this] { app_.exportMidi(); });
+    b("EXPORT MIX (WAV)", false, [this] { app_.exportMix(); });
+    b("IMPORT MIDI FILE", false, [this] { app_.requestMidi(); });
+    const std::string t = app_.toast();
+    if (!t.empty()) text(box.x + 14, box.y + box.h - 12, 11, ACCENT, t, 0, true);
 }
 
 void SamplerUI::librarySheet() {

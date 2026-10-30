@@ -13,6 +13,11 @@ public final class Native {
     public static native byte[] tick(long h, long nowMs);
     public static native boolean wantFile(long h);
     public static native void importFile(long h, String path);
+    public static native void autosave(long h);
+    public static native void restoreLast(long h);
+    public static native String sharePath(long h);
+    public static native boolean wantMidi(long h);
+    public static native void importMidi(long h, String path);
     public static native void say(long h, String message);
     public static native void uiLink(long h, boolean midi, boolean usbAudio);
     public static native Object[] uiFrame(long h, float w, float hh, float top, float bottom, long nowMs);

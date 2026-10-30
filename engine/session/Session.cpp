@@ -6,6 +6,7 @@
 #include "Reverb.h"
 #include "Sequencer.h"
 #include "Sampler.h"
+#include "Slicer.h"
 #include "Stretch.h"
 #include "TapeDelay.h"
 #include "TapeInsert.h"
@@ -30,7 +31,7 @@ struct Session::Impl {
     struct Note { int note, vel; };
     struct Track {
         std::unique_ptr<Sampler> sampler;
-        mutable std::mutex infoMtx; std::string label; std::vector<float> peaks;   // for the UI threads
+        mutable std::mutex infoMtx; std::string label; std::vector<float> peaks; float rootGuess = 0.f; std::vector<float> slicePts;   // for the UI threads
         // sound shaping
         Arp arp; bool arpOn = false;
         Lowpass filt; bool filtOn = false;
@@ -71,7 +72,7 @@ struct Session::Impl {
     // beat clock, metronome, sequencer
     double freeBeat = 0;   // beat position while the transport is stopped
     bool metroOn = false; float metroVol = 0.6f, clickEnv = 0, clickFreq = 1000, clickPh = 0;
-    uint32_t tombolaSeed = 1; float swing = 0.5f;
+    uint32_t tombolaSeed = 1; float swing = 0.5f; std::atomic<int> busy{0};   // file jobs in flight (project save / load)
     int takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
     // count-in: clicks for countIn bars, then the take (kind 1) or the sequencer recording (kind 2) starts
     int countIn = 0, countKind = 0; bool counting = false; double countLeft = 0;
@@ -427,6 +428,11 @@ struct Session::Impl {
     }
 
     // ---- samples ----
+    static std::vector<float> slicePoints(const Sampler& sm) {   // slice starts as 0..1 of the sample (for the waveform)
+        std::vector<float> o; auto b = sm.original(); if (!b || b->frames <= 0) return o;
+        for (int p : sm.slices()) o.push_back((float)p / (float)b->frames);
+        return o;
+    }
     static std::string baseName(const std::string& p) { size_t s = p.find_last_of("/\\"); return p.substr(s == std::string::npos ? 0 : s + 1); }
     void installNew(const std::string& path, int track, bool kit) {
         auto sm = std::make_unique<Sampler>(sr);
@@ -436,7 +442,7 @@ struct Session::Impl {
             Track& t = *tracks[track];
             releaseAll(t);
             std::swap(t.sampler, *holder);
-            { std::lock_guard<std::mutex> l(t.infoMtx); t.label = t.sampler->label(); t.peaks = t.sampler->peaks(); }
+            { std::lock_guard<std::mutex> l(t.infoMtx); t.label = t.sampler->label(); t.peaks = t.sampler->peaks(); t.rootGuess = t.sampler->rootGuess(); t.slicePts = slicePoints(*t.sampler); }
             (void)kit;
             bury(std::move(*holder));
             a_sampleTrack = track; a_sampleVersion++; a_sampleState = 0;
@@ -843,6 +849,97 @@ void Session::loopHalve() {
 }
 void Session::setLoopSpeed(float v) { d->tapeSpeed.store(clampf(v, 0.25f, 2.f)); }
 void Session::setLoopSource(int src) { d->post([=] { d->loopSrc = src ? 1 : 0; }); }
+// ---- projects: tape audio on disk ----
+// the loop clips of every track as tape_N.wav (16 bit, the length of the loop) and the mix of them as mix.wav; written on the worker thread
+bool Session::writeTape(const std::string& dir) {
+    d->busy++;
+    d->post([this, dir] {
+        std::vector<std::pair<int, std::vector<float>>> clips; std::vector<float> mix; const int32_t L = d->loopSamples;
+        if (L > 0) {
+            mix.assign((size_t)L * 2, 0.f);
+            for (int i = 0; i < kTracks; i++) {
+                const Impl::Track& t = *d->tracks[(size_t)i];
+                if (!t.clipHas || t.clip.size() != (size_t)L * 2) continue;
+                clips.push_back({i, t.clip});
+                const float a = (t.pan + 1.f) * kPi / 4.f, gl = std::cos(a) * t.vol * 1.414f, gr = std::sin(a) * t.vol * 1.414f;
+                for (int k = 0; k < L; k++) { mix[(size_t)k * 2] += t.clip[(size_t)k * 2] * gl; mix[(size_t)k * 2 + 1] += t.clip[(size_t)k * 2 + 1] * gr; }
+            }
+            float pk = 0.f; for (float v : mix) pk = std::max(pk, std::fabs(v)); if (pk > 1.f) for (float& v : mix) v /= pk;
+        }
+        d->job([this, dir, clips = std::move(clips), mix = std::move(mix)]() mutable {
+            std::filesystem::create_directories(dir);
+            for (int i = 0; i < kTracks; i++) std::filesystem::remove(dir + "/tape_" + std::to_string(i) + ".wav");   // stale clips of an older save
+            std::filesystem::remove(dir + "/mix.wav");
+            for (auto& c : clips) writeWav16(dir + "/tape_" + std::to_string(c.first) + ".wav", c.second, d->sr);
+            if (!mix.empty()) writeWav16(dir + "/mix.wav", mix, d->sr);
+            d->busy--;
+        });
+    });
+    return true;
+}
+// replaces the loops by the tape_N.wav files of a project (resampled when the project was made at another rate)
+void Session::loadTape(const std::string& dir, int bars, float bpm) {
+    d->busy++;
+    d->job([this, dir, bars, bpm] {
+        const int sr = d->sr;
+        std::vector<std::pair<int, std::vector<float>>> clips; size_t frames = 0;
+        for (int i = 0; i < kTracks; i++) {
+            std::vector<float> st; int fsr = 0;
+            const std::string path = dir + "/tape_" + std::to_string(i) + ".wav";
+            if (!std::filesystem::exists(path) || !readWav(path, st, fsr) || st.size() < 4) continue;
+            if (fsr != sr) {   // linear resample
+                const size_t n = (size_t)((double)(st.size() / 2) * sr / fsr); std::vector<float> o(n * 2);
+                for (size_t k = 0; k < n; k++) { const double x = (double)k * fsr / sr; const size_t i0 = std::min((size_t)x, st.size() / 2 - 2); const float f = (float)(x - (double)i0);
+                    o[2 * k] = st[2 * i0] + (st[2 * i0 + 2] - st[2 * i0]) * f; o[2 * k + 1] = st[2 * i0 + 1] + (st[2 * i0 + 3] - st[2 * i0 + 1]) * f; }
+                st = std::move(o);
+            }
+            frames = std::max(frames, st.size() / 2); clips.push_back({i, std::move(st)});
+        }
+        d->post([this, clips = std::move(clips), frames, bars, bpm]() mutable {
+            for (auto& t : d->tracks) { t->clipRec = false; t->clip.clear(); t->clipHas = false; }
+            if (clips.empty() || frames == 0) { d->clearIfEmpty(); if (bpm > 0.f && d->loopSamples == 0) { d->bpm = std::min(300.f, std::max(30.f, bpm)); d->a_bpm = d->bpm; } d->busy--; return; }
+            for (auto& c : clips) { c.second.resize(frames * 2, 0.f); d->tracks[(size_t)c.first]->clip = std::move(c.second); d->tracks[(size_t)c.first]->clipHas = true; }
+            d->loopSamples = (int32_t)frames; d->a_loop = d->loopSamples; d->loopBars = std::min(32, std::max(1, bars)); d->a_bars = d->loopBars;
+            d->bpm = std::min(300.f, std::max(30.f, bpm)); d->a_bpm = d->bpm;
+            d->pos = 0; d->tapePos = 0;
+            d->busy--;
+        });
+    });
+}
+void Session::setSynthMacros(int t, float tone, float body, float motion, float grit) {
+    if (t < 0 || t >= kTracks) return;
+    SynthMacros m; m.tone = clampf(tone, -1.f, 1.f); m.body = clampf(body, -1.f, 1.f); m.motion = clampf(motion, -1.f, 1.f); m.grit = clampf(grit, -1.f, 1.f);
+    d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setSynthMacros(m); });
+}
+void Session::setRoot(int t, int midi) { if (t >= 0 && t < kTracks) d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setRoot(midi); }); }
+// re-cuts the sample into `count` slices (4..32); `sens` 0.25..2 decides how soft a hit may be (built on the worker, then swapped in)
+void Session::setSlices(int t, int count, float sens) {
+    if (t < 0 || t >= kTracks) return;
+    d->post([=] {
+        Impl::Track& tr = *d->tracks[(size_t)t]; if (!tr.sampler) return;
+        auto orig = tr.sampler->original(); if (!orig) return;
+        d->job([=] {
+            auto sl = std::make_shared<std::vector<int>>(findSlices(orig->d, orig->frames, orig->sr, std::min(32, std::max(2, count)), sens));
+            d->post([=] {
+                Impl::Track& tr2 = *d->tracks[(size_t)t];
+                if (!tr2.sampler || tr2.sampler->original() != orig) return;
+                tr2.sampler->allOff(); tr2.sampler->setSlices(*sl);
+                std::lock_guard<std::mutex> l(tr2.infoMtx); tr2.slicePts = Impl::slicePoints(*tr2.sampler);
+            });
+        });
+    });
+}
+float Session::rootGuessOf(int t) const { if (t < 0 || t >= kTracks) return 0.f; std::lock_guard<std::mutex> l(d->tracks[(size_t)t]->infoMtx); return d->tracks[(size_t)t]->rootGuess; }
+std::vector<float> Session::slicesOf(int t) const { if (t < 0 || t >= kTracks) return {}; std::lock_guard<std::mutex> l(d->tracks[(size_t)t]->infoMtx); return d->tracks[(size_t)t]->slicePts; }
+void Session::unloadSample(int t) {
+    if (t < 0 || t >= kTracks) return;
+    d->post([this, t] {
+        Impl::Track& tr = *d->tracks[(size_t)t]; d->releaseAll(tr);
+        d->bury(std::move(tr.sampler));
+        std::lock_guard<std::mutex> l(tr.infoMtx); tr.label.clear(); tr.peaks.clear();
+    });
+}
+int Session::busyJobs() const { return d->busy.load(); }
 bool Session::saveClip(int t) {
     if (t < 0 || t >= kTracks || !d->tracks[(size_t)t]->clipHas) return false;
     std::vector<float> c = d->tracks[(size_t)t]->clip;   // a copy, written on the worker

@@ -23,7 +23,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -78,6 +78,8 @@ public:
     void seqBounce();                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
     void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
     void seqToggleAt(int tick, int note, int len = 0);   // touch: add / remove a note (length in ticks, 0 = one step)
+    void tapeStopHold(bool on) { tapeStopHeld_ = on; applyMasterFx(); }   // live: while held the tape runs down, on release it spins up again
+    bool tapeStopHeld() const { return tapeStopHeld_; }
     void tombolaDrop();                                   // a ball with a random note of the scale
     void tombolaReverse() { tSpin_ = 1.f - tSpin_; applyTomb(); }
     void tombolaClear() { s_.tombolaClear(); }
@@ -111,6 +113,7 @@ public:
         float vol = 0.8f, pan = 0.5f, sendR = 0.5f, sendD = 0.2f;
         int entry = -1;
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
+        float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
         int seqState = 0, seqBars = 2;   // sequencer: OFF / PLAY / REC, pattern length index (1, 2, 4, 8 bars)
     };
     const TrackState& state(int t) const { return ts_[t]; }
@@ -130,6 +133,21 @@ public:
     std::vector<float> peaks(int t, int bins);    // waveform of a track's sample, cached
     std::string sampleLabel(int t) const { return s_.trackLabel(t); }
     Session& session() { return s_; }
+    // ---- projects: everything (settings, patterns, samples used, tape audio) in dataDir/projects/<name>/ ----
+    std::vector<std::string> projectList() const;      // newest first
+    std::string newProjectName() const;                // "Project 1", "Project 2" ...
+    bool saveProject(const std::string& name);         // the tape audio is written in the background
+    bool loadProject(const std::string& name);
+    void deleteProject(const std::string& name);
+    void autosave(bool force = false);                 // "autosave": every 20 s from tick(), and the UI calls it when the app goes to the background
+    void restoreLast();                                // start of the app: back to where it was (skipped once if the last restore never finished)
+    std::string currentProject() const { return project_; }
+    bool exportMidi();                                 // the patterns as a .mid in dataDir/exports; the file is offered through sharePath()
+    bool exportMix();                                  // the tape mix as a .wav (needs a loop)
+    bool importMidi(const std::string& path);          // notes of a .mid file become the patterns of the tracks (one track each)
+    std::string sharePath() { std::string p = sharePath_; sharePath_.clear(); return p; }   // Java polls: a file to hand to the share sheet
+    void requestMidi() { wantMidi_ = true; }
+    bool wantMidi() { bool w = wantMidi_; wantMidi_ = false; return w; }
 
 private:
     // ---- FM-1 drawing ----
@@ -147,7 +165,7 @@ private:
     void encoder(int i, int delta);
     // ---- parameters ----
     void applyAll(int t);
-    void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
+    void applyShape(int t, bool reslice = false); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
     void applyFx();
     void applyMasterFx();
     void applyTempo(); void applyTomb();
@@ -157,6 +175,15 @@ private:
     void queueCommit(int t);
     Knob cont(const char* name, float* v, std::function<std::string(float)> fmt, std::function<void()> apply, float stepSize = 0.02f, bool commit = false);
     Knob choice(const char* name, int* v, std::vector<std::string> opts, std::function<void()> apply);
+
+    std::string projectDir(const std::string& name) const;
+    std::string projectsRoot() const;
+    static std::string cleanName(const std::string& n);
+    std::string project_ = "autosave"; uint32_t autosaveAt_ = 0, loadedAt_ = 0; bool tapeDirty_ = false, loading_ = false, wantMidi_ = false, anyRec_ = false;
+    int lastBounceSeen_ = 0; double lastLoopSeen_ = 0; std::string sharePath_, pendingShare_; uint32_t pendingShareAt_ = 0;
+    void projectTick();
+    std::string stateText();                            // the settings as key=value lines
+    void applyStateText(const std::string& text);
 
     Session& s_;
     Send send_;
@@ -169,7 +196,8 @@ private:
     // master fx (FX 2, LIVE FX), tempo page, sequencer grid
     float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
     float flanger_ = 0.f, drive_ = 0.f, eqLow_ = 0.5f, eqMid_ = 0.5f, eqHigh_ = 0.5f, tremolo_ = 0.f, wah_ = 0.f, ringmod_ = 0.f, tapeStop_ = 0.f;
-    int reverse_ = 0, freeze_ = 0;
+    int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;
+    float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f;   // OP-1 FX page
     int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 4, liveGrid_ = 0, countIn_ = 0;
     float swing_ = 0.f, tSpin_ = 0.557f, tGrav_ = 0.55f, tMass_ = 0.72f, tShape_ = 0.6f;   // swing 0..1 = 50..75 %, tombola knobs   // the pattern plays on a 1/16 grid unless told otherwise
     float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;

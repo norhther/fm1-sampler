@@ -4,7 +4,7 @@
 #include <cmath>
 #include <vector>
 
-inline std::vector<int> findSlices(const std::vector<float>& stereo, int frames, int sr, int count = 16) {
+inline std::vector<int> findSlices(const std::vector<float>& stereo, int frames, int sr, int count = 16, float sens = 1.f) {   // sens: 0.5 finds only the clear hits .. 2 finds the soft ones too
     std::vector<int> starts;
     const int hop = std::max(64, sr / 200), bins = frames / hop;
     if (bins >= 8) {
@@ -19,7 +19,7 @@ inline std::vector<int> findSlices(const std::vector<float>& stereo, int frames,
             float avg = 0.f; int k = 0; for (int j = std::max(0, b - 12); j < b - 1; j++) { avg += e[(size_t)j]; k++; }
             avg = avg / std::max(1, k) + 0.01f * peak;
             const float ratio = e[(size_t)b] / avg;
-            if (ratio > 2.5f && e[(size_t)b] > 0.05f * peak && e[(size_t)b] >= e[(size_t)b - 1] && e[(size_t)b] >= e[(size_t)b + 1]) cand.push_back({ratio * e[(size_t)b], b});
+            if (ratio > 2.5f / std::max(0.25f, sens) && e[(size_t)b] > 0.05f * peak / std::max(0.25f, sens) && e[(size_t)b] >= e[(size_t)b - 1] && e[(size_t)b] >= e[(size_t)b + 1]) cand.push_back({ratio * e[(size_t)b], b});
         }
         std::sort(cand.begin(), cand.end(), [](auto& a, auto& b) { return a.first > b.first; });
         const int minGap = std::max(1, sr / 15 / hop);   // 65 ms
