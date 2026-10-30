@@ -22,7 +22,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -48,7 +48,8 @@ public:
     // OP-1 style: four modes on the buttons HOME, FX, SEQ, EDIT, each with up to four pages (the same button steps through them, dots on the screen show where you are)
     static constexpr int kModes = 4;
     static const char* modeName(int mode);        // SOUND, FX, SEQ, MIX
-    static const Page* modePages(int mode);       // the 4 pages of a mode
+    static const Page* modePages(int mode);       // the pages of a mode (4, the FX mode has 7)
+    static int modePageCount(int mode);
     static int modeOf(Page p);
     static int pageSlot(Page p);                  // index of a page inside its mode
     int track() const { return track_; }
@@ -71,11 +72,14 @@ public:
     void loopRecord();                            // REC: arm / end the first take, or toggle overdub once a loop exists
     // sequencer (also used by the phone's piano roll)
     void seqUndo() { s_.seqUndo(track_); say("UNDO"); }
+    void seqRedo() { s_.seqRedo(track_); say("REDO"); }
     void seqClear() { s_.seqClear(track_); say("PATTERN CLEARED"); }
     void seqBounce();                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
     void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
     void seqToggleAt(int tick, int note);         // touch: add / remove a note (length = one step)
     int stepTicks() const { const int g = gridTicks(seqGrid_); return g ? g : kPpq / 4; }
+    int seqGridIndex() const { return seqGrid_; }
+    void cycleSeqGrid() { seqGrid_ = seqGrid_ >= kGrids - 1 || seqGrid_ < 1 ? 1 : seqGrid_ + 1; applyTempo(); }   // 1/4, 1/8, 1/8T ... 1/32T (the grid of the roll and of the quantize)
     int seqBarsOf(int t) const { return 1 << ts_[t].seqBars; }
     void lenAction(bool dbl);
     void loopSave();
@@ -156,6 +160,8 @@ private:
     int loopSrc_ = 1;
     // master fx (FX 2, LIVE FX), tempo page, sequencer grid
     float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
+    float flanger_ = 0.f, drive_ = 0.f, eqLow_ = 0.5f, eqMid_ = 0.5f, eqHigh_ = 0.5f, tremolo_ = 0.f, wah_ = 0.f, ringmod_ = 0.f, tapeStop_ = 0.f;
+    int reverse_ = 0, freeze_ = 0;
     int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 4, liveGrid_ = 0, countIn_ = 0;   // the pattern plays on a 1/16 grid unless told otherwise
     float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;
     float exciter_ = 0.f, lofi_ = 0.f, wobble_ = 0.f, loopSpeed_ = 2.f / 3.f, micThr_ = 0.452f;   // loop speed is global

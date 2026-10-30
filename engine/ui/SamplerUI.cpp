@@ -8,7 +8,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -224,44 +224,66 @@ void SamplerUI::sampleArea(Rect r) {
     if (!ts_.empty()) text(r.x, br.y + br.h + 14, 11, ACCENT, ts_, 0, true);
 }
 
-// ---- sequencer: piano roll with touch editing ----
+// ---- sequencer: piano roll with touch editing, zoom and undo / redo ----
 void SamplerUI::sequencerView(Rect r) {
     const int t = app_.track();
     const auto ts = app_.state(t);
-    const int bars = app_.seqBarsOf(t), pt = patternTicks(bars), st = app_.stepTicks(), steps = std::max(1, pt / st);
+    const int bars = app_.seqBarsOf(t), pt = patternTicks(bars), st = app_.stepTicks();
     const int state = ts.seqState;
+    // toolbar: undo, redo, zoom in time, zoom in pitch, grid
+    static const int kRows[] = {12, 18, 24, 36};
+    const float tbh = 26, bw7 = (r.w - 6 * 4) / 7.6f;   // the last button (GRID) is a bit wider
+    int tx = 0;
+    auto tb = [&](const std::string& label, bool on, std::function<void()> f) { button({r.x + tx * (bw7 + 4), r.y, tx == 6 ? bw7 * 1.6f : bw7, tbh}, label, on, std::move(f), 9.5f); tx++; };
+    tb("UNDO", st_.seqUndoN[t] > 0, [this] { app_.seqUndo(); });
+    tb("REDO", st_.seqRedoN[t] > 0, [this] { app_.seqRedo(); });
+    tb("TIME -", false, [this] { rollZoomX_ = std::max(0, rollZoomX_ - 1); });
+    tb("TIME +", false, [this] { rollZoomX_ = std::min(3, rollZoomX_ + 1); });
+    tb("PITCH -", false, [this] { const float mid = rollBase_ + kRows[rollRows_] / 2.f; rollRows_ = std::min(3, rollRows_ + 1); rollBase_ = mid - kRows[rollRows_] / 2.f; });   // more rows = smaller
+    tb("PITCH +", false, [this] { const float mid = rollBase_ + kRows[rollRows_] / 2.f; rollRows_ = std::max(0, rollRows_ - 1); rollBase_ = mid - kRows[rollRows_] / 2.f; });
+    tb(std::string("GRID ") + gridName(app_.seqGridIndex() ? app_.seqGridIndex() : 4), false, [this] { app_.cycleSeqGrid(); });
     // the roll
-    Rect roll{r.x, r.y, r.w, r.h - 46};
+    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46};
     rrect(roll, R_CARD, SURFACE); stroke(roll, R_CARD, OUTLINE, 1);
-    const int rows = 24; const float rh = (roll.h - 4) / rows, cw = (roll.w - 4) / steps, x0 = roll.x + 2, y0 = roll.y + 2;
+    const int rows = kRows[rollRows_], zoom = 1 << rollZoomX_, visible = std::max(st, pt / zoom);
+    const float W = roll.w - 4, rh = (roll.h - 4) / rows, x0 = roll.x + 2, y0 = roll.y + 2;
+    const double playTick = std::fmod(st_.beatPos * kPpq, (double)pt);
+    if (zoom > 1 && (st_.playing || state > 0) && !haveActive_ && (playTick < rollScroll_ || playTick >= rollScroll_ + visible)) rollScroll_ = (float)(std::floor(playTick / visible) * visible);   // the view pages along with the playhead
+    rollScroll_ = std::min((float)(pt - visible), std::max(0.f, rollScroll_));
     rollBase_ = std::min(127.f - rows, std::max(0.f, rollBase_));
     const int base = (int)std::floor(rollBase_);
+    auto px = [&](double tick) { return x0 + (float)((tick - rollScroll_) / visible * W); };
     clip(roll);
     for (int i = 0; i < rows; i++) {   // rows from the top: the highest note first; black keys are a little darker
         const int n = base + rows - 1 - i, pc = n % 12;
-        if (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10) rrect({x0, y0 + i * rh, roll.w - 4, rh}, 0, theme::withAlpha(BG, 110));
-        if (pc == 0) { line(x0, y0 + (i + 1) * rh, x0 + roll.w - 4, y0 + (i + 1) * rh, OUTLINE, 1); text(x0 + 3, y0 + i * rh + rh / 2, 8.5f, DIM, std::string("C") + std::to_string(n / 12 - 1), 0, false); }
+        if (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10) rrect({x0, y0 + i * rh, W, rh}, 0, theme::withAlpha(BG, 110));
+        if (pc == 0) { line(x0, y0 + (i + 1) * rh, x0 + W, y0 + (i + 1) * rh, OUTLINE, 1); text(x0 + 3, y0 + i * rh + rh / 2, 8.5f, DIM, std::string("C") + std::to_string(n / 12 - 1), 0, false); }
     }
-    for (int b = 0; b <= bars * 4; b++) { const float gx = x0 + (float)b * kPpq / pt * (roll.w - 4); line(gx, y0, gx, y0 + roll.h - 4, b % 4 == 0 ? DIM : OUTLINE, b % 4 == 0 ? 1.5f : 1); }
-    // step cursor and playhead
-    if (state == 3) rrect({x0 + (float)st_.seqCursor[t] / pt * (roll.w - 4), y0, std::max(2.f, cw), roll.h - 4}, 0, theme::withAlpha(ACCENT, 90));
+    const int lineStep = visible <= kPpq * 2 ? std::max(1, st) : kPpq;   // zoomed in far: a line on every step, else on every beat
+    for (int tick = (int)(rollScroll_ / lineStep) * lineStep; tick <= rollScroll_ + visible; tick += lineStep) { const bool bar = tick % (4 * kPpq) == 0, beat = tick % kPpq == 0; line(px(tick), y0, px(tick), y0 + roll.h - 4, bar ? DIM : beat ? OUTLINE : theme::withAlpha(OUTLINE, 120), bar ? 1.5f : 1); }
+    if (state == 3) rrect({px(st_.seqCursor[t]), y0, std::max(2.f, (float)st / visible * W), roll.h - 4}, 0, theme::withAlpha(ACCENT, 90));
     Session::SeqView v[kSeqMax]; const int n = app_.session().seqNotes(t, v, kSeqMax);
-    int newest = 0; for (int i = 0; i < n; i++) newest = std::max(newest, v[i].layer);
-    for (int i = 0; i < n; i++) {   // the newest layer is amber: that is what UNDO takes away
+    for (int i = 0; i < n; i++) {
         const int row = base + rows - 1 - v[i].note;
-        if (row < 0 || row >= rows) continue;
-        rrect({x0 + (float)v[i].tick / pt * (roll.w - 4), y0 + row * rh + 0.5f, std::max(3.f, (float)v[i].len / pt * (roll.w - 4)), std::max(2.f, rh - 1)}, 1, v[i].layer == newest ? ACCENT : TEXT);
+        if (row < 0 || row >= rows || v[i].tick + v[i].len < rollScroll_ || v[i].tick > rollScroll_ + visible) continue;
+        rrect({px(v[i].tick), y0 + row * rh + 0.5f, std::max(3.f, (float)v[i].len / visible * W), std::max(2.f, rh - 1)}, 1, TEXT);
     }
-    if (st_.playing || state > 0) { const float px = x0 + (float)std::fmod(st_.beatPos * kPpq, (double)pt) / pt * (roll.w - 4); line(px, y0, px, y0 + roll.h - 4, TEXT, 1.5f); }
+    if (st_.playing || state > 0) { const float pxx = px(playTick); if (pxx >= x0 && pxx <= x0 + W) line(pxx, y0, pxx, y0 + roll.h - 4, ACCENT, 1.5f); }
     if (n == 0) text(roll.x + roll.w / 2, roll.y + roll.h / 2, T_BODY, DIM, state == 2 ? "PLAY KEYS: THEY ARE RECORDED" : "TAP THE GRID TO ADD NOTES, OR RECORD PATTERN AND PLAY KEYS", 1, false);
+    if (zoom > 1) text(roll.x + roll.w - 6, roll.y + 10, 8.5f, DIM, std::to_string(zoom) + "X  DRAG SIDEWAYS TO SCROLL", 2, false);
     endClip();
-    // touch: tap adds / removes a note on the step, drag up and down scrolls the pitch range
-    hit(roll, [this](float x, float y) { rollDownX_ = x; rollDownY_ = y; rollMoved_ = false; rollStartBase_ = rollBase_; },
-        [this, rh](float, float y) { if (std::fabs(y - rollDownY_) > 8) rollMoved_ = true; if (rollMoved_) rollBase_ = rollStartBase_ + (y - rollDownY_) / rh; },
-        [this, roll, x0, y0, cw, rh, rows, base, st, steps] {
+    // touch: tap adds / removes a note on the step, drag up and down scrolls the pitch range, sideways the time (when zoomed in)
+    hit(roll, [this](float x, float y) { rollDownX_ = x; rollDownY_ = y; rollMoved_ = false; rollStartBase_ = rollBase_; rollStartScroll_ = rollScroll_; },
+        [this, rh, W, visible](float x, float y) {
+            if (std::fabs(y - rollDownY_) > 8 || std::fabs(x - rollDownX_) > 8) rollMoved_ = true;
+            if (!rollMoved_) return;
+            rollBase_ = rollStartBase_ + (y - rollDownY_) / rh;
+            rollScroll_ = rollStartScroll_ - (x - rollDownX_) / W * visible;
+        },
+        [this, x0, y0, W, rh, rows, base, st, visible] {
             if (rollMoved_) return;
-            const int col = std::min(steps - 1, std::max(0, (int)((rollDownX_ - x0) / cw))), row = std::min(rows - 1, std::max(0, (int)((rollDownY_ - y0) / rh)));
-            app_.seqToggleAt(col * st, base + rows - 1 - row);
+            const int tick = (int)(rollScroll_ + (rollDownX_ - x0) / W * visible) / st * st, row = std::min(rows - 1, std::max(0, (int)((rollDownY_ - y0) / rh)));
+            app_.seqToggleAt(tick, base + rows - 1 - row);
         });
     // buttons: record into the pattern (same as holding SEQ on the FM-1), mute, clear
     const float bw = (r.w - 2 * 6) / 3, by = r.y + r.h - 38;
@@ -279,13 +301,15 @@ void SamplerUI::pagePanel(Rect r) {
         Rect c{r.x + m * (mw + 4), r.y, (float)mw, 30};
         button(c, SamplerApp::modeName(m), m == mode, [this, m] { app_.gotoMode(m); }, 11);
     }
-    for (int i = 0; i < 4; i++) {
+    const int pn = SamplerApp::modePageCount(mode);
+    for (int i = 0; i < pn; i++) {   // the pages of the mode, four to a row
         const SamplerApp::Page pg = SamplerApp::modePages(mode)[i];
-        Rect c{r.x + i * (mw + 4), r.y + 34, (float)mw, 26};
+        Rect c{r.x + (i % 4) * (mw + 4), r.y + 34 + (i / 4) * 30, (float)mw, 26};
         button(c, kPageTab[pg], app_.page() == pg, [this, pg] { app_.gotoPage(pg); }, 9.5f);
     }
+    const float extra = pn > 4 ? 30.f : 0.f;
     auto k = app_.knobs();
-    const float top = r.y + 72, rh = (r.h - 72) / 4;
+    const float top = r.y + 72 + extra, rh = (r.h - 72 - extra) / 4;
     for (int i = 0; i < 4; i++) {
         const auto& p = k[(size_t)i];
         const float y = top + i * rh;

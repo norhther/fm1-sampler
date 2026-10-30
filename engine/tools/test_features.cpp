@@ -72,10 +72,46 @@ static void testFx() {
         CHECK(finite(b) && d / 3900 < 1e-4, "beat repeat loops a slice (period diff %.6f)", d / 3900);
     }
 }
+static void testFx2() {
+    const int sr = 48000, N = 48000;
+    auto src = sine(N, 220, sr);
+    for (int i = 0; i < N; i++) src[2 * i + 1] = 0.5f * std::sin(2 * M_PI * 330.0 * i / sr);
+    auto run = [&](const FxParams& p, std::vector<float> in) {
+        MasterFx fx(sr); fx.set(p);
+        for (int i = 0; i < (int)(in.size() / 2); i += 256) fx.process(in.data() + 2 * i, std::min<int>(256, (int)(in.size() / 2) - i), i / 24000.0, 1.0 / 24000.0);
+        return in;
+    };
+    struct C { const char* n; FxParams p; } c[7] = {};
+    c[0].n = "drive"; c[0].p.drive = 0.8f;
+    c[1].n = "flanger"; c[1].p.flanger = 1.f;
+    c[2].n = "tremolo"; c[2].p.tremolo = 1.f;
+    c[3].n = "auto-wah"; c[3].p.wah = 1.f;
+    c[4].n = "ring mod"; c[4].p.ringmod = 0.5f;
+    c[5].n = "eq low boost"; c[5].p.eqLow = 1.f;
+    c[6].n = "eq high cut"; c[6].p.eqHigh = 0.f;
+    for (auto& k : c) { auto o = run(k.p, src); CHECK(finite(o) && diff(o, src) > 1e-3, "%s changes the signal and stays finite (diff %.4f)", k.n, diff(o, src)); }
+    { MasterFx fx(sr); FxParams p; p.eqMid = 0.52f; fx.set(p); CHECK(!fx.active(), "EQ within 0.02 of flat is bypassed"); p.eqMid = 0.8f; fx.set(p); CHECK(fx.active(), "EQ moved: active"); }
+    { auto lows = sine(N, 80, sr); FxParams p; p.eqLow = 1.f; auto o = run(p, lows); CHECK(rms(o, 24000, 48000) > rms(lows, 24000, 48000) * 1.6, "EQ low boost lifts 80 Hz (%.3f -> %.3f)", rms(lows, 24000, 48000), rms(o, 24000, 48000));
+      auto highs = sine(N, 10000, sr); FxParams q; q.eqHigh = 0.f; auto h = run(q, highs); CHECK(rms(h, 24000, 48000) < rms(highs, 24000, 48000) * 0.5, "EQ high cut lowers 10 kHz (%.3f -> %.3f)", rms(highs, 24000, 48000), rms(h, 24000, 48000)); }
+    { FxParams p; p.tremolo = 1.f; auto o = run(p, sine(N, 220, sr)); double lo = 1e9, hi = 0; for (int w = 0; w < 9; w++) { const double r = rms(o, 2 * 2400 * (size_t)(w + 1) * 2, 2 * 2400 * (size_t)(w + 2) * 2); lo = std::min(lo, r); hi = std::max(hi, r); }
+      CHECK(lo < hi * 0.6, "tremolo moves the level up and down (%.3f .. %.3f)", lo, hi); }
+    { FxParams p; p.tapeStop = 1.f; MasterFx fx(sr); auto in = sine(N * 2, 220, sr); fx.set(FxParams()); fx.process(in.data(), 12000, 0, 1.0 / 24000); fx.set(p);
+      for (int i = 12000; i < N * 2; i += 256) fx.process(in.data() + 2 * i, std::min(256, N * 2 - i), 0, 1.0 / 24000);
+      CHECK(finite(in) && rms(in, 2 * 80000, 2 * 96000) < 0.02, "tape stop: the sound runs down to nothing (%.4f at the end)", rms(in, 2 * 80000, 2 * 96000));
+      fx.set(FxParams()); auto live = sine(4800, 220, sr); fx.process(live.data(), 4800, 0, 1.0 / 24000); CHECK(rms(live, 2 * 2400, 2 * 4800) > 0.3, "...and it is back when the knob is released (%.3f)", rms(live, 2 * 2400, 2 * 4800)); }
+    { MasterFx fx(sr, 1.f); FxParams p; fx.set(p); auto a = sine(12000, 440, sr); fx.process(a.data(), 12000, 0, 1.0 / 24000); p.freeze = 1; fx.set(p);
+      std::vector<float> silence(2 * 48000, 0.f); for (int i = 0; i < 48000; i += 256) fx.process(silence.data() + 2 * i, std::min(256, 48000 - i), 0, 1.0 / 24000);
+      CHECK(finite(silence) && rms(silence, 2 * 24000, 2 * 48000) > 0.1, "freeze holds the sound after the input stopped (%.3f)", rms(silence, 2 * 24000, 2 * 48000)); }
+    { MasterFx fx(sr); FxParams p; fx.set(p); std::vector<float> ramp(2 * 24000); for (int i = 0; i < 24000; i++) ramp[2 * i] = ramp[2 * i + 1] = i / 48000.f;
+      for (int i = 0; i < 24000; i += 256) fx.process(ramp.data() + 2 * i, std::min(256, 24000 - i), 0, 1.0 / 24000);
+      p.reverse = 1; fx.set(p); std::vector<float> o(2 * 24000, 0.f); for (int i = 0; i < 24000; i += 256) fx.process(o.data() + 2 * i, std::min(256, 24000 - i), 0, 1.0 / 24000);
+      CHECK(finite(o) && o[2 * 2000] > 0.35f && o[2 * 20000] < 0.15f, "reverse plays the last beat backwards (%.2f at the start of the slice, %.2f near its end)", o[2 * 2000], o[2 * 20000]); }
+}
 int main() {
     Denormals::enableOnThisThread();
     testGrid();
     testFx();
+    testFx2();
     const int sr = SAMPLERATE;
     // ---- metronome ----
     {
@@ -98,13 +134,16 @@ int main() {
     // pages
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX: sends");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX2, "FX again: inserts");
+    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TONE, "FX again: tone (drive, EQ)");
+    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_MOD, "FX again: modulation");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE, "FX again: live fx");
+    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE2, "FX again: live fx 2");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX again: track fx");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX again: back to sends");
     // the four modes: every page belongs to exactly one, the same button steps through its pages, a mode comes back to the page it was left on
     {
         int seen[SamplerApp::kPages] = {};
-        for (int m = 0; m < SamplerApp::kModes; m++) for (int i = 0; i < 4; i++) { const auto pg = SamplerApp::modePages(m)[i]; seen[pg]++; if (SamplerApp::modeOf(pg) != m || SamplerApp::pageSlot(pg) != i) seen[0] += 100; }
+        for (int m = 0; m < SamplerApp::kModes; m++) for (int i = 0; i < SamplerApp::modePageCount(m); i++) { const auto pg = SamplerApp::modePages(m)[i]; seen[pg]++; if (SamplerApp::modeOf(pg) != m || SamplerApp::pageSlot(pg) != i) seen[0] += 100; }
         bool once = true; for (int i = 0; i < SamplerApp::kPages; i++) once &= seen[i] == 1;
         CHECK(once, "every page is in exactly one mode, in one slot");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME: sound mode, sample page");
@@ -152,17 +191,28 @@ int main() {
     }
     // live fx and fx2 pages sound
     {
-        btn(SamplerApp::FX); btn(SamplerApp::FX);
-        for (int i = 0; i < 4; i++) { auto k = app.knobs(); k[i].set(0.8f); }
-        size_t m = all.size(); app.playNote(60, true); run(1.0); app.playNote(60, false); run(0.3);
-        CHECK(rms(all, m, all.size()) > 0.002 && finite(all), "FX 2 inserts all on: sound, finite (rms %.4f)", rms(all, m, all.size()));
-        for (int i = 0; i < 4; i++) { auto k = app.knobs(); k[i].set(0.f); }
-        btn(SamplerApp::FX);
+        for (SamplerApp::Page pg : {SamplerApp::P_FX2, SamplerApp::P_TONE, SamplerApp::P_MOD}) {
+            app.gotoPage(pg);
+            for (int i = 0; i < 4; i++) { auto k = app.knobs(); k[i].set(0.7f); }
+            size_t m = all.size(); app.playNote(60, true); run(1.0); app.playNote(60, false); run(0.3);
+            CHECK(rms(all, m, all.size()) > 0.002 && finite(all), "%s page, every knob up: sound, finite (rms %.4f)", SamplerApp::pageName(pg), rms(all, m, all.size()));
+            for (int i = 0; i < 4; i++) { auto k = app.knobs(); k[i].set(pg == SamplerApp::P_TONE || pg == SamplerApp::P_MOD ? (i == 3 && pg == SamplerApp::P_MOD ? 0.5f : (pg == SamplerApp::P_TONE && i > 0 ? 0.5f : 0.f)) : 0.f); }
+        }
+        app.gotoPage(SamplerApp::P_LIVE); size_t m;
         { auto k = app.knobs(); k[0].set(0.2f); k[1].set(1.f); k[2].set(1.f); k[3].set(0.5f); }
         m = all.size(); app.playNote(60, true); run(1.0); app.playNote(60, false); run(0.3);
         CHECK(rms(all, m, all.size()) > 0.0005 && finite(all), "LIVE FX all on: finite (rms %.4f)", rms(all, m, all.size()));
         { auto k = app.knobs(); k[0].set(0.5f); k[1].set(0.f); k[2].set(0.f); k[3].set(0.f); }
         run(0.3);
+        app.gotoPage(SamplerApp::P_LIVE2);
+        { auto k = app.knobs(); k[0].set(0.5f); k[1].set(0.5f); k[2].set(1.f); }
+        m = all.size(); app.playNote(60, true); run(1.0); app.playNote(60, false); run(0.5);
+        CHECK(finite(all), "LIVE FX 2 (reverse, tape stop, freeze) all on: finite");
+        { auto k = app.knobs(); k[0].set(0.f); k[1].set(0.f); k[2].set(0.f); }
+        run(0.5);
+        app.gotoPage(SamplerApp::P_TONE); { auto k = app.knobs(); k[1].set(1.f); }
+        CHECK(std::string(app.knobs()[1].value) == "+12 DB" && std::string(app.knobs()[2].value) == "FLAT", "EQ shows its gain in dB (%s, %s)", app.knobs()[1].value.c_str(), app.knobs()[2].value.c_str());
+        { auto k = app.knobs(); k[1].set(0.5f); }
     }
     // tempo, take snap, sequencer
     {
@@ -266,7 +316,7 @@ int main() {
         const double all4 = note(); CHECK(all4 > 0.001 && finite(all), "track fx: chorus + gate + crush sound (%.4f)", all4);
         { auto k = app.knobs(); k[1].set(0.f); k[2].set(0.f); k[3].set(0.f); }
         CHECK(other > 0.003, "the other tracks are untouched (%.4f)", other);
-        app.gotoPage(SamplerApp::P_FX); btn(SamplerApp::FX); btn(SamplerApp::FX); btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX x3 from the sends: track fx");
+        app.gotoPage(SamplerApp::P_FX); for (int i = 0; i < 6; i++) btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX x6 from the sends: track fx");
         app.gotoPage(SamplerApp::P_SQ); btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX returns to the page it was left on");
     }
     // ---- sequencer v2: overdub with undo, step entry, erase, touch, bounce to tape ----
@@ -292,7 +342,7 @@ int main() {
         app.playNote(64, true); run(0.2); app.playNote(64, false);
         run(1.2); seqUp(); run(0.3);
         { Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax);
-          CHECK(n == 2 && v[0].layer != v[1].layer, "holding SEQ again overdubs on top: %d notes, layers %d and %d", n, n > 0 ? v[0].layer : -1, n > 1 ? v[1].layer : -1); }
+          CHECK(n == 2 && v[0].note != v[1].note, "holding SEQ again overdubs on top: %d notes", n); }
         app.seqUndo(); run(0.2);
         { Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax); CHECK(n == 1 && v[0].note == 60, "undo (engine) takes the newest pass away (%d note left)", n); }
         { auto k = app.knobs(); k[3].step(1); } run(0.2); CHECK(app.status().seqCount[0] == 0, "K4 clears the pattern");
@@ -309,7 +359,15 @@ int main() {
         CHECK(app.status().seqCursor[0] == 192, "the cursor sits after the chord (%d)", app.status().seqCursor[0]);
         s.seqCursorMove(0, -1); run(0.2); app.playNote(67, true); run(0.1); app.playNote(67, false); run(0.3);
         CHECK(app.status().seqCount[0] == 3, "the same key on the same step erases it (%d notes)", app.status().seqCount[0]);
-        app.seqUndo(); run(0.2); CHECK(app.status().seqCount[0] == 3 || app.status().seqCount[0] == 2, "undo in step mode takes a step back (%d notes)", app.status().seqCount[0]);
+        app.seqUndo(); run(0.2); CHECK(app.status().seqCount[0] == 4 && app.status().seqRedoN[0] > 0, "undo takes the erase back (%d notes, redo possible)", app.status().seqCount[0]);
+        app.seqRedo(); run(0.2); CHECK(app.status().seqCount[0] == 3, "redo erases it again (%d notes)", app.status().seqCount[0]);
+        app.seqUndo(); app.seqUndo(); run(0.2); CHECK(app.status().seqCount[0] == 2, "two more undos: the chord is gone (%d notes)", app.status().seqCount[0]);
+        for (int i = 0; i < 20; i++) { app.seqUndo(); run(0.02); }
+        CHECK(app.status().seqCount[0] == 0 && app.status().seqUndoN[0] == 0, "undo runs back to the empty pattern and stops (%d notes, %d steps left)", app.status().seqCount[0], app.status().seqUndoN[0]);
+        for (int i = 0; i < 20; i++) { app.seqRedo(); run(0.02); }
+        CHECK(app.status().seqCount[0] == 3 && app.status().seqRedoN[0] == 0, "redo runs forward again (%d notes)", app.status().seqCount[0]);
+        { const int c0 = app.status().seqCount[0]; app.seqToggleAt(240, 72); run(0.1); app.seqUndo(); run(0.1); const int c1 = app.status().seqCount[0]; app.seqToggleAt(300, 70); run(0.1); CHECK(c1 == c0 && app.status().seqRedoN[0] == 0, "a new edit after an undo drops the redo steps (%d, redo %d)", c1, app.status().seqRedoN[0]); }
+        app.seqClear(); run(0.1); app.seqUndo(); run(0.1); CHECK(app.status().seqCount[0] > 0, "CLEAR can be undone (%d notes back)", app.status().seqCount[0]);
         // touch edit: the roll adds a note under the finger and removes it again
         { const int before = app.status().seqCount[0]; app.seqToggleAt(240, 72); run(0.2); const int added = app.status().seqCount[0]; app.seqToggleAt(240, 72); run(0.2);
           CHECK(added == before + 1 && app.status().seqCount[0] == before, "touch: tap adds (%d -> %d), tap again removes (%d)", before, added, app.status().seqCount[0]); }

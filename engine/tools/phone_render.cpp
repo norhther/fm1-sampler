@@ -49,6 +49,8 @@ int main(int argc, char** argv) {
     tab(11); ui.frame(now); dump("live");
     tab(12); { int notes[] = {60, 64, 67, 72, 67, 64, 55, 62}; for (int i = 0; i < 8; i++) app.seqToggleAt(i * 96, notes[i]); app.setSeqState(1); run(0.5); app.playNote(65, true); } ui.frame(now); dump("seq");
     tab(13); ui.frame(now); dump("tempo");
+    tab(16); ui.frame(now); dump("tone");
+    tab(18); ui.frame(now); dump("live2");
     tab(0);
     app.playNote(60, true); app.playNote(67, true); run(0.5); ui.frame(now); dump("voices"); app.playNote(60, false); app.playNote(67, false); run(0.3);
     tapAt(60, 100); run(1.0); ui.frame(now); dump("track2");

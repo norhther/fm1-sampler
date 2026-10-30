@@ -43,10 +43,11 @@ public:
         int countBeats;          // > 0 while the count-in runs: beats left
         int seqState[kTracks], seqBars[kTracks], seqCount[kTracks];   // sequencer: 0 mute 1 play 2 record 3 step entry, pattern length in bars, notes in the pattern
         int seqCursor[kTracks];  // step entry cursor, in ticks
+        int seqUndoN[kTracks], seqRedoN[kTracks];   // how many steps back / forward are possible
         int bounce;              // 0 idle, 1 waiting for the loop start, 2 recording the pattern to tape
         int bounceDone;          // counts up when a bounce finished
     };
-    struct SeqView { int tick, len, note, vel, layer; };
+    struct SeqView { int tick, len, note, vel; };
     struct Lfo { float rate = 1.f, depth = 0.f, base = 0.5f; int target = 0 /*0 pitch 1 filter 2 volume 3 pan*/, shape = 0 /*0 sine 1 tri 2 square 3 s&h*/; };
 
     explicit Session(int sampleRate = 48000);
@@ -86,7 +87,8 @@ public:
 
     // ---- note sequencer (per track pattern on the beat clock, locked to the loop) ----
     void seqSetState(int track, int state);   // 0 mute, 1 play, 2 record (starts the transport; one track records at a time), 3 step entry (keys write at the cursor)
-    void seqUndo(int track);                  // removes the newest layer: the last recording pass, or the last step
+    void seqUndo(int track);                  // takes back the last edit of the pattern (a recording pass, a step, a tap on the grid, clear, a change of the length); 16 steps
+    void seqRedo(int track);
     void seqToggle(int track, int tick, int len, int note, int vel);   // touch edit: a note under that tick is removed, else one is added
     void seqRest(int track);                  // step entry: skip one step
     void seqCursorMove(int track, int steps); // step entry: move the cursor

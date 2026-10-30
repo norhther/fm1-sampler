@@ -9,11 +9,12 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
 const char* kRepeat[] = {"OFF", "1/4", "1/8", "1/16", "1/32"};
+const char* kOffOn[] = {"OFF", "ON"};
 const char* kGate[] = {"OFF", "1/8", "1/16", "1/32"};
 const char* kTakeQ[] = {"OFF", "BEAT", "BAR"};
 const char* kCountIn[] = {"OFF", "1 BAR", "2 BARS"};
@@ -64,11 +65,12 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][4] = {{P_HOME, P_ENV, P_LFO, P_ARP}, {P_FX, P_FX2, P_LIVE, P_TFX}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
+    static const Page p[kModes][7] = {{P_HOME, P_ENV, P_LFO, P_ARP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
     return p[m & 3];
 }
-int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < 4; i++) if (modePages(m)[i] == pg) return m; return 0; }
-int SamplerApp::pageSlot(Page pg) { const Page* p = modePages(modeOf(pg)); for (int i = 0; i < 4; i++) if (p[i] == pg) return i; return 0; }
+int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 7 : 4; }
+int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
+int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
     scale = std::min(kScaleCount - 1, std::max(0, scale));
     for (int i = 0; i < kScaleN[scale]; i++) out[i] = kScaleStep[scale][i];
@@ -174,7 +176,8 @@ void SamplerApp::applyFx() {
     s_.setDelay(0.05f + delayTime_ * 1.45f, delayFb_ * 0.95f);
 }
 void SamplerApp::applyMasterFx() {
-    FxParams p; p.chorus = chorus_; p.phaser = phaser_; p.comp = comp_; p.width = width_; p.filter = djFilter_; p.crush = crush_; p.repeat = repeat_; p.gate = gate_;
+    FxParams p; p.chorus = chorus_; p.flanger = flanger_; p.phaser = phaser_; p.comp = comp_; p.width = width_; p.filter = djFilter_; p.crush = crush_; p.repeat = repeat_; p.gate = gate_;
+    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStop_; p.reverse = reverse_; p.freeze = freeze_;
     s_.setMasterFx(p);
 }
 void SamplerApp::applyTempo() {
@@ -208,7 +211,7 @@ void SamplerApp::selectTrack(int t) {
 }
 void SamplerApp::gotoPage(Page p) { page_ = p; lastPage_[modeOf(p)] = p; }
 void SamplerApp::modeButton(int m) {   // a mode button: enter the mode on the page it was left on, press again for the next page
-    gotoPage(modeOf(page_) == m ? modePages(m)[(pageSlot(page_) + 1) % 4] : lastPage_[m]);
+    gotoPage(modeOf(page_) == m ? modePages(m)[(pageSlot(page_) + 1) % modePageCount(m)] : lastPage_[m]);
 }
 
 SamplerApp::Knob SamplerApp::cont(const char* name, float* v, std::function<std::string(float)> f, std::function<void()> apply, float stepSize, bool commit) {
@@ -330,9 +333,28 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
     }
     case P_FX2:
         k[0] = cont("CHORUS", &chorus_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
-        k[1] = cont("PHASER", &phaser_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
-        k[2] = cont("COMPRESSOR", &comp_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        k[1] = cont("FLANGER", &flanger_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        k[2] = cont("PHASER", &phaser_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        k[3] = cont("COMPRESSOR", &comp_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        break;
+    case P_TONE: {
+        auto db = [](float v) { return std::fabs(v - 0.5f) < 0.02f ? std::string("FLAT") : fmt("%+.0f DB", (v - 0.5f) * 24.0); };
+        k[0] = cont("DRIVE", &drive_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        k[1] = cont("EQ LOW", &eqLow_, db, [=] { applyMasterFx(); }, 0.02f);
+        k[2] = cont("EQ MID", &eqMid_, db, [=] { applyMasterFx(); }, 0.02f);
+        k[3] = cont("EQ HIGH", &eqHigh_, db, [=] { applyMasterFx(); }, 0.02f);
+        break;
+    }
+    case P_MOD:
+        k[0] = cont("TREMOLO", &tremolo_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        k[1] = cont("AUTO WAH", &wah_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        k[2] = cont("RING MOD", &ringmod_, [](float v) { return v < 0.005f ? std::string("OFF") : fmt("%.0f HZ", 20.0 * std::pow(150.0, v)); }, [=] { applyMasterFx(); });
         k[3] = cont("WIDTH", &width_, [](float v) { return v < 0.01f ? std::string("MONO") : pct(v * 2.f); }, [=] { applyMasterFx(); });
+        break;
+    case P_LIVE2:
+        k[0] = choice("REVERSE", &reverse_, {kRepeat[0], kRepeat[1], kRepeat[2], kRepeat[3], kRepeat[4]}, [=] { applyMasterFx(); });
+        k[1] = cont("TAPE STOP", &tapeStop_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
+        k[2] = choice("FREEZE", &freeze_, {kOffOn[0], kOffOn[1]}, [=] { applyMasterFx(); });
         break;
     case P_LIVE:
         k[0] = cont("DJ FILTER", &djFilter_, [](float v) {
@@ -696,9 +718,9 @@ void SamplerApp::draw(uint32_t now) {
         rect(8 + i, i * 30 + 9, 20, 12, 2, st_.track_clip_rec[i] ? ACCENT : st_.track_has_clip[i] ? PAPER : BLACK);
     }
     drawText(20, 6, 26, 2, ACCENT, BLACK, kPage[page_], 9);
-    for (int i = 0; i < 4; i++) rect(270 + i, 122 + i * 8, 30, 5, 5, i == pageSlot(page_) ? ACCENT : BAR);   // where you are inside the mode (press its button again for the next page)
+    for (int i = 0; i < 7; i++) rect(270 + i, 122 + i * 7, 30, 5, 5, i >= modePageCount(modeOf(page_)) ? BLACK : i == pageSlot(page_) ? ACCENT : BAR);   // where you are inside the mode (press its button again for the next page)
     const char* state = st_.freeRecording || st_.track_clip_rec[track_] ? "REC" : st_.playing ? "PLAY" : "STOP";
-    drawText(21, 156, 26, 2, st_.freeRecording || st_.track_clip_rec[track_] ? ACCENT : PAPER, BLACK, state, 7);
+    drawText(21, 176, 26, 2, st_.freeRecording || st_.track_clip_rec[track_] ? ACCENT : PAPER, BLACK, state, 5);
     // sample line: name and algorithm (or the toast / microphone state)
     std::string line;
     if (mic_ == 1) line = "MIC: WAITING FOR SOUND";

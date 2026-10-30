@@ -51,5 +51,6 @@ private:
     bool linkMidi_ = false, linkAudio_ = false, sheetOpen_ = false;
     float sheetScroll_ = 0, sheetLastY_ = 0, sheetMoved_ = 0;
     Rect sheetList_{0, 0, 0, 0};
-    float rollBase_ = 48, rollDownX_ = 0, rollDownY_ = 0, rollStartBase_ = 48; bool rollMoved_ = false;   // piano roll: lowest note shown, touch state
+    float rollBase_ = 48, rollScroll_ = 0, rollDownX_ = 0, rollDownY_ = 0, rollStartBase_ = 48, rollStartScroll_ = 0; bool rollMoved_ = false;   // piano roll: lowest note shown, first tick shown, touch state
+    int rollZoomX_ = 0, rollRows_ = 2;   // zoom index in time (1x, 2x, 4x, 8x), index of the number of pitch rows (12, 18, 24, 36)
 };
