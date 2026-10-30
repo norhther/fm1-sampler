@@ -130,7 +130,7 @@ void SamplerUI::topBar(Rect r) {
     const uint32_t lc = linkMidi_ && linkAudio_ ? TEXT : linkMidi_ ? ACCENT : DIM;
     circle(W_ - 22, cy, 5, lc);
     text(W_ - 34, cy - 6, 10, DIM, linkMidi_ ? "FM-1" : "NO FM-1", 2, true);
-    if (st_.clip) text(W_ - 96, cy + 9, 9.5f, ACCENT, "CLIP", 2, true);
+    if (st_.clip) text(W_ - 72, cy - 6, 9.5f, ACCENT, "CLIP", 2, true);
     text(W_ - 34, cy + 9, 9, DIM, "CPU " + num("%.0f", st_.cpu_permille / 10.0) + "%", 2, false);
 }
 
@@ -438,8 +438,8 @@ void SamplerUI::sequencerView(Rect r) {
     {
         const float sy = roll.y + roll.h + 4 + (selMode_ ? 0.f : 0.f) + panelH;
         const int cur = app_.patternSlot(t), pend = st_.seqSlotPending[t];
-        const float cw = 34, sw = 56, gap = 4; float cx = r.x;
-        text(cx + 2, sy + slotH / 2, 8.5f, DIM, "PATTERN", 0, true); cx += 52;
+        const float cw = 28, sw = 44, gap = 3; float cx = r.x;
+        text(cx + 2, sy + slotH / 2, 8.f, DIM, "PTN", 0, true); cx += 26;
         for (int q = 0; q < 8; q++) {
             Session::SeqView tmp[1]; int bb = 0; const int cnt = app_.session().seqSlotNotes(t, q, tmp, 1, &bb);
             const Rect c{cx + q * (cw + gap), sy, cw, slotH};
@@ -449,12 +449,12 @@ void SamplerUI::sequencerView(Rect r) {
             if (cnt > 0) circle(c.x + c.w - 6, c.y + 6, 2.5f, on ? ON_ACCENT : ACCENT);
             tap(c, [this, q] { if (copyArm_) { app_.copyPattern(q); copyArm_ = false; app_.say(std::string("COPIED TO ") + (char)('A' + q)); } else app_.selectPattern(q); });
         }
-        const float ex = cx + 8 * (cw + gap) + 6;
-        button({ex, sy, sw, slotH}, copyArm_ ? "COPY TO..." : "COPY", copyArm_, [this] { copyArm_ = !copyArm_; }, 9.5f);
-        button({ex + sw + gap, sy, sw, slotH}, st_.songOn ? "SONG ON" : "SONG", st_.songOn, [this] { songOpen_ = true; }, 9.5f);
+        const float ex = cx + 8 * (cw + gap) + 4;
+        button({ex, sy, sw, slotH}, copyArm_ ? "TO..." : "COPY", copyArm_, [this] { copyArm_ = !copyArm_; }, 9.5f);
+        button({ex + sw + gap, sy, sw, slotH}, st_.songOn ? "SONG*" : "SONG", st_.songOn, [this] { songOpen_ = true; }, 9.5f);
     }
     // bars: add or remove one at the end (new bars are empty; the notes behind a removed end are dropped, UNDO brings them back)
-    const float by = r.y + r.h - 38, bwBar = 40, lblW = 78, cpW = 50, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 4 * 6) / 4;
+    const float by = r.y + r.h - 38, bwBar = 34, lblW = 64, cpW = 44, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 4 * 6) / 4;
     const int nb = app_.seqBarsOf(t);
     button({r.x, by, bwBar, 38}, "-", false, [this, nb] { app_.seqSetBarCount(nb - 1); }, 16);
     text(r.x + bwBar + 4 + lblW / 2, by + 13, 13, TEXT, std::to_string(nb) + (nb == 1 ? " BAR" : " BARS"), 1, true);
@@ -463,8 +463,8 @@ void SamplerUI::sequencerView(Rect r) {
     button({r.x + 2 * bwBar + 4 + lblW + 8, by, cpW, 38}, "+COPY", false, [this] { app_.seqAddBarCopy(); }, 9.f);   // a new bar with the notes of the last one
     int bx = 0;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + barsW + 6 + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
-    b(state == 2 ? "STOP REC" : "RECORD", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
-    b(state == 0 ? "MUTED" : "PLAYING", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
+    b(state == 2 ? "STOP" : "REC", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
+    b(state == 0 ? "MUTE" : "PLAY", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
     b("DICE", false, [this] { app_.seqDice(); });
     b("CLEAR", false, [this] { app_.seqClear(); });
 }
