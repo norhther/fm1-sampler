@@ -33,6 +33,9 @@ public class Backend {
     int usbAudioId = 0;
     /** Set by the activity: opens the system file picker (the phone UI asked for LOAD FILE FROM DISK). */
     public volatile Runnable onFileRequest;
+    /** A MIDI file was asked for (PROJECT sheet), and a file is ready for the share sheet. */
+    public volatile Runnable onMidiRequest;
+    public volatile java.util.function.Consumer<String> onShare;
 
     public static synchronized Backend get(Context c) {
         if (instance == null) instance = new Backend(c.getApplicationContext());
@@ -51,6 +54,7 @@ public class Backend {
         engine = Native.create(c.getFilesDir().getAbsolutePath(), samples.getAbsolutePath());
         midi = (MidiManager) c.getSystemService(Context.MIDI_SERVICE);
         am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        Native.restoreLast(engine);   // back to where the app was left (the engine ignores it once if the last restore never finished)
     }
 
     public synchronized void start() {
@@ -75,6 +79,9 @@ public class Backend {
                 send(out);
                 Native.uiLink(engine, toFm1 != null, usbAudioId != 0);
                 if (Native.wantFile(engine)) { Runnable r = onFileRequest; if (r != null) main.post(r); }
+                if (Native.wantMidi(engine)) { Runnable r = onMidiRequest; if (r != null) main.post(r); }
+                String share = Native.sharePath(engine);
+                if (share != null && !share.isEmpty()) { java.util.function.Consumer<String> c = onShare; if (c != null) main.post(() -> c.accept(share)); }
                 try { Thread.sleep(16); } catch (InterruptedException ignored) { }
             }
         }, "fm1-surface");

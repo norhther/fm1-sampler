@@ -63,6 +63,12 @@ public:
 
     // ---- sampler (per track) ----
     void loadSamplePath(const std::string& path, bool kit, int track);          // worker thread builds it, then it replaces the track's sampler
+    void setSynthMacros(int track, float tone, float body, float motion, float grit);   // -1..1 each; only a built-in synth listens
+    void setRoot(int track, int midiNote);                                     // the key that plays the sample at its own pitch (60 = the library's tuning)
+    void setSlices(int track, int count, float sensitivity);                   // KIT: cut the sample into `count` pads again
+    float rootGuessOf(int track) const;                                        // pitch of the sample as a MIDI note, 0 = not a pitched sound
+    std::vector<float> slicesOf(int track) const;                              // slice starts, 0..1 of the sample
+    void unloadSample(int track);                                              // the track is empty again
     void setMode(int track, int mode);                                         // 0 melodic, 1 one-shot, 2 looped, 3 kit, 4 granular, 5 paulstretch
     void setEnv(int track, float attack, float decay, float sustain, float release);   // seconds, level
     void setSampleRange(int track, float start, float end);                    // 0..1 of the sample
@@ -125,6 +131,9 @@ public:
     void loopHalve();                     // half as long, the second half dropped
     void setLoopSpeed(float speed);       // 0.25..2, tape speed of all loops together; 1 = locked to the transport
     void setLoopSource(int src);          // what the loop records: 0 microphone, 1 the track's sound
+    bool writeTape(const std::string& dir);   // projects: every loop as dir/tape_N.wav plus the mix as dir/mix.wav (written in the background, see busyJobs)
+    void loadTape(const std::string& dir, int bars, float bpm);   // projects: replaces the loops by dir/tape_N.wav
+    int busyJobs() const;                     // > 0 while a project is being written or read
     bool saveClip(int track);             // the loop of `track` as sample_*.wav in the data dir
     int loopPeaks(int track /* -1 = all tracks mixed */, float* out, int maxBins) const;
 

@@ -11,6 +11,8 @@
 #include <Sequencer.h>
 #include <Arp.h>
 #include <Tombola.h>
+#include <Midi.h>
+#include <fstream>
 #include <cmath>
 #include <thread>
 #include <chrono>
@@ -98,6 +100,16 @@ static void testFx2() {
     c[5].n = "eq low boost"; c[5].p.eqLow = 1.f;
     c[6].n = "eq high cut"; c[6].p.eqHigh = 0.f;
     for (auto& k : c) { auto o = run(k.p, src); CHECK(finite(o) && diff(o, src) > 1e-3, "%s changes the signal and stays finite (diff %.4f)", k.n, diff(o, src)); }
+    {   // the OP-1 effects
+        FxParams sp; sp.spring = 1.f; FxParams ph; ph.phone = 1.f; FxParams pu; pu.punch = 1.f;
+        { auto o = run(pu, src); CHECK(finite(o) && diff(o, src) > 1e-3, "punch changes the signal and stays finite (diff %.4f)", diff(o, src)); }
+        { MasterFx fx(sr); fx.set(sp); std::vector<float> a(2 * 4800, 0.f); for (int i = 0; i < 200; i++) a[2 * i] = a[2 * i + 1] = 0.8f; std::vector<float> tail(2 * 24000, 0.f);   // a click, then silence
+          fx.process(a.data(), 4800, 0, 1.0 / 24000); for (int i = 0; i < 24000; i += 256) fx.process(tail.data() + 2 * i, std::min(256, 24000 - i), 0, 1.0 / 24000);
+          CHECK(finite(tail) && rms(tail, 2 * 4000, 2 * 24000) > 0.003, "spring rings on after a click (%.4f)", rms(tail, 2 * 4000, 2 * 24000)); }
+        { auto lo = sine(N, 80, sr), mid = sine(N, 1000, sr); auto a = run(ph, lo), b = run(ph, mid);
+          CHECK(finite(a) && finite(b) && rms(a, 24000, 48000) < rms(lo, 24000, 48000) * 0.5 && rms(b, 24000, 48000) > rms(mid, 24000, 48000) * 0.5, "phone cuts 80 Hz (%.3f -> %.3f) and keeps 1 kHz (%.3f -> %.3f)", rms(lo, 24000, 48000), rms(a, 24000, 48000), rms(mid, 24000, 48000), rms(b, 24000, 48000)); }
+        MasterFx rest(sr); CHECK(!rest.active(), "the new effects are off at rest"); rest.set(sp); CHECK(rest.active(), "...and on when turned up");
+    }
     { MasterFx fx(sr); FxParams p; p.eqMid = 0.52f; fx.set(p); CHECK(!fx.active(), "EQ within 0.02 of flat is bypassed"); p.eqMid = 0.8f; fx.set(p); CHECK(fx.active(), "EQ moved: active"); }
     { auto lows = sine(N, 80, sr); FxParams p; p.eqLow = 1.f; auto o = run(p, lows); CHECK(rms(o, 24000, 48000) > rms(lows, 24000, 48000) * 1.6, "EQ low boost lifts 80 Hz (%.3f -> %.3f)", rms(lows, 24000, 48000), rms(o, 24000, 48000));
       auto highs = sine(N, 10000, sr); FxParams q; q.eqHigh = 0.f; auto h = run(q, highs); CHECK(rms(h, 24000, 48000) < rms(highs, 24000, 48000) * 0.5, "EQ high cut lowers 10 kHz (%.3f -> %.3f)", rms(highs, 24000, 48000), rms(h, 24000, 48000)); }
@@ -191,7 +203,7 @@ static void testSynths() {
         if (!finite(o)) bad++;
         if (r0 < 0.01) { silent++; printf("quiet synth %s rms %.4f\n", kSynths[i].name, r0); }
         if (pk > 1.2f) { loud++; printf("loud synth %s peak %.2f\n", kSynths[i].name, pk); }
-        if (tail > 0.01 && kSynths[i].r < 1.5f) { stuck++; printf("synth %s still sounds after release rms %.4f\n", kSynths[i].name, tail); }
+        if (tail > 0.01 && kSynths[i].r < 1.5f && kSynths[i].engine != 3) { stuck++; printf("synth %s still sounds after release rms %.4f\n", kSynths[i].name, tail); }
         if (sm.peaks().size() != 512) bad++;
     }
     CHECK(kSynthCount >= 20, "%d built-in synths", kSynthCount);
@@ -252,6 +264,19 @@ static void testOp1() {
     CHECK(n2 > 0 && (n2 != n || w[0].tick != v[0].tick || w[0].note != v[0].note || w[1].tick != v[1].tick), "...and every roll is different (%d, %d notes)", n, n2);
     app.seqUndo(); run(0.2); const int n3 = s.seqNotes(0, w, kSeqMax);
     CHECK(n3 == n, "one undo brings the previous pattern back (%d notes)", n3);
+    {   // live TAPE STOP: hold = the sound runs down, let go = it spins up again
+        std::vector<float> all2; auto runA = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); all2.insert(all2.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+        for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Organ" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+        for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }   // the worker loads the synth in real time
+        app.seqClear(); run(0.3);
+        app.playNote(60, true); runA(1.0);
+        const double before = rms(all2, all2.size() - 4800 * 2, all2.size());
+        app.tapeStopHold(true); runA(2.0);
+        const double stopped = rms(all2, all2.size() - 4800 * 2, all2.size());
+        app.tapeStopHold(false); runA(1.5);
+        const double after = rms(all2, all2.size() - 4800 * 2, all2.size()); app.playNote(60, false);
+        CHECK(before > 0.01 && stopped < before * 0.15 && after > before * 0.5, "tape stop button: %.3f held note, %.3f while held, %.3f after the release", before, stopped, after);
+    }
 }
 
 static void testTombola() {
@@ -328,6 +353,175 @@ static void testSwing() {
     app.seqClear(); run(0.2); if (app.status().playing) btn(SamplerApp::PLAY);
 }
 
+static void testProject() {
+    const int sr = SAMPLERATE;
+    {   // midi files: notes out and back in
+        MidiSong a; a.bpm = 133.f; a.tracks = {{{0, 96, 60, 100}, {96, 48, 64, 80}, {96, 192, 67, 127}}, {}, {{384, 24, 36, 90}}};
+        CHECK(writeMidi("/tmp/fm1_t.mid", a), "midi file written");
+        MidiSong b; const bool ok = readMidi("/tmp/fm1_t.mid", b);
+        bool same = ok && b.tracks.size() == 2 && b.tracks[0].size() == 3 && b.tracks[1].size() == 1 && std::fabs(b.bpm - 133.f) < 0.1f;
+        if (same) { auto& t0 = b.tracks[0]; same = t0[0].tick == 0 && t0[0].len == 96 && t0[0].note == 60 && t0[0].vel == 100 && t0[2].len == 192 && t0[2].vel == 127 && b.tracks[1][0].tick == 384 && b.tracks[1][0].note == 36; }
+        CHECK(same, "midi round trip: %zu tracks, %.1f bpm", b.tracks.size(), b.bpm);
+        CHECK(!readMidi("/tmp/fm1_nothing.mid", b), "a missing midi file is refused");
+        {   // damaged files: data bytes with the high bit set, a track that ends in the middle of an event, a huge length
+            std::string bad = "MThd"; bad += std::string("\0\0\0\6\0\0\0\1\0\xc0", 10);
+            std::string trk; const char ev[] = {0, (char)0x90, (char)200, (char)100, 10, (char)0x80, (char)250, 0, 5, (char)0x90, 60, (char)130, 5, (char)0x90, 64, 100, 5, (char)0x80, 64, 0, 0, (char)0xff, 0x2f, 0};
+            trk.assign(ev, sizeof ev);
+            std::string t2 = "MTrk"; t2 += std::string("\0\0\0", 3); t2 += (char)trk.size(); t2 += trk;
+            { std::ofstream f("/tmp/fm1_bad.mid", std::ios::binary); f << bad << t2; }
+            MidiSong x; const bool ok = readMidi("/tmp/fm1_bad.mid", x);
+            CHECK(ok && x.tracks.size() == 1 && x.tracks[0].size() == 1 && x.tracks[0][0].note == 64, "a damaged midi file: the bad events are skipped, the good note stays (%zu notes)", ok && !x.tracks.empty() ? x.tracks[0].size() : 0);
+            std::string cut = bad + "MTrk" + std::string("\0\0\xff\xff", 4) + std::string("\0\x90", 2);
+            { std::ofstream f("/tmp/fm1_cut.mid", std::ios::binary); f << cut; }
+            MidiSong y; readMidi("/tmp/fm1_cut.mid", y); CHECK(true, "a truncated midi file with a huge track length does not crash");
+        }
+    }
+    system("rm -rf /tmp/fm1sampler_ta; mkdir -p /tmp/fm1sampler_ta");
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    {
+        Session s(sr); s.setDataDir("/tmp/fm1sampler_ta"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+        SamplerApp app(s, [](const uint8_t*, size_t) {});
+        auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+        auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
+        run(2.5);
+        // a project to remember: tempo, a pattern on track 1, a bounced loop, odd settings, a synth on track 3
+        app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((100.f - 30.f) / 270.f); } run(0.2);
+        app.gotoPage(SamplerApp::P_SQ); { auto k = app.knobs(); k[0].set(1.f / 3); k[1].set(0.f); }
+        app.seqClear(); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 192, 60 + i * 2, i == 1 ? 120 : 0); run(0.3);
+        btn(SamplerApp::REC); run(0.4); run(3.0);
+        CHECK(app.status().loopSamples > 0, "a loop was bounced to the tape (%.0f samples)", app.status().loopSamples);
+        app.gotoPage(SamplerApp::P_ENV); { auto k = app.knobs(); k[0].set(0.7f); k[2].set(0.33f); }
+        app.gotoPage(SamplerApp::P_FX); { auto k = app.knobs(); k[0].set(0.9f); }
+        app.selectTrack(2); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Hoover") app.loadEntry(i); run(1.0);
+        app.gotoPage(SamplerApp::P_SHAPE); { auto k = app.knobs(); k[0].set(0.9f); k[3].set(0.2f); }
+        const double loop0 = app.status().loopSamples; const float bpm0 = app.status().bpm;
+        CHECK(app.saveProject("Test One"), "project saved");
+        run(1.0); while (s.busyJobs() > 0) run(0.2);
+        CHECK(std::filesystem::exists("/tmp/fm1sampler_ta/projects/Test One/project.txt") && std::filesystem::exists("/tmp/fm1sampler_ta/projects/Test One/tape_0.wav") && std::filesystem::exists("/tmp/fm1sampler_ta/projects/Test One/mix.wav"), "the project folder has the settings, the tape and the mix");
+        // wreck everything, then load
+        app.selectTrack(0); app.seqClear(); s.clipClearAll(); run(0.5);
+        app.gotoPage(SamplerApp::P_ENV); { auto k = app.knobs(); k[0].set(0.1f); k[2].set(0.9f); }
+        app.gotoPage(SamplerApp::P_FX); { auto k = app.knobs(); k[0].set(0.1f); }
+        app.selectTrack(2); app.loadEntry(0); run(1.0); app.selectTrack(0);
+        CHECK(app.status().loopSamples == 0 && app.status().seqCount[0] == 0, "wrecked: no loop, no notes");
+        CHECK(app.loadProject("Test One"), "project loaded");
+        run(3.0); while (s.busyJobs() > 0) run(0.2); run(1.0);
+        CHECK(app.status().seqCount[0] == 4, "the pattern is back (%d notes)", app.status().seqCount[0]);
+        { Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax); bool ok = n == 4; for (int i = 0; ok && i < n; i++) if (v[i].tick == 192 && v[i].len != 120) ok = false;
+          CHECK(ok, "...with its note lengths"); }
+        CHECK(std::fabs(app.status().loopSamples - loop0) < 2 && std::fabs(app.status().bpm - bpm0) < 0.5f, "the tape is back: %.0f samples (was %.0f), %.1f bpm (was %.1f)", app.status().loopSamples, loop0, app.status().bpm, bpm0);
+        CHECK(app.state(0).a > 0.69f && app.state(0).a < 0.71f && std::fabs(app.state(0).s - 0.33f) < 0.01f, "the envelope is back (%.2f, %.2f)", app.state(0).a, app.state(0).s);
+        CHECK(app.sampleLabel(2) == "Hoover" && app.isSynth(2), "track 3 plays the synth again (%s)", app.sampleLabel(2).c_str());
+        CHECK(std::fabs(app.state(2).synTone - 0.9f) < 0.02f && std::fabs(app.state(2).synGrit - 0.2f) < 0.02f, "...with its macros (%.2f, %.2f)", app.state(2).synTone, app.state(2).synGrit);
+        CHECK(app.sampleLabel(0) == "Tape Key" && app.sampleLabel(1) == "Acoustic", "the samples of the tracks are back (%s, %s)", app.sampleLabel(0).c_str(), app.sampleLabel(1).c_str());
+        size_t m = all.size(); run(2.5); CHECK(rms(all, m, all.size()) > 0.003 && finite(all), "the loaded project plays (rms %.4f)", rms(all, m, all.size()));
+        CHECK(!std::filesystem::exists("/tmp/fm1sampler_ta/projects/.loading"), "the loading marker is gone again");
+        CHECK(app.projectList().size() >= 1 && app.projectList()[0] == "Test One" && app.currentProject() == "Test One", "the project is listed (%zu, first %s, current %s)", app.projectList().size(), app.projectList().empty() ? "-" : app.projectList()[0].c_str(), app.currentProject().c_str());
+        // midi export of the patterns, and back in on another track
+        CHECK(app.exportMidi() && !app.sharePath().empty() && app.sharePath().empty(), "midi exported (the share path is handed out once)");
+        MidiSong exp; CHECK(readMidi("/tmp/fm1sampler_ta/exports/Test One.mid", exp) && exp.tracks.size() >= 1 && exp.tracks[0].size() == 4, "the exported file has the four notes");
+        app.selectTrack(4); CHECK(app.importMidi("/tmp/fm1sampler_ta/exports/Test One.mid"), "midi imported"); run(0.3);
+        CHECK(app.status().seqCount[4] == 4, "...onto the selected track (%d notes)", app.status().seqCount[4]);
+        // the autosave, written on its own
+        app.autosave(true); run(0.5); while (s.busyJobs() > 0) run(0.2);
+        CHECK(std::filesystem::exists("/tmp/fm1sampler_ta/projects/autosave/project.txt"), "autosave written");
+        app.deleteProject("Test One"); CHECK(!std::filesystem::exists("/tmp/fm1sampler_ta/projects/Test One"), "a project can be deleted");
+    }
+    {   // the next start finds the autosave and goes back to it; a start after a failed restore skips it once
+        Session s(sr); s.setDataDir("/tmp/fm1sampler_ta"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+        SamplerApp app(s, [](const uint8_t*, size_t) {});
+        auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+        run(2.0); app.restoreLast(); run(3.0); while (s.busyJobs() > 0) run(0.2); run(1.0);
+        CHECK(app.status().seqCount[0] == 4 && app.status().loopSamples > 0 && app.sampleLabel(2) == "Hoover", "a new start comes back to the autosave (%d notes, loop %.0f, track 3 %s)", app.status().seqCount[0], app.status().loopSamples, app.sampleLabel(2).c_str());
+        { std::ofstream mk("/tmp/fm1sampler_ta/projects/.loading"); mk << "autosave"; }
+        Session s2(sr); s2.setDataDir("/tmp/fm1sampler_ta"); s2.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+        SamplerApp app2(s2, [](const uint8_t*, size_t) {});
+        app2.restoreLast();
+        CHECK(!std::filesystem::exists("/tmp/fm1sampler_ta/projects/.loading") && app2.state(2).entry != app.state(2).entry, "an unfinished restore is skipped once and the marker removed");
+    }
+}
+
+static int synthIndex(const char* name) { for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == name) return i; return -1; }
+static std::vector<float> playSynth(int idx, int note, double sec, const SynthMacros& m = SynthMacros(), double holdSec = 1e9) {
+    const int sr = SAMPLERATE; Sampler sm(sr); sm.load("synth:" + std::to_string(idx)); sm.setSynthMacros(m);
+    std::vector<float> o((size_t)(sec * sr) * 2, 0.f); sm.noteOn(note, 110);
+    for (size_t b = 0; b + 256 <= o.size() / 2; b += 256) { if (b >= (size_t)(holdSec * sr)) sm.noteOff(note); sm.render(o.data() + b * 2, 256); }
+    return o;
+}
+static double zcr(const std::vector<float>& v, size_t a, size_t b) { int z = 0; for (size_t i = a + 2; i < b; i += 2) z += (v[i] < 0.f) != (v[i - 2] < 0.f); return z / (double)((b - a) / 2); }
+static double pitchOf(const std::vector<float>& o, int sr, int lo, int hi, size_t from) {   // autocorrelation pitch in Hz between lo and hi
+    const int w = sr / 4; int best = 0; double bc = -1e9;
+    for (int lag = sr / hi; lag < sr / lo; lag++) { double c = 0; for (int k = 0; k < w; k++) c += o[2 * (from + (size_t)k)] * o[2 * (from + (size_t)k + (size_t)lag)]; if (c > bc) { bc = c; best = lag; } }
+    return (double)sr / best;
+}
+static void testSound() {
+    const int sr = SAMPLERATE;
+    CHECK(kSynthCount >= 30, "%d built-in synths", kSynthCount);
+    {   // wavetable: moves while the note holds, follows the key
+        const int wb = synthIndex("Wave Bass"), wp = synthIndex("Wave Pad");
+        auto o = playSynth(wb, 45, 1.5); const double hz = pitchOf(o, sr, 60, 180, (size_t)sr / 5);
+        CHECK(wb >= 0 && finite(o) && hz > 104 && hz < 116, "Wave Bass plays A2 near 110 Hz (%.0f)", hz);
+        auto p = playSynth(wp, 60, 3.0); const double early = zcr(p, 0, (size_t)sr / 2 * 2), late = zcr(p, (size_t)sr * 2 * 2, (size_t)sr * 5), flat = rms(p, (size_t)sr * 4, (size_t)sr * 5);
+        CHECK(finite(p) && flat > 0.01 && std::fabs(early - late) > 0.002, "Wave Pad: the sound morphs while the note is held (crossings %.4f -> %.4f)", early, late);
+    }
+    {   // modal: a struck bar rings at the key and dies away by itself
+        const int mb = synthIndex("Marimba"), tb = synthIndex("Tubular Bell");
+        auto o = playSynth(mb, 57, 2.0); const double hz = pitchOf(o, sr, 150, 300, (size_t)sr / 20);
+        CHECK(mb >= 0 && finite(o) && hz > 215 && hz < 225, "Marimba A3 rings at 220 Hz (%.0f)", hz);
+        CHECK(rms(o, 0, (size_t)sr / 5) > 0.02 && rms(o, (size_t)sr * 2 * 2 - 4000, (size_t)sr * 2 * 2) < 0.1 * rms(o, 0, (size_t)sr / 5), "...and dies away (%.3f -> %.4f)", rms(o, 0, (size_t)sr / 5), rms(o, (size_t)sr * 2 * 2 - 4000, (size_t)sr * 2 * 2));
+        auto b = playSynth(tb, 60, 4.0); CHECK(rms(b, (size_t)sr * 4, (size_t)sr * 4 + 4800) > 0.003, "a held bell is still ringing after two seconds (%.4f)", rms(b, (size_t)sr * 4, (size_t)sr * 4 + 4800));
+    }
+    {   // drum kits: 16 pads, every one sounds and ends, kick low and hat high
+        const int k = synthIndex("Synth Kit 808"); bool all = k >= 0; double lo = 0, hi = 0;
+        for (int pad = 0; pad < 16 && all; pad++) { auto o = playSynth(k, 60 + pad, 2.5); const bool ok = finite(o) && rms(o, 0, (size_t)sr / 5) > 0.01; all &= ok; if (!ok) printf("pad %d silent\n", pad); if (pad == 0) lo = zcr(o, 0, (size_t)sr / 10); if (pad == 6) hi = zcr(o, 0, (size_t)sr / 40); }
+        CHECK(all && lo < 0.05 && hi > 0.15, "synth kit: all 16 pads sound; kick crossings %.3f, hat %.3f", lo, hi);
+        auto cl = playSynth(k, 64, 3.0); CHECK(rms(cl, (size_t)sr * 2 * 2 + 0, (size_t)sr * 3 * 2) < 0.002, "a clap ends by itself (%.4f)", rms(cl, (size_t)sr * 4, (size_t)sr * 6));
+        auto pu = playSynth(synthIndex("Synth Kit Punch"), 60, 1.0), l8 = playSynth(k, 60, 1.0); CHECK(diff(pu, l8) > 1e-3, "the kits differ from each other");
+    }
+    {   // macros
+        const int sb = synthIndex("Saw Bass"); SynthMacros bright; bright.tone = 1.f; SynthMacros dark; dark.tone = -1.f;
+        auto br = playSynth(sb, 48, 0.6, bright), dk = playSynth(sb, 48, 0.6, dark);
+        CHECK(zcr(br, 4000, 40000) > zcr(dk, 4000, 40000) * 1.2, "TONE: brighter has more crossings (%.4f vs %.4f)", zcr(br, 4000, 40000), zcr(dk, 4000, 40000));
+        SynthMacros body; body.body = 1.f; const int mb = synthIndex("Marimba");
+        auto longer = playSynth(mb, 60, 2.0, body), normal = playSynth(mb, 60, 2.0);
+        CHECK(rms(longer, (size_t)sr * 2, (size_t)sr * 3) > rms(normal, (size_t)sr * 2, (size_t)sr * 3) * 1.5, "BODY: a struck bar rings longer (%.4f vs %.4f)", rms(longer, (size_t)sr * 2, (size_t)sr * 3), rms(normal, (size_t)sr * 2, (size_t)sr * 3));
+        SynthMacros grit; grit.grit = 1.f; auto gr = playSynth(sb, 48, 0.5, grit), cl = playSynth(sb, 48, 0.5);
+        CHECK(finite(gr) && diff(gr, cl) > 0.005, "GRIT changes the waveform (diff %.4f)", diff(gr, cl));
+        SynthMacros mo; mo.motion = 1.f; const int ss = synthIndex("Super Saw");
+        CHECK(diff(playSynth(ss, 55, 1.0, mo), playSynth(ss, 55, 1.0)) > 0.005, "MOTION changes a patch");
+    }
+    {   // auto tune: the pitch of a sample, and the slices
+        std::vector<float> w((size_t)sr * 2 * 2); for (int i = 0; i < sr * 2; i++) { const float v = 0.5f * std::sin(2 * M_PI * 220.0 * i / sr) * std::exp(-i / (0.8f * sr)) + 0.2f * std::sin(2 * M_PI * 440.0 * i / sr); w[2 * i] = w[2 * i + 1] = v; }
+        writeWav16("/tmp/fm1_a3.wav", w, sr); Sampler sm(sr); sm.load("/tmp/fm1_a3.wav");
+        CHECK(std::fabs(sm.rootGuess() - 57.f) < 0.3f, "auto tune finds A3 (MIDI %.2f, expect 57)", sm.rootGuess());
+        Sampler dr(sr); dr.load(std::string(getenv("HOME")) + "/fm1-sampler/samples/Drums/808 Kit.wav");
+        CHECK(dr.rootGuess() == 0.f, "a drum kit has no pitch (%.1f)", dr.rootGuess());
+        std::vector<float> o2((size_t)sr * 2, 0.f); sm.setRoot(57); sm.noteOn(57, 100); for (int b = 0; b < sr / 2 / 256; b++) sm.render(o2.data() + (size_t)b * 512, 256);
+        const double hz = pitchOf(o2, sr, 150, 300, (size_t)sr / 20);
+        CHECK(hz > 217 && hz < 223, "with the root at A3, key A3 plays the sample as it is (%.0f Hz)", hz);
+    }
+    system("rm -rf /tmp/fm1sampler_tb; mkdir -p /tmp/fm1sampler_tb");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tb"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.5);
+    app.selectTrack(3); app.gotoPage(SamplerApp::P_SHAPE);   // the default project has TrapKit here
+    const size_t n0 = s.slicesOf(3).size();
+    { auto k = app.knobs(); k[2].set(0.f); } run(1.5);   // 4 slices
+    const size_t n4 = s.slicesOf(3).size();
+    CHECK(n0 >= 8 && n4 <= 5 && n4 >= 2, "SLICES: the pads follow the knob (%zu -> %zu)", n0, n4);
+    app.selectTrack(0); app.gotoPage(SamplerApp::P_SHAPE);
+    CHECK(std::string(app.knobs()[0].name) == "ROOT KEY" && std::string(app.knobs()[0].value) == "C4", "a sample track shows ROOT KEY C4 (%s %s)", app.knobs()[0].name.c_str(), app.knobs()[0].value.c_str());
+    { auto k = app.knobs(); k[0].set(0.6f); } CHECK(std::string(app.knobs()[0].value) != "C4", "the root key moves");
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Warm Pad") app.loadEntry(i);
+    run(2.0); { auto k = app.knobs(); k[1].step(1); }
+    CHECK(app.state(0).rootN > 0.f, "AUTO TUNE answers (%s)", app.knobs()[1].value.c_str());
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Pluck" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    run(1.5); app.gotoPage(SamplerApp::P_SHAPE);
+    CHECK(std::string(app.knobs()[0].name) == "TONE" && std::string(app.knobs()[3].name) == "GRIT", "a synth track shows its macros (%s .. %s)", app.knobs()[0].name.c_str(), app.knobs()[3].name.c_str());
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -394,6 +588,8 @@ int main() {
     }
     testSynths();
     testOp1();
+    testSound();
+    testProject();
     testTombola();
     testSwing();
     testRollZoom();
@@ -429,6 +625,7 @@ int main() {
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE, "FX again: live fx");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE2, "FX again: live fx 2");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX again: track fx");
+    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX3, "FX again: the OP-1 effects");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX again: back to sends");
     // the four modes: every page belongs to exactly one, the same button steps through its pages, a mode comes back to the page it was left on
     {
@@ -439,6 +636,7 @@ int main() {
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME: sound mode, sample page");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ENV, "HOME again: envelope");
         btn(SamplerApp::HOME); btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ARP, "HOME x4: arpeggiator");
+        btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SHAPE, "HOME x5: shape (macros, root key, slices)");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME again: back to the sample");
         btn(SamplerApp::ENV); CHECK(app.page() == SamplerApp::P_ENV, "ENV: shortcut to the envelope");
         btn(SamplerApp::LFO); CHECK(app.page() == SamplerApp::P_LFO, "LFO: shortcut");

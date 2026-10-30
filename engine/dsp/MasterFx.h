@@ -14,6 +14,7 @@ struct FxParams {
     float tremolo = 0, wah = 0, ringmod = 0;
     float filter = 0.5f;                                                // DJ filter: below 0.5 low-pass sweeping down, above 0.5 high-pass sweeping up
     float crush = 0, tapeStop = 0;
+    float spring = 0, springDamp = 0.5f, phone = 0, punch = 0;   // OP-1 style: spring reverb (mix, damping), phone (telephone band + grit), punch (transients + saturation)
     int repeat = 0;    // 0 off, 1..4: 1/4, 1/8, 1/16, 1/32 of a beat... (note values: 1/4 = one beat)
     int reverse = 0;   // the same slices, played backwards
     int gate = 0;      // 0 off, 1..3: 1/8, 1/16, 1/32
@@ -36,7 +37,7 @@ public:
     bool active() const {
         return p_.chorus > 0.004f || p_.flanger > 0.004f || p_.phaser > 0.004f || p_.comp >= 0.01f || std::fabs(p_.width - 0.5f) >= 0.01f
             || p_.drive > 0.004f || eqOn() || p_.tremolo > 0.004f || p_.wah > 0.004f || p_.ringmod > 0.004f
-            || std::fabs(p_.filter - 0.5f) >= 0.02f || p_.crush >= 0.005f || p_.tapeStop > 0.02f
+            || std::fabs(p_.filter - 0.5f) >= 0.02f || p_.crush >= 0.005f || p_.tapeStop > 0.02f || p_.spring > 0.004f || p_.phone > 0.004f || p_.punch > 0.004f
             || p_.repeat > 0 || p_.reverse > 0 || p_.gate > 0 || p_.freeze > 0;
     }
     void feedOnly(const float* x, int n) {
@@ -53,6 +54,7 @@ public:
     // x: interleaved stereo, in place. beat0: the beat position at the first sample, beatsPerSample: the tempo.
     void process(float* x, int n, double beat0, double beatsPerSample) {
         drive(x, n);
+        punch(x, n);
         eq(x, n);
         chorus(x, n);
         flanger(x, n);
@@ -63,8 +65,10 @@ public:
         width(x, n);
         djFilter(x, n);
         crush(x, n);
+        phone(x, n);
         gate(x, n, beat0, beatsPerSample);
         slicer(x, n, beatsPerSample > 0 ? 1.0 / beatsPerSample : sr_ * 0.5);
+        spring(x, n);
         tapeStop(x, n);
         comp(x, n);
     }
@@ -75,6 +79,50 @@ private:
         if (p_.drive < 0.004f) return;
         const float g = 1.f + p_.drive * 14.f, makeup = 1.f / (1.f + (g - 1.f) * 0.22f), mix = std::min(1.f, p_.drive * 3.f);
         for (int i = 0; i < n * 2; i++) { const float d = x[i], w = std::tanh(d * g) * makeup * 1.6f; x[i] = d + (w - d) * mix; }
+    }
+    // ---- punch: the attack of every hit is pushed up (fast level against slow level), then a little saturation glues it ----
+    void punch(float* x, int n) {
+        if (p_.punch < 0.004f) return;
+        const float fa = std::exp(-1.f / (0.001f * sr_)), sa = std::exp(-1.f / (0.04f * sr_)), amt = p_.punch * 3.f, sat = 1.f + p_.punch * 2.5f, mk = 1.f / std::tanh(sat);
+        for (int i = 0; i < n; i++) {
+            const float lv = std::max(std::fabs(x[2 * i]), std::fabs(x[2 * i + 1]));
+            puF_ = lv > puF_ ? lv : fa * puF_ + (1.f - fa) * lv; puS_ = sa * puS_ + (1.f - sa) * lv;
+            const float boost = 1.f + amt * clampf((puF_ - puS_) / (puS_ + 0.02f), 0.f, 2.f) * 0.5f;
+            for (int c = 0; c < 2; c++) { const float v = x[2 * i + c] * boost; x[2 * i + c] = std::tanh(v * sat) * mk * 0.9f + v * 0.1f; }
+        }
+    }
+    // ---- phone: 400 Hz .. 3.4 kHz band, a few bits, a little hiss and clipping ----
+    void phone(float* x, int n) {
+        if (p_.phone < 0.004f) return;
+        const float a = 1.f - std::exp(-2.f * kPi * 400.f / sr_), b = 1.f - std::exp(-2.f * kPi * (4500.f - 1200.f * p_.phone) / sr_), mix = std::min(1.f, p_.phone * 2.f);
+        const int hold = 1 + (int)(p_.phone * 3.f); const float q = 1.f / (float)(1 << (int)(10 - p_.phone * 4.f));
+        for (int i = 0; i < n; i++) {
+            for (int c = 0; c < 2; c++) {
+                const float d = x[2 * i + c];
+                phHp_[c] += a * (d - phHp_[c]); float v = d - phHp_[c]; phHp2_[c] += a * (v - phHp2_[c]); v -= phHp2_[c];   // high-pass, two poles
+                phLp1_[c] += b * (v - phLp1_[c]); phLp2_[c] += b * (phLp1_[c] - phLp2_[c]); v = phLp2_[c] * 1.4f;   // low-pass, two poles
+                if (c == 0 && phCnt_ % hold == 0) phHold_[0] = std::round(v / q) * q; if (c == 1 && phCnt_ % hold == 0) phHold_[1] = std::round(v / q) * q;
+                phRng_ = phRng_ * 1664525u + 1013904223u; const float hiss = ((phRng_ >> 9) / 4194304.f - 1.f) * 0.004f * p_.phone;
+                const float w = std::tanh((phHold_[c] + hiss) * (1.f + p_.phone));
+                x[2 * i + c] = d + (w - d) * mix;
+            }
+            phCnt_++;
+        }
+    }
+    // ---- spring reverb: a chain of allpass filters smears the attack into the "boing", fed back through a short delay and a damping filter ----
+    void spring(float* x, int n) {
+        if (p_.spring < 0.004f) { if (spOn_) { spOn_ = false; std::fill(spD_.begin(), spD_.end(), 0.f); for (float& q : spZ_) q = 0.f; } return; }
+        spOn_ = true;
+        const float fb = 0.62f, damp = 0.25f + 0.7f * (1.f - p_.springDamp), mix = p_.spring * 0.8f, ap = 0.62f;
+        for (int i = 0; i < n; i++) {
+            const float in = 0.5f * (x[2 * i] + x[2 * i + 1]);
+            const size_t rp = (spW_ + kSpD - 1300) % kSpD;
+            float v = in + spD_[rp] * fb;
+            for (int k = 0; k < kSpAp; k++) { const float y = -ap * v + spZ_[(size_t)k]; spZ_[(size_t)k] = v + ap * y; v = y; }   // dispersion: the highs arrive before the lows
+            spLp_ += damp * (v - spLp_);
+            spD_[spW_] = spLp_; spW_ = (spW_ + 1) % kSpD;
+            x[2 * i] += spLp_ * 1.8f * mix; x[2 * i + 1] += spLp_ * 1.8f * mix;
+        }
     }
     // ---- three band EQ: low shelf 120 Hz, peak 1 kHz, high shelf 6 kHz ----
     struct Biquad {
@@ -324,4 +372,8 @@ private:
     std::vector<float> rep_; size_t repW_ = 0, repStart_ = 0, repLen_ = 0, repK_ = 0; bool repOn_ = false; int repMode_ = 0;
     std::vector<float> ts_; size_t tsW_ = 0; double tsPos_ = 0; float tsSpeed_ = 1.f; bool tsOn_ = false; int tsRel_ = 0;
     float cmpEnv_ = 0;
+    float puF_ = 0, puS_ = 0;                                                   // punch: fast and slow level
+    float phHp_[2] = {0, 0}, phHp2_[2] = {0, 0}, phLp1_[2] = {0, 0}, phLp2_[2] = {0, 0}, phHold_[2] = {0, 0}; int phCnt_ = 0; uint32_t phRng_ = 5;   // phone
+    static constexpr int kSpAp = 20; static constexpr size_t kSpD = 4096;       // spring: allpass stages, loop delay
+    std::vector<float> spD_ = std::vector<float>(kSpD, 0.f); float spZ_[kSpAp] = {}; size_t spW_ = 0; float spLp_ = 0; bool spOn_ = false;
 };

@@ -9,18 +9,39 @@ Sampler::Sampler(int engineRate) : sr_(engineRate) {
 }
 Sampler::~Sampler() = default;
 
+// the pitch of a sample as a MIDI note (autocorrelation of a mono window after the attack), 0 when it has none (drums, noise)
+float Sampler::detectPitch(const std::vector<float>& st, int frames, int sr) {
+    const int W = 2048;
+    if (frames < W * 3) return 0.f;
+    int best0 = frames / 20; float pkv = 0.f;   // the loudest stretch between 5 % and 60 % of the sample
+    for (int a = frames / 20; a + 2 * W < frames * 3 / 5; a += W / 2) { float e = 0.f; for (int i = 0; i < W; i += 4) e += std::fabs(st[2 * (size_t)(a + i)]); if (e > pkv) { pkv = e; best0 = a; } }
+    std::vector<float> x((size_t)W * 2); for (int i = 0; i < W * 2; i++) x[(size_t)i] = 0.5f * (st[2 * (size_t)(best0 + i)] + st[2 * (size_t)(best0 + i) + 1]);
+    const int lmin = std::max(8, sr / 2000), lmax = std::min(W, sr / 40);
+    std::vector<float> c((size_t)lmax + 2, 0.f); double e0 = 0; for (int i = 0; i < W; i++) e0 += (double)x[(size_t)i] * x[(size_t)i];
+    if (e0 < 1e-6) return 0.f;
+    for (int lag = lmin; lag <= lmax; lag++) { double s = 0, e1 = 0; for (int i = 0; i < W; i++) { s += (double)x[(size_t)i] * x[(size_t)(i + lag)]; e1 += (double)x[(size_t)(i + lag)] * x[(size_t)(i + lag)]; } c[(size_t)lag] = (float)(s / std::sqrt(e0 * e1 + 1e-12)); }
+    float top = 0.f; for (int lag = lmin; lag <= lmax; lag++) top = std::max(top, c[(size_t)lag]);
+    if (top < 0.8f) return 0.f;
+    int lagBest = 0;   // the first strong peak (not a multiple of the period)
+    for (int lag = lmin + 1; lag < lmax; lag++) if (c[(size_t)lag] > top * 0.92f && c[(size_t)lag] >= c[(size_t)lag - 1] && c[(size_t)lag] >= c[(size_t)lag + 1]) { lagBest = lag; break; }
+    if (lagBest == 0) return 0.f;
+    const float y0 = c[(size_t)lagBest - 1], y1 = c[(size_t)lagBest], y2 = c[(size_t)lagBest + 1], d = y0 - 2 * y1 + y2;
+    const float lag = (float)lagBest + (std::fabs(d) > 1e-9f ? 0.5f * (y0 - y2) / d : 0.f);
+    return 69.f + 12.f * std::log2((float)sr / lag / 440.f);
+}
+
 bool Sampler::loadSynth(int idx) {
     if (idx < 0 || idx >= kSynthCount) return false;
     const SynthPatch& p = kSynths[idx];
     // loudness: play the patch once and bring its peak to a sample-like level; the same render gives the overview
-    SynthVoice sv; Adsr env; env.set(p.a, p.d, p.s, p.r, (float)sr_); env.gateOn();
+    SynthVoice sv; Adsr env; env.set(p.a, p.d, p.s, p.r, (float)sr_); env.gateOn(); const SynthMacros none;
     const int total = sr_ * 12 / 10, hold = sr_ * 8 / 10;
     std::vector<float> mono((size_t)total);
     float pk = 1e-4f;
-    sv.start(p, 60, 1.f, (float)sr_, 1);
+    sv.start(p, 60, 1.f, (float)sr_, 1, none);
     for (int i = 0; i < total; i++) {
         if (i == hold) env.gateOff();
-        float l, r; sv.next(0.f, l, r); const float e = env.next();
+        float l, r; sv.next(0.f, none, l, r); const float e = env.next();
         mono[(size_t)i] = 0.5f * (l + r) * e; pk = std::max(pk, std::fabs(mono[(size_t)i]));
     }
     synthNorm_ = clampf(0.9f / pk, 0.05f, 8.f);
@@ -46,6 +67,7 @@ bool Sampler::load(const std::string& path) {
         peaks_[(size_t)b] = m;
     }
     slices_ = findSlices(buf->d, buf->frames, buf->sr, 16);
+    rootGuess_ = detectPitch(buf->d, buf->frames, buf->sr);
     const size_t slash = path.find_last_of("/\\"), dot = path.rfind('.');
     label_ = path.substr(slash == std::string::npos ? 0 : slash + 1);
     if (dot != std::string::npos && dot > (slash == std::string::npos ? 0 : slash)) label_ = label_.substr(0, label_.rfind('.'));
@@ -95,8 +117,10 @@ void Sampler::noteOn(int note, int vel) {
     v.on = true; v.gate = true; v.note = note; v.vel = clampf(vel / 127.f, 0.f, 1.f); v.born = ++bornCounter_;
     v.slice = ((note - 60) % 16 + 16) % 16;
     if (synth_ >= 0) {
-        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_);
-        v.env.set(atk_, dec_, sus_, rel_, (float)sr_); v.env.gateOn();
+        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_, mac_);
+        v.env.set(atk_, dec_, sus_, rel_, (float)sr_);
+        if (kSynths[synth_].engine == 3) v.env.set(0.001f, 0.01f, 1.f, 0.02f, (float)sr_);   // a drum hit plays itself out
+        v.env.gateOn();
         return;
     }
     resolveWindow(v, v.buf, v.ws, v.we);
@@ -113,6 +137,7 @@ void Sampler::fadeOut(Voice& v) {
 }
 void Sampler::noteOff(int note) {
     if (mode_ == ONESHOT && synth_ < 0) return;   // always plays out
+    if (synth_ >= 0 && kSynths[synth_].engine == 3) return;   // so does a drum hit
     for (auto& v : voices_) if (v.on && v.gate && v.note == note) { v.gate = false; v.env.gateOff(); }
 }
 void Sampler::allOff() { for (auto& v : voices_) v = Voice(); }
@@ -135,7 +160,8 @@ void Sampler::renderSynth(Voice& v, SynthVoice& sv, float* out, int n) {
     for (int i = 0; i < n; i++) {
         const float e = v.env.next();
         if (v.env.done() && !v.gate) { v.on = false; return; }
-        float l, r; sv.next(bend_, l, r);
+        float l, r; sv.next(bend_, mac_, l, r);
+        if (sv.finished()) { v.on = false; return; }
         out[2 * i] += l * e * gain; out[2 * i + 1] += r * e * gain;
     }
 }
@@ -150,7 +176,7 @@ void Sampler::render(float* out, int n) {
 void Sampler::renderVoice(Voice& v, float* out, int n) {
     const float* d = v.buf->d.data(); const int frames = v.buf->frames;
     const double srcRate = (double)v.buf->sr / sr_;
-    const double pitch = mode_ == KIT ? 1.0 : std::pow(2.0, (v.note - 60 + bend_) / 12.0);
+    const double pitch = mode_ == KIT ? 1.0 : std::pow(2.0, (v.note - root_ + bend_) / 12.0);
     const double rate = srcRate * pitch;
     auto readAt = [&](double p, float& l, float& r) {
         const int i0 = std::min(frames - 2, std::max(0, (int)p)); const float f = (float)(p - i0);

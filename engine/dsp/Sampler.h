@@ -30,6 +30,11 @@ public:
     // worker thread: reads a WAV, normalises it, finds the slices and the overview peaks
     bool load(const std::string& path);   // a WAV, or "synth:N" for built-in synth patch N
     bool isSynth() const { return synth_ >= 0; }
+    float rootGuess() const { return rootGuess_; }   // pitch of the sample as a MIDI note (0 = not pitched)
+    void setRoot(int midi) { root_ = std::min(108, std::max(12, midi)); }   // the key that plays the sample at its own pitch (60 = C4, how the library is tuned)
+    const std::vector<int>& slices() const { return slices_; }
+    void setSlices(std::vector<int> s) { if (s.size() >= 2) slices_ = std::move(s); }
+    void setSynthMacros(const SynthMacros& m) { mac_ = m; }   // TONE, BODY, MOTION, GRIT of a built-in synth
     const std::string& label() const { return label_; }
     const std::vector<float>& peaks() const { return peaks_; }   // 512 bins, 0..1
     std::shared_ptr<const SampleBuf> original() const { return orig_; }
@@ -70,6 +75,8 @@ private:
     Voice voices_[kVoices]; std::vector<std::unique_ptr<PaulStream>> paul_; bool paulBusy_[kVoices] = {};
     uint32_t bornCounter_ = 0, rng_ = 7;
     bool loadSynth(int idx);
+    static float detectPitch(const std::vector<float>& st, int frames, int sr);
     void renderSynth(Voice& v, SynthVoice& sv, float* out, int n);
-    int synth_ = -1; float synthNorm_ = 1.f; SynthVoice sv_[kVoices];
+    int root_ = 60; float rootGuess_ = 0.f;
+    SynthMacros mac_; int synth_ = -1; float synthNorm_ = 1.f; SynthVoice sv_[kVoices];
 };
