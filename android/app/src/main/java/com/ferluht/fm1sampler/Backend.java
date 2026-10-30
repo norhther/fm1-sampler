@@ -41,9 +41,12 @@ public class Backend {
 
     Backend(Context c) {
         ctx = c;
-        java.io.File samples = new java.io.File(c.getFilesDir(), "samples");   // the bundled sample library, copied out once: the engine reads plain files
-        if (!new java.io.File(samples, ".v1").exists()) {
-            try { copyAssets(c, "samples", samples); new java.io.File(samples, ".v1").createNewFile(); } catch (java.io.IOException e) { android.util.Log.w("fm1sampler", "samples: " + e); }
+        java.io.File samples = new java.io.File(c.getFilesDir(), "samples");   // the bundled sample library, copied out again after every update: the engine reads plain files
+        int version = 0;
+        try { version = c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionCode; } catch (Exception e) { android.util.Log.w("fm1sampler", "version: " + e); }
+        java.io.File marker = new java.io.File(samples, ".version");
+        if (!marker.exists() || !readText(marker).equals(String.valueOf(version))) {   // first start, or an update that may bring new instruments
+            try { copyAssets(c, "samples", samples); try (java.io.FileWriter w = new java.io.FileWriter(marker)) { w.write(String.valueOf(version)); } } catch (java.io.IOException e) { android.util.Log.w("fm1sampler", "samples: " + e); }
         }
         engine = Native.create(c.getFilesDir().getAbsolutePath(), samples.getAbsolutePath());
         midi = (MidiManager) c.getSystemService(Context.MIDI_SERVICE);
@@ -151,6 +154,9 @@ public class Backend {
         }
     }
 
+    static String readText(java.io.File f) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f))) { String l = r.readLine(); return l == null ? "" : l.trim(); } catch (java.io.IOException e) { return ""; }
+    }
     static void copyAssets(Context c, String from, java.io.File to) throws java.io.IOException {
         String[] list = c.getAssets().list(from);
         if (list == null || list.length == 0) {   // a file
