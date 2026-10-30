@@ -9,6 +9,14 @@ android {
     externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
     ndkVersion '27.2.12479018'
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    // the sample library lives once, in <repo>/samples (the desktop tools read it there): it is copied into the assets of the APK at build time
+    sourceSets { main { assets.srcDirs = ['src/main/assets', "$buildDir/generated/samples"] } }
 }
+
+def copySamples = tasks.register('copySamples', Copy) {
+    from("${rootDir}/../samples") { into 'samples' }
+    into "$buildDir/generated/samples"
+}
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') }.configureEach { dependsOn(copySamples) }
 
 dependencies { implementation 'com.google.oboe:oboe:1.9.0' }

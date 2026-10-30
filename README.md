@@ -72,7 +72,7 @@ On the phone the same four modes are the buttons above the page tabs.
 - Tests of the added features: `make $PWD/engine/build/test_features` (run from `engine/`), then `engine/build/test_features`.
 
 ## Sample sources
-- **Bundled library** (`samples/`, packed into the APK assets, copied to `files/samples` once): Bass, Drums (loaded as KIT), Keys, Pads.
+- **Bundled library** (`samples/`, packed into the APK assets by Gradle, copied to `files/samples` on the first start and again after every update): Bass, Drums (loaded as KIT), Keys, Leads, Pads. 47 sounds. 30 of them are synthesized by `tools/gen_instruments.py` (numpy / scipy, deterministic, no recordings): Keys: E-Piano, Wurly, Organ, Marimba, Music Box, Bell, Harpsichord, Clav, Vibraphone. Bass: 808 Sub, Saw Bass, Square Bass, Pluck Bass, Reese, Funk Bass. Pads: Strings, Choir, Warm Pad, Glass Pad, Brass Pad, Dark Pad. Leads: Square Lead, Saw Lead, Chip, Flute, Pluck Lead, Sync Lead. Drums: 808 Kit, Electro Kit, Lo-Fi Kit (16 hits each, one per pad). Melodic samples are tuned to C4 (basses to C2): they play at their own pitch on MIDI note 60. Run `python3 tools/gen_instruments.py` to rebuild them.
 - **Microphone**: phone button "RECORD FROM MIC" or LOOP page K1. Waits for sound above the trigger level, trims and normalises, saves `sample_<ms>.wav` in the data dir, loads it on the track it was started on.
 - **Disk**: phone button "LOAD FILE FROM DISK" -> system picker -> `AudioImport.java` converts to a 16-bit WAV (`sample_<name>.wav` in `files/`): WAV 8/16/24/32/float directly, anything else through MediaCodec (mp3, aac, ogg, flac). Max 90 s.
 - **Saved loops** and the two above all live in the "User" group of the library (`sample_*.wav` in the data dir).
