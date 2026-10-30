@@ -2,6 +2,9 @@
 #include <Session.h>
 #include <SamplerApp.h>
 #include <MasterFx.h>
+#include <Sampler.h>
+#include <Paul.h>
+#include <Wav.h>
 #include <Sequencer.h>
 #include <cmath>
 #include <thread>
@@ -107,8 +110,42 @@ static void testFx2() {
       p.reverse = 1; fx.set(p); std::vector<float> o(2 * 24000, 0.f); for (int i = 0; i < 24000; i += 256) fx.process(o.data() + 2 * i, std::min(256, 24000 - i), 0, 1.0 / 24000);
       CHECK(finite(o) && o[2 * 2000] > 0.35f && o[2 * 20000] < 0.15f, "reverse plays the last beat backwards (%.2f at the start of the slice, %.2f near its end)", o[2 * 2000], o[2 * 20000]); }
 }
+// PAUL (Paulstretch) with several notes: the FFT work of the voices must not pile up in one block, and a voice that is pushed out must fade
+static void testPaul() {
+    const int sr = 44100, block = 256;
+    const std::string dir = std::string(getenv("HOME")) + "/fm1-sampler/samples/Keys/Tape Key.wav";
+    {   // a chord of four starts in one block: the hops of the voices are spread over the following blocks
+        Sampler s(sr); s.load(dir); s.setMode(Sampler::PAUL); s.setEnv(0.01f, 0.3f, 0.8f, 0.3f);
+        for (int n : {60, 64, 67, 71}) s.noteOn(n, 100);
+        std::vector<float> out(2 * block); unsigned long maxPerBlock = 0, maxSteady = 0, total = 0; double ss = 0; size_t cnt = 0;
+        for (int b = 0; b < 8 * sr / block; b++) {
+            std::fill(out.begin(), out.end(), 0.f);
+            const unsigned long before = PaulStream::stagesDone(); s.render(out.data(), block); const unsigned long d = PaulStream::stagesDone() - before;
+            maxPerBlock = std::max(maxPerBlock, d); if (b > 24) maxSteady = std::max(maxSteady, d); total += d;
+            if (b > 40) { for (float v : out) ss += v * v; cnt += out.size(); }
+        }
+        CHECK(maxSteady <= 2, "chord of 4 in PAUL: at most %lu half hops in any block once running (before: 8 at once)", maxSteady);
+        CHECK(maxPerBlock <= 4, "...and at most %lu while the voices start", maxPerBlock);
+        CHECK(std::sqrt(ss / cnt) > 0.1, "...and the chord sounds (rms %.3f)", std::sqrt(ss / cnt));
+    }
+    {   // a sine as the sample: a voice that is cut shows as a jump, a faded one does not
+        const std::string path = std::string(getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp") + "/fm1_sine_test.wav";
+        std::vector<float> w((size_t)2 * sr * 3); for (int i = 0; i < sr * 3; i++) w[2 * i] = w[2 * i + 1] = 0.8f * std::sin(2 * M_PI * 220.0 * i / sr);
+        writeWav16(path, w, sr);
+        Sampler s(sr); s.load(path); s.setMode(Sampler::MELODIC); s.setEnv(0.002f, 0.3f, 1.f, 0.3f);
+        std::vector<float> out(2 * block), all; int note = 60;
+        for (int i = 0; i < 8; i++) s.noteOn(note++, 100);   // eight voices: the limit
+        for (int ev = 0; ev < 24; ev++) {
+            for (int b = 0; b < 12; b++) { std::fill(out.begin(), out.end(), 0.f); s.render(out.data(), block); all.insert(all.end(), out.begin(), out.end()); }
+            s.noteOn(note, 100); note = 60 + (note - 59) % 12;   // the ninth note and then every next one takes the oldest voice's place
+        }
+        float m2 = 0; for (size_t i = 1; i + 1 < all.size() / 2; i++) m2 = std::max(m2, std::fabs(all[2 * (i + 1)] - 2 * all[2 * i] + all[2 * (i - 1)]));   // a cut is a corner: a big second difference
+        CHECK(m2 < 0.05f, "stolen voices fade instead of being cut: the largest second difference is %.3f (a cut voice gave 0.57)", m2);
+    }
+}
 int main() {
     Denormals::enableOnThisThread();
+    testPaul();
     testGrid();
     testFx();
     testFx2();

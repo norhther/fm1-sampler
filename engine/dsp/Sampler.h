@@ -21,7 +21,7 @@ struct SampleBuf {
 class Sampler {
 public:
     enum Mode { MELODIC, ONESHOT, LOOPED, KIT, GRAIN, PAUL, kModes };
-    static constexpr int kVoices = 8;
+    static constexpr int kVoices = 10;   // 8 sounding (4 in PAUL mode) + room for the voices that are fading out because a new note took their place
 
     Sampler(int engineRate);
     ~Sampler();
@@ -48,7 +48,7 @@ public:
 private:
     struct Grain { bool on = false; double pos = 0, inc = 0; int age = 0, len = 1; };
     struct Voice {
-        bool on = false, gate = false; int note = 0, slice = 0; float vel = 1.f; uint32_t born = 0;
+        bool on = false, gate = false, fading = false, paulReady = false; int note = 0, slice = 0; float vel = 1.f; uint32_t born = 0;
         double pos = 0, rate = 1.0, ws = 0, we = 0;   // window of the played buffer, frames
         const SampleBuf* buf = nullptr;
         Adsr env; Grain grain[12]; double spawn = 0; int paulIdx = -1;
@@ -56,6 +56,8 @@ private:
     void resolveWindow(Voice& v, const SampleBuf*& buf, double& ws, double& we) const;
     float orginalPosOf(const Voice& v) const;
     void renderVoice(Voice& v, float* out, int n);
+    void pumpPaul();   // tops up the Paulstretch streams: a little work per block, never all voices at once
+    void fadeOut(Voice& v);
     float rnd() { rng_ = rng_ * 1664525u + 1013904223u; return (rng_ >> 8) / 16777216.f; }
 
     int sr_;
