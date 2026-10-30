@@ -36,8 +36,7 @@ int main(int argc, char** argv) {
         for (auto& o : ui.ops()) { fprintf(f, "%s[%d,%g,%g,%g,%g,%g,%g,%u,\"%s\"]", first ? "" : ",", (int)o.type, o.f[0], o.f[1], o.f[2], o.f[3], o.f[4], o.f[5], o.color, esc(o.text).c_str()); first = false; }
         fprintf(f, "]}");
     };
-    const float rx = W - 252, tw = (252 - 8 - 16) / 5.f;
-    auto tab = [&](int i) { tapAt(rx + (i % 5) * (tw + 4) + tw / 2, 44 + 8 + (i / 5) * 32 + 14); };
+    auto tab = [&](int i) { app.gotoPage((SamplerApp::Page)i); run(0.05); };   // Page order == the old tab order
     ui.frame(now); dump("sample");
     tab(1); ui.frame(now); dump("fx");
     tab(2); ui.frame(now); dump("env");

@@ -101,8 +101,31 @@ int main() {
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE, "FX again: live fx");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX again: track fx");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX again: back to sends");
-    btn(SamplerApp::ARP); btn(SamplerApp::ARP); CHECK(app.page() == SamplerApp::P_SQ, "ARP twice: sequencer");
-    btn(SamplerApp::GLO); btn(SamplerApp::GLO); CHECK(app.page() == SamplerApp::P_TEMPO, "GLO twice: tempo");
+    // the four modes: every page belongs to exactly one, the same button steps through its pages, a mode comes back to the page it was left on
+    {
+        int seen[SamplerApp::kPages] = {};
+        for (int m = 0; m < SamplerApp::kModes; m++) for (int i = 0; i < 4; i++) { const auto pg = SamplerApp::modePages(m)[i]; seen[pg]++; if (SamplerApp::modeOf(pg) != m || SamplerApp::pageSlot(pg) != i) seen[0] += 100; }
+        bool once = true; for (int i = 0; i < SamplerApp::kPages; i++) once &= seen[i] == 1;
+        CHECK(once, "every page is in exactly one mode, in one slot");
+        btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME: sound mode, sample page");
+        btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ENV, "HOME again: envelope");
+        btn(SamplerApp::HOME); btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ARP, "HOME x4: arpeggiator");
+        btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME again: back to the sample");
+        btn(SamplerApp::ENV); CHECK(app.page() == SamplerApp::P_ENV, "ENV: shortcut to the envelope");
+        btn(SamplerApp::LFO); CHECK(app.page() == SamplerApp::P_LFO, "LFO: shortcut");
+        btn(SamplerApp::ARP); CHECK(app.page() == SamplerApp::P_ARP, "ARP: shortcut");
+        btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_MIX, "EDIT: mix mode, mixer");
+        btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_KEY, "EDIT again: key");
+        btn(SamplerApp::HOME); btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_KEY, "mix mode returns to the page it was left on");
+        btn(SamplerApp::GLO); CHECK(app.page() == SamplerApp::P_KEY, "GLO: shortcut to the key");
+        btn(SamplerApp::SEL); CHECK(app.page() == SamplerApp::P_LEN, "SEL: shortcut to the length");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ tap: sequencer mode, pattern page");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SEQ, "SEQ again: tape");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TEMPO, "SEQ again: tempo");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ again: back to the pattern");
+        app.gotoPage(SamplerApp::P_FX);
+    }
     // scales
     {
         bool ok = true;
@@ -163,7 +186,7 @@ int main() {
         if (app.status().playing) { btn(SamplerApp::PLAY); run(0.2); }
         app.gotoPage(SamplerApp::P_SQ);
         { auto k = app.knobs(); k[1].set(0.f); }   // 1 bar = 2 s
-        { auto k = app.knobs(); k[0].set(2.f / 3); }   // REC
+        { auto k = app.knobs(); k[0].set(1.f); }   // REC
         run(0.01);
         run(0.5);  app.playNote(60, true); run(0.2); app.playNote(60, false);          // beat 1 -> tick 192
         run(0.8);  app.playNote(64, true); run(0.2); app.playNote(64, false);          // beat 3 + a bit
@@ -197,7 +220,7 @@ int main() {
         quiet();
         if (app.status().playing) { btn(SamplerApp::PLAY); run(0.2); }
         app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(1.f / 7.f); k[1].set(0.f); k[2].set(0.f); }   // 1/4, playback quantize OFF
-        app.gotoPage(SamplerApp::P_SQ); { auto k = app.knobs(); k[1].set(0.f); k[0].set(2.f / 3); }                          // 1 bar, REC from a stopped transport
+        app.gotoPage(SamplerApp::P_SQ); { auto k = app.knobs(); k[1].set(0.f); k[0].set(1.f); }                          // 1 bar, REC from a stopped transport
         run(0.01);
         run(0.79); size_t mark = all.size(); app.playNote(60, true); run(0.12); size_t early = all.size(); run(0.28); app.playNote(60, false);   // 0.8 s: closer to beat 2 (1.0 s)
         const double rEarly = rms(all, mark, early), rLate = rms(all, early + (size_t)sr * 2 / 10, all.size());
@@ -225,7 +248,7 @@ int main() {
         CHECK(!app.loopExists(), "loop cleared again");
         // count-in before a sequencer recording
         if (app.status().playing) { btn(SamplerApp::PLAY); run(0.2); }
-        app.gotoPage(SamplerApp::P_SQ); { auto k = app.knobs(); k[0].set(2.f / 3); } run(0.4);
+        app.gotoPage(SamplerApp::P_SQ); { auto k = app.knobs(); k[0].set(1.f); } run(0.4);
         CHECK(!app.status().playing && app.status().countBeats > 0, "sequencer REC counts in first (%d beats left)", app.status().countBeats);
         run(1.5);
         CHECK(app.status().playing && app.status().countBeats == 0, "...then the transport starts");
@@ -244,46 +267,49 @@ int main() {
         { auto k = app.knobs(); k[1].set(0.f); k[2].set(0.f); k[3].set(0.f); }
         CHECK(other > 0.003, "the other tracks are untouched (%.4f)", other);
         app.gotoPage(SamplerApp::P_FX); btn(SamplerApp::FX); btn(SamplerApp::FX); btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX x3 from the sends: track fx");
-        btn(SamplerApp::GLO); btn(SamplerApp::GLO); btn(SamplerApp::GLO); app.gotoPage(SamplerApp::P_KEY); btn(SamplerApp::GLO); btn(SamplerApp::GLO); CHECK(app.page() == SamplerApp::P_TIMING, "GLO x2 from the key: timing");
+        app.gotoPage(SamplerApp::P_SQ); btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX returns to the page it was left on");
     }
     // ---- sequencer v2: overdub with undo, step entry, erase, touch, bounce to tape ----
     {
         auto quiet = [&] { run(4.0); };
         auto stop = [&] { if (app.status().playing) { btn(SamplerApp::PLAY); run(0.2); } };
-        auto saveTap = [&] { const uint8_t d[3] = {0x91, (uint8_t)SamplerApp::SAVE, 100}, u[3] = {0x81, (uint8_t)SamplerApp::SAVE, 100}; app.onMidi(d, 3); run(0.1); app.onMidi(u, 3); run(0.2); };
-        auto saveHold = [&] { const uint8_t d[3] = {0x91, (uint8_t)SamplerApp::SAVE, 100}, u[3] = {0x81, (uint8_t)SamplerApp::SAVE, 100}; app.onMidi(d, 3); run(0.9); app.onMidi(u, 3); run(0.3); };
         stop(); quiet(); app.selectTrack(0); app.seqClear(); run(0.3);
         app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(0.f); k[1].set(0.f); k[2].set(0.f); }
         app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); k[1].set(0.f); k[3].set(0.f); } run(0.2);
         app.gotoPage(SamplerApp::P_SQ); { auto k = app.knobs(); k[0].set(1.f / 3); k[1].set(0.f); }   // PLAY, 1 bar
-        // REC on the sequencer page is the pattern overdub; the page stays where it is
-        btn(SamplerApp::REC); run(0.3);
-        CHECK(app.page() == SamplerApp::P_SQ && app.status().seqState[0] == 2 && app.status().playing && !app.status().freeArmed, "REC on the sequencer page records the pattern (state %d, tape not armed)", app.status().seqState[0]);
+        // SEQ held = record the pattern while keys are played; let go and it loops
+        auto seqDown = [&] { const uint8_t m[3] = {0x91, (uint8_t)SamplerApp::SEQ, 100}; app.onMidi(m, 3); };
+        auto seqUp = [&] { const uint8_t m[3] = {0x81, (uint8_t)SamplerApp::SEQ, 100}; app.onMidi(m, 3); };
+        app.gotoPage(SamplerApp::P_HOME);
+        seqDown(); run(0.1); seqUp(); run(0.1);
+        CHECK(app.page() == SamplerApp::P_SQ && app.status().seqState[0] == 1, "a short SEQ press only changes the page");
+        seqDown(); run(0.5);
+        CHECK(app.page() == SamplerApp::P_SQ && app.status().seqState[0] == 2 && app.status().playing && !app.status().freeArmed, "SEQ held: the pattern records, the tape is not armed (state %d)", app.status().seqState[0]);
         app.playNote(60, true); run(0.2); app.playNote(60, false);
-        run(1.6); btn(SamplerApp::REC); run(0.2);
-        CHECK(app.status().seqState[0] == 1 && app.status().seqCount[0] == 1, "REC again ends the pass, the pattern keeps playing (%d note)", app.status().seqCount[0]);
-        btn(SamplerApp::REC); run(0.3);
+        run(1.2); seqUp(); run(0.3);
+        CHECK(app.status().seqState[0] == 1 && app.status().seqCount[0] == 1, "let go: the pattern plays on (%d note)", app.status().seqCount[0]);
+        seqDown(); run(0.5);
         app.playNote(64, true); run(0.2); app.playNote(64, false);
-        run(1.6); btn(SamplerApp::REC); run(0.2);
+        run(1.2); seqUp(); run(0.3);
         { Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax);
-          CHECK(n == 2 && v[0].layer != v[1].layer, "a second pass overdubs on top: %d notes, layers %d and %d", n, n > 0 ? v[0].layer : -1, n > 1 ? v[1].layer : -1); }
-        saveTap();
-        { Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax); CHECK(n == 1 && v[0].note == 60, "SAVE tap undoes the last pass only (%d note left)", n); }
-        saveHold(); CHECK(app.status().seqCount[0] == 0, "SAVE held clears the pattern");
+          CHECK(n == 2 && v[0].layer != v[1].layer, "holding SEQ again overdubs on top: %d notes, layers %d and %d", n, n > 0 ? v[0].layer : -1, n > 1 ? v[1].layer : -1); }
+        app.seqUndo(); run(0.2);
+        { Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax); CHECK(n == 1 && v[0].note == 60, "undo (engine) takes the newest pass away (%d note left)", n); }
+        { auto k = app.knobs(); k[3].step(1); } run(0.2); CHECK(app.status().seqCount[0] == 0, "K4 clears the pattern");
         stop();
         // step entry: keys write at the cursor, a rest, erase, a chord is one step
-        { auto k = app.knobs(); k[0].set(1.f); } run(0.2);
-        CHECK(app.status().seqState[0] == 3, "STEP mode");
+        app.setSeqState(3); run(0.2);
+        CHECK(app.status().seqState[0] == 3, "STEP mode (engine)");
         app.playNote(60, true); run(0.1); app.playNote(60, false); run(0.2);
         app.playNote(64, true); run(0.1); app.playNote(64, false); run(0.2);
-        btn(SamplerApp::REC); run(0.2);   // rest
+        s.seqRest(0); run(0.2);   // rest
         app.playNote(67, true); app.playNote(71, true); run(0.1); app.playNote(67, false); run(0.05); app.playNote(71, false); run(0.3);
         { Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax);
           CHECK(n == 4 && v[0].tick == 0 && v[1].tick == 48 && v[2].tick == 144 && v[3].tick == 144, "step entry: ticks %d %d %d %d (expect 0 48 144 144, the rest skipped one step, the chord shares one)", n > 0 ? v[0].tick : -1, n > 1 ? v[1].tick : -1, n > 2 ? v[2].tick : -1, n > 3 ? v[3].tick : -1); }
         CHECK(app.status().seqCursor[0] == 192, "the cursor sits after the chord (%d)", app.status().seqCursor[0]);
-        enc(6, -1); run(0.2); app.playNote(67, true); run(0.1); app.playNote(67, false); run(0.3);
+        s.seqCursorMove(0, -1); run(0.2); app.playNote(67, true); run(0.1); app.playNote(67, false); run(0.3);
         CHECK(app.status().seqCount[0] == 3, "the same key on the same step erases it (%d notes)", app.status().seqCount[0]);
-        saveTap(); CHECK(app.status().seqCount[0] == 3 || app.status().seqCount[0] == 2, "undo in step mode takes a step back (%d notes)", app.status().seqCount[0]);
+        app.seqUndo(); run(0.2); CHECK(app.status().seqCount[0] == 3 || app.status().seqCount[0] == 2, "undo in step mode takes a step back (%d notes)", app.status().seqCount[0]);
         // touch edit: the roll adds a note under the finger and removes it again
         { const int before = app.status().seqCount[0]; app.seqToggleAt(240, 72); run(0.2); const int added = app.status().seqCount[0]; app.seqToggleAt(240, 72); run(0.2);
           CHECK(added == before + 1 && app.status().seqCount[0] == before, "touch: tap adds (%d -> %d), tap again removes (%d)", before, added, app.status().seqCount[0]); }
@@ -293,7 +319,7 @@ int main() {
         app.seqToggleAt(0, 60); app.seqToggleAt(96, 64); app.seqToggleAt(384, 67); app.seqToggleAt(576, 72); run(0.2);
         CHECK(!app.loopExists(), "no loop before the bounce");
         const int done0 = app.status().bounceDone; size_t m = all.size();
-        app.seqBounce(); run(0.4);
+        btn(SamplerApp::REC); run(0.4);   // REC with a playing pattern: the pattern goes on the tape
         CHECK(app.status().bounce == 2 && app.status().playing, "bouncing: recording the pattern to the tape");
         run(2.2);
         CHECK(app.status().bounceDone == done0 + 1 && app.status().bounce == 0, "the bounce ended by itself");
@@ -303,7 +329,7 @@ int main() {
         CHECK(rms(all, m, all.size()) > 0.003 && finite(all), "the tape plays the pattern back (rms %.4f)", rms(all, m, all.size()));
         // bounce again on top of the loop: it waits for the loop start and records one more cycle
         { auto k = app.knobs(); k[0].set(1.f / 3); } run(0.2);
-        const int done1 = app.status().bounceDone; app.seqBounce(); run(0.3);
+        const int done1 = app.status().bounceDone; btn(SamplerApp::REC); run(0.3);
         CHECK(app.status().bounce >= 1, "second bounce waits for the loop start (%d)", app.status().bounce);
         run(5.0);
         CHECK(app.status().bounceDone == done1 + 1 && app.status().bounce == 0 && std::fabs(app.status().loopSamples - 2.0 * sr) < 2, "...and ends after one cycle without changing the loop");

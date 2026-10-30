@@ -43,7 +43,14 @@ public:
     // ---- state for the phone UI (all of it can also be edited from there) ----
     Page page() const { return page_; }
     void gotoPage(Page p);
+    void gotoMode(int m) { gotoPage(lastPage_[m & 3]); }   // the page the mode was left on
     static const char* pageName(Page p);
+    // OP-1 style: four modes on the buttons HOME, FX, SEQ, EDIT, each with up to four pages (the same button steps through them, dots on the screen show where you are)
+    static constexpr int kModes = 4;
+    static const char* modeName(int mode);        // SOUND, FX, SEQ, MIX
+    static const Page* modePages(int mode);       // the 4 pages of a mode
+    static int modeOf(Page p);
+    static int pageSlot(Page p);                  // index of a page inside its mode
     int track() const { return track_; }
     void selectTrack(int t);
     Knobs knobs();
@@ -63,10 +70,9 @@ public:
     void transportPlay();
     void loopRecord();                            // REC: arm / end the first take, or toggle overdub once a loop exists
     // sequencer (also used by the phone's piano roll)
-    void seqRecToggle();                          // REC on the sequencer page: pattern overdub on / off (in step mode: a rest)
     void seqUndo() { s_.seqUndo(track_); say("UNDO"); }
     void seqClear() { s_.seqClear(track_); say("PATTERN CLEARED"); }
-    void seqBounce();                             // pattern -> tape for one loop cycle
+    void seqBounce();                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
     void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
     void seqToggleAt(int tick, int note);         // touch: add / remove a note (length = one step)
     int stepTicks() const { const int g = gridTicks(seqGrid_); return g ? g : kPpq / 4; }
@@ -150,7 +156,7 @@ private:
     int loopSrc_ = 1;
     // master fx (FX 2, LIVE FX), tempo page, sequencer grid
     float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
-    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 0, liveGrid_ = 0, countIn_ = 0;
+    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 4, liveGrid_ = 0, countIn_ = 0;   // the pattern plays on a 1/16 grid unless told otherwise
     float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;
     float exciter_ = 0.f, lofi_ = 0.f, wobble_ = 0.f, loopSpeed_ = 2.f / 3.f, micThr_ = 0.452f;   // loop speed is global
     uint32_t repaintAt_ = 0; int repaintCount_ = 0;
@@ -163,7 +169,10 @@ private:
     Session::Status st_{};
     bool loopAny_ = false;
     int mic_ = 0, micTrack_ = 0;
-    uint32_t saveDownAt_ = 0; bool saveHeld_ = false, saveHoldDone_ = false, saveSeq_ = false;   // saveSeq_: SAVE was pressed on the sequencer page (undo / clear)
+    uint32_t saveDownAt_ = 0; bool saveHeld_ = false, saveHoldDone_ = false;
+    Page lastPage_[kModes] = {P_HOME, P_FX, P_SQ, P_MIX};   // each mode comes back to the page it was left on
+    uint32_t seqDownAt_ = 0; bool seqHeld_ = false, seqRecStarted_ = false;   // SEQ held = record the pattern while the keys are played
+    void modeButton(int mode);
     int seqSeen_[kTracks] = {}, lastBounceDone_ = 0;
     int lastSampleVersion_ = 0, lastSampleFails_ = 0;
     uint32_t commitAt_ = 0; int commitTrack_ = -1;

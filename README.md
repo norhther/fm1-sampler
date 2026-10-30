@@ -16,30 +16,51 @@ Phone app (sample with voice positions and the whole-loop lane, voices, LOOP pag
 ## Downloads
 APK and the flash page of the matching firmware are attached to the [releases](../../releases) of this repository. Flash the firmware first (SEL = loop length page needs it), then install the APK.
 
-## FM-1 controls
+## Quick start (OP-1 style)
+The tape is the song, the sequencer only makes notes, the four knobs K1..K4 always control the page you are on.
+1. **Pick a sound**: turn PRESETS to browse (it plays after you stop turning), SELECT picks the track (1..8).
+2. **Play and record to tape**: REC, play keys, REC again. The first take sets the loop length and tempo. REC again to overdub, REC to stop.
+3. **Make a pattern**: **hold SEQ and play keys** while it plays. Let go and it loops. Hold again to add more notes (overdub). K4 on the pattern page clears it.
+4. **Put the pattern on tape**: with a pattern playing, **REC** records one pass of it onto the tape (the pattern is muted afterwards, the tape plays it). Move to the next track, repeat.
+5. **Shape it**: FX for effects, MIX for volume, pan, key and scale.
+
+## Modes
+Four mode buttons, like the OP-1. Each has up to four pages. **Press the button again for the next page**, the four dots next to the page name show where you are, and a mode comes back to the page you left it on.
+
+| Button | Mode | Pages |
+|---|---|---|
+| HOME | SOUND | SAMPLE, ENVELOPE, LFO, ARP |
+| FX | FX | SENDS (reverb, delay), INSERT (chorus, phaser, compressor, width), LIVE (DJ filter, beat repeat, trance gate, crush), TRACK (the same kind of effects on the selected track only) |
+| SEQ | SEQ | PATTERN, TAPE (loop speed, exciter, lo-fi, wobble), TEMPO (tempo, metronome, take snap), TIMING (live quantize, pattern quantize, count-in) |
+| EDIT | MIX | MIXER, KEY (scale, root, octave, mode), LOOP (mic sample, loop source, save), LENGTH |
+
+ENV, LFO, ARP, GLO, SEL and SAVE are shortcuts to a page (ENVELOPE, LFO, ARP, KEY, LENGTH, LOOP). SAVE: tap saves the loop, hold clears all loops.
+On the phone the same four modes are the buttons above the page tabs.
+
+## FM-1 controls (all pages)
 | Control | Does |
 |---|---|
 | SELECT (encoder 0) | track 1..8 |
 | PRESETS (encoder 6) | browses the sample library; after 250 ms of rest the entry is loaded on the selected track and played (audition) |
 | ALGORITHM (encoder 1) | MELODIC, ONE-SHOT, LOOPED, KIT/SLICE, GRANULAR, PAULSTRETCH (the Sampler's MODE; KIT slices on transients, equal parts if there are none) |
 | K1..K4 (encoders 2..5) | the four parameters of the current page (below) |
-| HOME | sample: START, END, SPEED (time stretch 0.25..4x), PITCH (+-24 st). Speed and pitch are offline stretches, applied 350 ms after the knob rests |
-| FX | REVERB SIZE, REVERB D/W (return level), DELAY TIME, DELAY FEEDBACK (global sends; per-track send levels are on MIXER). **Press FX again** for FX 2, again for LIVE FX, again for TRACK FX |
-| FX 2 | master inserts: CHORUS, PHASER, COMPRESSOR (4:1, threshold 0..-24 dB with half make-up), WIDTH (0 = mono, 50% = untouched, 100% = double) |
+| HOME | (SOUND mode, page 1) sample: START, END, SPEED (time stretch 0.25..4x), PITCH (+-24 st). Speed and pitch are offline stretches, applied 350 ms after the knob rests |
+| FX | REVERB SIZE, REVERB D/W (return level), DELAY TIME, DELAY FEEDBACK (global sends; per-track send levels are on MIXER). FX mode, pages 1..4: this one, then INSERT, LIVE, TRACK |
+| INSERT | master inserts: CHORUS, PHASER, COMPRESSOR (4:1, threshold 0..-24 dB with half make-up), WIDTH (0 = mono, 50% = untouched, 100% = double) |
 | LIVE FX | performance effects on the master, for turning while playing: DJ FILTER (centre = off, left low-pass, right high-pass), BEAT REPEAT (loops the last 1/4, 1/8, 1/16 or 1/32 beat until switched off), TRANCE GATE (1/8, 1/16, 1/32 on the beat clock), CRUSH (sample rate + bit depth). They are not recorded into the loop |
-| TRACK FX | the same kind of effects on the selected track only: DJ FILTER, CHORUS, TRANCE GATE, CRUSH (after the cassette, before volume and sends) |
+| TRACK FX | (FX mode, page 4) the same kind of effects on the selected track only: DJ FILTER, CHORUS, TRANCE GATE, CRUSH (after the cassette, before volume and sends) |
 | ENV | ATTACK, DECAY, SUSTAIN, RELEASE of the selected track |
 | LFO | RATE (0.1..20 Hz), DEPTH, TARGET (PITCH, FILTER, VOLUME, PAN), SHAPE (SINE, TRI, SQUARE, S&H) |
-| ARP | RATE (OFF, 1..64 with triplets), PATTERN, OCTAVES, LENGTH (own arpeggiator on the tempo grid, free running). **Press ARP again** for the SEQUENCER |
-| SEQUENCER | per track note pattern on the beat clock, locked to the loop (press ARP again). **REC** = overdub into the pattern (LED blinks, every pass is one layer, the pattern keeps looping), **SAVE** tap = undo the last layer, hold = clear, **PLAY** = transport. K1 PATTERN (MUTE, PLAY, REC, STEP), K2 BARS (1, 2, 4, 8; longer repeats the content, shorter drops the rest), K3 QUANTIZE (applied when playing, the recorded timing is kept; in STEP mode it is the step size, 1/16 when OFF), K4 **TO TAPE**. **STEP** entry: keys write at the cursor and it moves on when you let go (a chord is one step), REC = rest, PRESETS = move the cursor, the same key on the same step erases it. **TO TAPE** records the pattern onto the track's tape clip for exactly one loop cycle (a new loop of the pattern's length when there is none, otherwise it waits for the loop start), then mutes the pattern so it does not play twice. The phone shows a piano roll: tap a cell to add or remove a note, drag up and down to scroll, the newest layer is amber. Notes go through the track's arpeggiator when it is on. 256 notes per track |
-| SEQ ("TAPE") | LOOP SPEED (0.25..2x tape-style varispeed of the loop, GLOBAL for all tracks), EXCITER (cassette saturation), LO-FI (bit crush + hiss + dark tone), WOBBLE |
+| ARP | (SOUND mode, page 4) RATE (OFF, 1..64 with triplets), PATTERN, OCTAVES, LENGTH (own arpeggiator on the tempo grid; it follows the tempo) |
+| PATTERN | (SEQ mode, page 1) per track note pattern on the beat clock, locked to the loop. **Hold SEQ and play keys** to record (overdub: hold again to add), let go and it loops. K1 PATTERN (OFF, PLAY, REC), K2 BARS (1, 2, 4, 8; longer repeats the content, shorter drops the rest), K3 QUANTIZE (1/16 by default; applied when the pattern plays, the recorded timing is kept so it can be changed or switched off later), K4 CLEAR. **REC** while the pattern plays records one pass onto the tape (a new loop of the pattern's length when there is none, otherwise it waits for the loop start) and mutes the pattern. The phone shows a piano roll: tap a cell to add or remove a note, drag up and down to scroll. Notes go through the track's arpeggiator when it is on. 256 notes per track |
+| TAPE | (SEQ mode, page 2) LOOP SPEED (0.25..2x tape-style varispeed of the loop, GLOBAL for all tracks), EXCITER (cassette saturation), LO-FI (bit crush + hiss + dark tone), WOBBLE |
 | EDIT | mixer of the selected track: VOLUME, PAN, REVERB SEND, DELAY SEND |
-| GLO | key and scale: SCALE (22: the 7 firmware tables, DORIAN, LYDIAN, LOCR, PENT+, PENT-, BLUES, WHOLE, DIM, PHRDOM, HMAJ, MELMIN, HUNG, HIRA, DHARM, OFF last), ROOT, OCTAVE, MODE (KEY, CHORD, SNAP: keys outside the scale play the nearest scale note). **Press GLO again** for TEMPO, again for TIMING |
-| TEMPO | TEMPO (30..300; locked while a loop exists, the loop defines it), METRONOME (click on the beat clock, accent on the bar), CLICK LEVEL, TAKE SNAP (OFF: the first take sets the tempo as before; BEAT / BAR: the tempo stays and the take is cut or padded to whole beats / bars, i.e. the loop is quantized). The arpeggiator follows the tempo too |
-| TIMING | LIVE QUANTIZE (OFF, 1/4 ... 1/32T: a played key sounds on the nearest grid line of the beat clock, a key that is a little late plays at once; sequencer recording stores the snapped time), SEQ QUANTIZE (same setting as on the sequencer page), COUNT-IN (OFF, 1 or 2 bars of clicks, with the metronome off too, before a free take or a sequencer recording from a stopped transport; keys played during the count-in do not start the take) |
+| GLO | (MIX mode, page 2, shortcut) key and scale: SCALE (22: the 7 firmware tables, DORIAN, LYDIAN, LOCR, PENT+, PENT-, BLUES, WHOLE, DIM, PHRDOM, HMAJ, MELMIN, HUNG, HIRA, DHARM, OFF last), ROOT, OCTAVE, MODE (KEY, CHORD, SNAP: keys outside the scale play the nearest scale note). |
+| TEMPO | (SEQ mode, page 3) TEMPO (30..300; locked while a loop exists, the loop defines it), METRONOME (click on the beat clock, accent on the bar), CLICK LEVEL, TAKE SNAP (OFF: the first take sets the tempo; BEAT / BAR: the tempo stays and the take is cut or padded to whole beats / bars, i.e. the loop is quantized) |
+| TIMING | (SEQ mode, page 4) LIVE QUANTIZE (OFF, 1/4 ... 1/32T: a played key sounds on the nearest grid line of the beat clock, a key that is a little late plays at once; sequencer recording stores the snapped time), PATTERN QUANTIZE (the same setting as on the pattern page), COUNT-IN (OFF, 1 or 2 bars of clicks, with the metronome off too, before a free take or a sequencer recording from a stopped transport; keys played during the count-in do not start the take) |
 | SAVE | page LOOP. Tap = save the loop of the selected track into the library, hold 0.7 s = clear ALL loops (every track), also the phone CLEAR button. Knobs: MIC SAMPLE, LOOP SOURCE, SAVE LOOP, MIC THRESHOLD (-46..-6 dB, level that starts a mic take; used by mic sampling and mic loop source) |
 | PLAY | play / stop |
-| REC | clean looper: arms the first take (it starts with the first key or sound and sets the loop length and tempo; REC again ends it). Loop exists: toggles overdub on the selected track |
+| REC | always the tape. While the selected track's pattern plays it records one pass of the pattern onto the tape instead (see PATTERN). Clean looper: arms the first take (it starts with the first key or sound and sets the loop length and tempo; REC again ends it). Loop exists: toggles overdub on the selected track |
 | SEL (the button after FX; index 3, the protocol and the firmware call it SCL) | page LENGTH: K1 LENGTH (turn up = loop x2 with its content repeated, down = /2), K2 DUPLICATE, K3 HALVE, K4 bars/bpm (read-only). Needs the firmware built here (`firmware/FM1-Sampler-Workbench.html`): it forwards SCL as button 3 and has no scale screen; the stock/fm1-daw firmware keeps SCL local |
 | OCT -/+ | handled by the firmware (octave) |
 | keys | KIT algorithm: all 27 keys are pads (note 60 + key, 16 slices repeat over the keys), every key lit, tonality and octave ignored. Otherwise the firmware is kept on a plain chromatic keyboard (scale OFF, SysEx 06 always sends 7; notes 53+key) so keys outside the tonality still play; the app adds the octave, builds triads itself in CHORD mode and lights ONLY keys that belong to the scale (root of each octave blinks; scale OFF: only roots); a sounding key goes dark. |

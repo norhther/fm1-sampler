@@ -8,8 +8,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const SamplerApp::Page kTabs[] = {SamplerApp::P_HOME, SamplerApp::P_FX, SamplerApp::P_ENV, SamplerApp::P_LFO, SamplerApp::P_ARP, SamplerApp::P_SEQ, SamplerApp::P_MIX, SamplerApp::P_KEY, SamplerApp::P_SAVE, SamplerApp::P_LEN, SamplerApp::P_FX2, SamplerApp::P_LIVE, SamplerApp::P_SQ, SamplerApp::P_TEMPO, SamplerApp::P_TFX, SamplerApp::P_TIMING};
-const char* kTabName[] = {"SAMPLE", "FX", "ENV", "LFO", "ARP", "TAPE", "MIX", "KEY", "LOOP", "LEN", "FX2", "LIVE", "SEQR", "TEMPO", "TRK FX", "TIME"};
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -254,7 +253,7 @@ void SamplerUI::sequencerView(Rect r) {
         rrect({x0 + (float)v[i].tick / pt * (roll.w - 4), y0 + row * rh + 0.5f, std::max(3.f, (float)v[i].len / pt * (roll.w - 4)), std::max(2.f, rh - 1)}, 1, v[i].layer == newest ? ACCENT : TEXT);
     }
     if (st_.playing || state > 0) { const float px = x0 + (float)std::fmod(st_.beatPos * kPpq, (double)pt) / pt * (roll.w - 4); line(px, y0, px, y0 + roll.h - 4, TEXT, 1.5f); }
-    if (n == 0) text(roll.x + roll.w / 2, roll.y + roll.h / 2, T_BODY, DIM, state == 2 ? "PLAY KEYS: THEY ARE RECORDED" : state == 3 ? "PLAY KEYS: THEY LAND ON THE CURSOR  REC = REST" : "TAP THE GRID TO ADD NOTES, OR PRESS REC AND PLAY", 1, false);
+    if (n == 0) text(roll.x + roll.w / 2, roll.y + roll.h / 2, T_BODY, DIM, state == 2 ? "PLAY KEYS: THEY ARE RECORDED" : "TAP THE GRID TO ADD NOTES, OR RECORD PATTERN AND PLAY KEYS", 1, false);
     endClip();
     // touch: tap adds / removes a note on the step, drag up and down scrolls the pitch range
     hit(roll, [this](float x, float y) { rollDownX_ = x; rollDownY_ = y; rollMoved_ = false; rollStartBase_ = rollBase_; },
@@ -264,25 +263,29 @@ void SamplerUI::sequencerView(Rect r) {
             const int col = std::min(steps - 1, std::max(0, (int)((rollDownX_ - x0) / cw))), row = std::min(rows - 1, std::max(0, (int)((rollDownY_ - y0) / rh)));
             app_.seqToggleAt(col * st, base + rows - 1 - row);
         });
-    // buttons
-    const float bw = (r.w - 4 * 6) / 5, by = r.y + r.h - 38;
+    // buttons: record into the pattern (same as holding SEQ on the FM-1), mute, clear
+    const float bw = (r.w - 2 * 6) / 3, by = r.y + r.h - 38;
     int bx = 0;
-    auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
-    b("UNDO", false, [this] { app_.seqUndo(); });
-    b("CLEAR", false, [this] { app_.seqClear(); });
-    b(state == 3 ? "REST" : state == 2 ? "RECORDING" : "OVERDUB", state == 2, [this] { app_.seqRecToggle(); });
-    b("STEP", state == 3, [this, state] { app_.setSeqState(state == 3 ? 1 : 3); });
-    b(st_.bounce == 2 ? "ON TAPE..." : st_.bounce == 1 ? "WAITING..." : "TO TAPE", st_.bounce != 0, [this] { app_.seqBounce(); }, true);
+    auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 11, accent); bx++; };
+    b(state == 2 ? "RECORDING: TAP TO LOOP" : "RECORD PATTERN", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
+    b(state == 0 ? "PATTERN OFF" : "PATTERN ON", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
+    b("CLEAR PATTERN", false, [this] { app_.seqClear(); });
 }
 
 void SamplerUI::pagePanel(Rect r) {
-    const float tw = (r.w - 4 * 4) / 5;
-    for (int i = 0; i < 16; i++) {
-        Rect c{r.x + (i % 5) * (tw + 4), r.y + (i / 5) * 32, tw, 28};
-        button(c, kTabName[i], app_.page() == kTabs[i], [this, i] { app_.gotoPage(kTabs[i]); }, 9.5f);
+    // four modes (OP-1 style), then the four pages of the current mode
+    const int mode = SamplerApp::modeOf(app_.page()), mw = (r.w - 3 * 4) / 4.f;
+    for (int m = 0; m < SamplerApp::kModes; m++) {
+        Rect c{r.x + m * (mw + 4), r.y, (float)mw, 30};
+        button(c, SamplerApp::modeName(m), m == mode, [this, m] { app_.gotoMode(m); }, 11);
+    }
+    for (int i = 0; i < 4; i++) {
+        const SamplerApp::Page pg = SamplerApp::modePages(mode)[i];
+        Rect c{r.x + i * (mw + 4), r.y + 34, (float)mw, 26};
+        button(c, kPageTab[pg], app_.page() == pg, [this, pg] { app_.gotoPage(pg); }, 9.5f);
     }
     auto k = app_.knobs();
-    const float top = r.y + 136, rh = (r.h - 136) / 4;
+    const float top = r.y + 72, rh = (r.h - 72) / 4;
     for (int i = 0; i < 4; i++) {
         const auto& p = k[(size_t)i];
         const float y = top + i * rh;

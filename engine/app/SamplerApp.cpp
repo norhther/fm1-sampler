@@ -62,6 +62,13 @@ float lfoHz(float n) { return 0.1f * std::pow(200.f, n); }            // 0.1..20
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i))]; }
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
+const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
+const SamplerApp::Page* SamplerApp::modePages(int m) {
+    static const Page p[kModes][4] = {{P_HOME, P_ENV, P_LFO, P_ARP}, {P_FX, P_FX2, P_LIVE, P_TFX}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
+    return p[m & 3];
+}
+int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < 4; i++) if (modePages(m)[i] == pg) return m; return 0; }
+int SamplerApp::pageSlot(Page pg) { const Page* p = modePages(modeOf(pg)); for (int i = 0; i < 4; i++) if (p[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
     scale = std::min(kScaleCount - 1, std::max(0, scale));
     for (int i = 0; i < kScaleN[scale]; i++) out[i] = kScaleStep[scale][i];
@@ -199,7 +206,10 @@ void SamplerApp::selectTrack(int t) {
     track_ = t;
     if (ts_[t].entry >= 0) libCursor_ = ts_[t].entry;   // PRESETS starts from the sample this track plays
 }
-void SamplerApp::gotoPage(Page p) { page_ = p; }
+void SamplerApp::gotoPage(Page p) { page_ = p; lastPage_[modeOf(p)] = p; }
+void SamplerApp::modeButton(int m) {   // a mode button: enter the mode on the page it was left on, press again for the next page
+    gotoPage(modeOf(page_) == m ? modePages(m)[(pageSlot(page_) + 1) % 4] : lastPage_[m]);
+}
 
 SamplerApp::Knob SamplerApp::cont(const char* name, float* v, std::function<std::string(float)> f, std::function<void()> apply, float stepSize, bool commit) {
     Knob k; k.name = name; k.valid = true; k.norm = *v; k.value = f(*v);
@@ -334,12 +344,12 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         break;
     case P_SQ: {
         std::vector<std::string> grids; for (int g = 0; g < kGrids; g++) grids.push_back(gridName(g));
-        k[0] = choice("PATTERN", &x.seqState, {"MUTE", "PLAY", "REC", "STEP"}, [=] { applyPattern(t); });
+        k[0] = choice("PATTERN", &x.seqState, {"OFF", "PLAY", "REC"}, [=] { applyPattern(t); });
         k[1] = choice("BARS", &x.seqBars, {"1", "2", "4", "8"}, [=] { applyPattern(t); });
-        k[2] = choice(x.seqState == 3 ? "STEP SIZE" : "QUANTIZE", &seqGrid_, grids, [=] { applyTempo(); });
-        Knob c; c.name = "TO TAPE"; c.valid = true; c.isChoice = true;
-        c.value = st_.bounce == 1 ? "WAITING" : st_.bounce == 2 ? "RECORDING" : st_.seqCount[t] ? "TURN" : "EMPTY";
-        c.step = [this](int) { seqBounce(); }; c.set = [this](float) { seqBounce(); };
+        k[2] = choice("QUANTIZE", &seqGrid_, grids, [=] { applyTempo(); });
+        Knob c; c.name = "CLEAR"; c.valid = true; c.isChoice = true;
+        c.value = st_.seqCount[t] ? std::to_string(st_.seqCount[t]) + " NOTES" : "EMPTY";
+        c.step = [this](int) { seqClear(); }; c.set = [this](float) { seqClear(); };
         k[3] = c;
         break;
     }
@@ -383,6 +393,8 @@ void SamplerApp::setTempo(float bpm) {
 void SamplerApp::transportPlay() { s_.play(!st_.playing); }
 void SamplerApp::loopRecord() {
     if (st_.freeArmed || st_.freeRecording) { s_.freeRecord(track_, false); say("LOOP SET"); return; }
+    if (st_.bounce) { say("RECORDING THE PATTERN"); return; }
+    if (ts_[track_].seqState == 1 && st_.seqCount[track_] > 0) { seqBounce(); return; }   // the pattern plays: REC puts one pass of it on the tape
     if (!loopAny_ && !st_.track_clip_rec[track_]) {   // a clean looper: arm the first take, it starts with the first note (or sound) and sets the loop length
         s_.freeRecord(track_, true);
         say(countIn_ ? "COUNT-IN" : loopSrc_ ? "PLAY A KEY TO START" : "WAITING FOR SOUND");
@@ -391,12 +403,6 @@ void SamplerApp::loopRecord() {
     if (!st_.playing) s_.play(true);
     s_.clipRecord(track_, !st_.track_clip_rec[track_]);
     say(st_.track_clip_rec[track_] ? "OVERDUB OFF" : "OVERDUB");
-}
-void SamplerApp::seqRecToggle() {
-    TrackState& x = ts_[track_];
-    if (x.seqState == 3) { s_.seqRest(track_); return; }   // step entry: REC is a rest
-    x.seqState = x.seqState == 2 ? 1 : 2; applyPattern(track_);
-    say(x.seqState == 2 ? "PATTERN REC: PLAY KEYS" : "PATTERN PLAYS");
 }
 void SamplerApp::seqBounce() {
     if (!st_.seqCount[track_]) { say("PATTERN IS EMPTY"); return; }
@@ -433,8 +439,7 @@ void SamplerApp::micSample() {
 std::string SamplerApp::loopText() const {
     if (st_.countBeats > 0) return "COUNT-IN " + std::to_string(st_.countBeats);
     if (st_.bounce) return st_.bounce == 1 ? "PATTERN TO TAPE: WAITING FOR THE LOOP START" : "PATTERN TO TAPE: RECORDING";
-    if (st_.seqState[track_] == 2) return "PATTERN REC  SAVE UNDO";
-    if (st_.seqState[track_] == 3) return "STEP ENTRY: PLAY KEYS";
+    if (st_.seqState[track_] == 2) return seqHeld_ ? "PATTERN REC: LET GO TO LOOP" : "PATTERN REC";
     if (st_.freeArmed) return loopSrc_ ? "PLAY A KEY TO START" : "WAITING FOR SOUND";
     if (st_.freeRecording) return fmt("RECORDING %.1fS", st_.freeSeconds);
     if (st_.track_clip_rec[track_]) return "OVERDUB";
@@ -504,30 +509,39 @@ void SamplerApp::onSysex(const uint8_t* m, size_t n) {
 void SamplerApp::button(int b, bool down) {
     if (down) held_ |= 1u << b; else held_ &= ~(1u << b);
     if (b == SAVE) {   // tap = save the loop, hold = clear it
-        if (down) { saveDownAt_ = nowMs_ ? nowMs_ : 1; saveHeld_ = true; saveHoldDone_ = false; saveSeq_ = page_ == P_SQ; if (!saveSeq_) page_ = P_SAVE; }
-        else { saveHeld_ = false; if (!saveHoldDone_) { if (saveSeq_) seqUndo(); else loopSave(); } saveSeq_ = false; }   // sequencer page: tap = undo the last pass, hold = clear the pattern
+        if (down) { saveDownAt_ = nowMs_ ? nowMs_ : 1; saveHeld_ = true; saveHoldDone_ = false; gotoPage(P_SAVE); }
+        else { saveHeld_ = false; if (!saveHoldDone_) loopSave(); }
+        return;
+    }
+    if (b == SEQ) {   // tap = the SEQ mode (again: its next page); hold and play keys = record the pattern, let go and it loops
+        if (down) { seqDownAt_ = nowMs_ ? nowMs_ : 1; seqHeld_ = true; seqRecStarted_ = false; }
+        else {
+            seqHeld_ = false;
+            if (seqRecStarted_) { ts_[track_].seqState = 1; applyPattern(track_); say("PATTERN PLAYS"); }
+            else modeButton(2);
+            seqRecStarted_ = false;
+        }
         return;
     }
     if (!down) return;
     switch (b) {
-    case HOME: page_ = P_HOME; break;
-    case FX: page_ = page_ == P_FX ? P_FX2 : page_ == P_FX2 ? P_LIVE : page_ == P_LIVE ? P_TFX : P_FX; break;   // FX cycles: sends, inserts, live, track
-    case ENV: page_ = P_ENV; break;
-    case LFO: page_ = P_LFO; break;
-    case ARP: page_ = page_ == P_ARP ? P_SQ : P_ARP; break;                            // ARP cycles: arpeggiator, sequencer
-    case SEQ: page_ = P_SEQ; break;
-    case EDIT: page_ = P_MIX; break;
-    case GLO: page_ = page_ == P_KEY ? P_TEMPO : page_ == P_TEMPO ? P_TIMING : P_KEY; break;   // GLO cycles: key, tempo, timing
-    case SEL: page_ = P_LEN; break;
+    case HOME: modeButton(0); break;
+    case FX: modeButton(1); break;
+    case EDIT: modeButton(3); break;
+    case ENV: gotoPage(P_ENV); break;      // shortcuts to a page of a mode
+    case LFO: gotoPage(P_LFO); break;
+    case ARP: gotoPage(P_ARP); break;
+    case GLO: gotoPage(P_KEY); break;
+    case SEL: gotoPage(P_LEN); break;
     case PLAY: transportPlay(); break;
-    case REC: if (page_ == P_SQ) seqRecToggle(); else loopRecord(); break;
+    case REC: loopRecord(); break;
     default: break;
     }
 }
 void SamplerApp::encoder(int i, int delta) {
     if (!delta) return;
     if (i == 0) { selectTrack(track_ + (delta > 0 ? 1 : -1)); return; }
-    if (i == 6) { if (page_ == P_SQ && ts_[track_].seqState == 3) s_.seqCursorMove(track_, delta > 0 ? 1 : -1); else browse(delta); return; }   // step entry: PRESETS moves the cursor
+    if (i == 6) { browse(delta); return; }
     if (i == 1) { setAlgo(ts_[track_].algo + (delta > 0 ? 1 : -1)); return; }
     if (i == 2 && mic_ == 1 && page_ != P_SAVE) { setMicThreshold01(micThr_ + (delta > 0 ? 0.03f : -0.03f)); touchedKnob_ = 0; touchedAt_ = nowMs_; return; }   // K1 = trigger level while the microphone listens
     Knobs k = knobs();
@@ -548,7 +562,10 @@ void SamplerApp::tick(uint32_t now) {
     if (st_.loopSamples != lastLoopSamples_) { lastLoopSamples_ = st_.loopSamples; tempo_ = st_.bpm; }   // a take or a clear changed the tempo
     if (now - lastLoss_ > 4000 && now - lastRaise_ > 2000 && gap_ > 16) { gap_ = std::max<uint32_t>(16, gap_ * 9 / 10); lastRaise_ = now; }
     if (now - lastPing_ >= 500) { lastPing_ = now; pingId_ = (pingId_ + 1) & 0x3fff; sysex(5, n14(pingId_)); }
-    if (saveHeld_ && !saveHoldDone_ && now - saveDownAt_ > 700) { saveHoldDone_ = true; if (saveSeq_) seqClear(); else loopClear(); }
+    if (saveHeld_ && !saveHoldDone_ && now - saveDownAt_ > 700) { saveHoldDone_ = true; loopClear(); }
+    if (seqHeld_ && !seqRecStarted_ && now - seqDownAt_ > 300) {   // SEQ held: the pattern records what is played
+        seqRecStarted_ = true; gotoPage(P_SQ); ts_[track_].seqState = 2; applyPattern(track_); say("RECORDING: PLAY KEYS");
+    }
     // audition: the cursor rested, load the entry on the selected track and play it
     if (auditionAt_ && now >= auditionAt_) loadEntry(libCursor_);
     if (st_.sampleVersion != lastSampleVersion_) {   // a sample landed on a track: give it this track's settings
@@ -637,8 +654,9 @@ void SamplerApp::heal() {   // a lost frame leaves a hole nothing would redraw: 
 void SamplerApp::leds() {
     uint64_t m = 0;
     const bool blinkFast = (nowMs_ / 250) & 1, blinkSlow = (nowMs_ / 500) & 1;
-    static const int pageBtn[] = {HOME, FX, ENV, LFO, ARP, SEQ, EDIT, GLO, SAVE, SEL, FX, FX, ARP, GLO, FX, GLO};
-    m |= 1ull << pageBtn[page_];
+    static const int modeBtn[] = {HOME, FX, SEQ, EDIT};
+    m |= 1ull << modeBtn[modeOf(page_)];
+    switch (page_) { case P_ENV: m |= 1ull << ENV; break; case P_LFO: m |= 1ull << LFO; break; case P_ARP: m |= 1ull << ARP; break; case P_KEY: m |= 1ull << GLO; break; case P_SAVE: m |= 1ull << SAVE; break; case P_LEN: m |= 1ull << SEL; break; default: break; }
     if (st_.playing) m |= 1ull << PLAY;
     if (st_.freeRecording || st_.track_clip_rec[track_] || mic_ == 2 || st_.seqState[track_] == 2 || st_.bounce == 2) { if (blinkFast) m |= 1ull << REC; }
     else if (st_.freeArmed || mic_ == 1) { if (blinkSlow) m |= 1ull << REC; }
@@ -678,6 +696,7 @@ void SamplerApp::draw(uint32_t now) {
         rect(8 + i, i * 30 + 9, 20, 12, 2, st_.track_clip_rec[i] ? ACCENT : st_.track_has_clip[i] ? PAPER : BLACK);
     }
     drawText(20, 6, 26, 2, ACCENT, BLACK, kPage[page_], 9);
+    for (int i = 0; i < 4; i++) rect(270 + i, 122 + i * 8, 30, 5, 5, i == pageSlot(page_) ? ACCENT : BAR);   // where you are inside the mode (press its button again for the next page)
     const char* state = st_.freeRecording || st_.track_clip_rec[track_] ? "REC" : st_.playing ? "PLAY" : "STOP";
     drawText(21, 156, 26, 2, st_.freeRecording || st_.track_clip_rec[track_] ? ACCENT : PAPER, BLACK, state, 7);
     // sample line: name and algorithm (or the toast / microphone state)
@@ -713,7 +732,7 @@ void SamplerApp::draw(uint32_t now) {
         if (rect(60 + i, cx, cy + 29, 110, 4, BAR)) rects_[70 + i] = ~0ull;   // the fill goes on top of every repaint of the track
         rect(70 + i, cx, cy + 29, bw, 4, p.isChoice ? ACCENT : PAPER);
     }
-    const char* hint = mic_ == 1 ? (page_ == P_SAVE ? "K4 = TRIGGER LEVEL  LINE = THRESHOLD" : "K1 = TRIGGER LEVEL  LINE = THRESHOLD") : mic_ == 2 ? "RECORDING  K1 ON LOOP PAGE STOPS"  : page_ == P_LEN ? "TURN K1: X2 OR /2  THE LOOP REPEATS" : page_ == P_SAVE ? "TAP SAVE = SAVE LOOP  HOLD = CLEAR ALL" : page_ == P_SQ ? (ts_[track_].seqState == 3 ? "KEY NOTE  REC REST  PRE MOVE  SAVE UNDO" : "REC OVERDUB  SAVE UNDO  HOLD CLEAR") : page_ == P_KEY ? "KEYS FOLLOW THE KEY  CHANGE ANY TIME"
+    const char* hint = mic_ == 1 ? (page_ == P_SAVE ? "K4 = TRIGGER LEVEL  LINE = THRESHOLD" : "K1 = TRIGGER LEVEL  LINE = THRESHOLD") : mic_ == 2 ? "RECORDING  K1 ON LOOP PAGE STOPS"  : page_ == P_LEN ? "TURN K1: X2 OR /2  THE LOOP REPEATS" : page_ == P_SAVE ? "TAP SAVE = SAVE LOOP  HOLD = CLEAR ALL" : page_ == P_SQ ? "HOLD SEQ AND PLAY KEYS TO RECORD" : page_ == P_KEY ? "KEYS FOLLOW THE KEY  CHANGE ANY TIME"
                      : "SEL TRACK  PRE BROWSE  ALG ALGORITHM";
     drawText(90, 6, 230, 1, DIM, BLACK, hint, 38);
     needClear_ = false;
