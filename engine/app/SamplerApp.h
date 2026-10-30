@@ -89,7 +89,8 @@ public:
     int stepTicks() const { const int g = gridTicks(seqGrid_); return g ? g : kPpq / 4; }
     int seqGridIndex() const { return seqGrid_; }
     void cycleSeqGrid() { seqGrid_ = seqGrid_ >= kGrids - 1 || seqGrid_ < 1 ? 1 : seqGrid_ + 1; applyTempo(); }   // 1/4, 1/8, 1/8T ... 1/32T (the grid of the roll and of the quantize)
-    int seqBarsOf(int t) const { return 1 << ts_[t].seqBars; }
+    int seqBarsOf(int t) const { return ts_[t].seqBars + 1; }
+    void seqSetBarCount(int bars) { ts_[track_].seqBars = std::min(15, std::max(0, bars - 1)); applyPattern(track_); }   // add or remove bars (1..16)
     void lenAction(bool dbl);
     void loopSave();
     void loopClear();
@@ -114,7 +115,7 @@ public:
         int entry = -1;
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
-        int seqState = 0, seqBars = 2;   // sequencer: OFF / PLAY / REC, pattern length index (1, 2, 4, 8 bars)
+        int seqState = 0, seqBars = 3;   // sequencer: OFF / PLAY / REC, pattern length - 1 (1..16 bars)
     };
     const TrackState& state(int t) const { return ts_[t]; }
     void setVolume(int t, float v); void setPan01(int t, float v); void setSend(int t, int which, float v);
@@ -133,6 +134,11 @@ public:
     std::vector<float> peaks(int t, int bins);    // waveform of a track's sample, cached
     std::string sampleLabel(int t) const { return s_.trackLabel(t); }
     Session& session() { return s_; }
+    // ---- look: the colour theme (see Theme.h) and the full screen; both are kept in dataDir/settings.txt ----
+    int themeId() const { return theme_; }
+    void setTheme(int id);
+    bool fullscreen() const { return fullscreen_; }
+    void setFullscreen(bool on) { fullscreen_ = on; saveSettings(); }
     // ---- projects: everything (settings, patterns, samples used, tape audio) in dataDir/projects/<name>/ ----
     std::vector<std::string> projectList() const;      // newest first
     std::string newProjectName() const;                // "Project 1", "Project 2" ...
@@ -179,6 +185,7 @@ private:
     std::string projectDir(const std::string& name) const;
     std::string projectsRoot() const;
     static std::string cleanName(const std::string& n);
+    int theme_ = 0; bool fullscreen_ = false; void loadSettings(); void saveSettings();
     std::string project_ = "autosave"; uint32_t autosaveAt_ = 0, loadedAt_ = 0; bool tapeDirty_ = false, loading_ = false, wantMidi_ = false, anyRec_ = false;
     int lastBounceSeen_ = 0; double lastLoopSeen_ = 0; std::string sharePath_, pendingShare_; uint32_t pendingShareAt_ = 0;
     void projectTick();

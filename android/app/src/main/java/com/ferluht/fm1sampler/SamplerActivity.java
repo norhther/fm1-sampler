@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.View;
 import android.view.WindowManager;
 import java.io.File;
 
@@ -23,6 +24,7 @@ public class SamplerActivity extends Activity {
         backend.onFileRequest = this::pickFile;
         backend.onMidiRequest = this::pickMidi;
         backend.onShare = this::share;
+        backend.onLook = this::look;
         backend.start();
         SamplerView v = new SamplerView(this, backend.engine, 6, 6);
         v.setFitsSystemWindows(true);
@@ -54,6 +56,22 @@ public class SamplerActivity extends Activity {
     @Override protected void onPause() {
         Native.autosave(backend.engine);   // the project is saved when the app goes away
         super.onPause();
+    }
+
+    /** Theme colour for the system bars, and the full screen option (immersive: the bars hide, a swipe from the edge shows them for a moment). */
+    @SuppressWarnings("deprecation")
+    void look(int bg, boolean full) {
+        getWindow().setStatusBarColor(bg); getWindow().setNavigationBarColor(bg);
+        View dv = getWindow().getDecorView();
+        boolean lightBars = ((bg >> 16 & 255) + (bg >> 8 & 255) + (bg & 255)) > 3 * 140;   // dark icons on a light background
+        int flags = lightBars && android.os.Build.VERSION.SDK_INT >= 23 ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR : 0;
+        if (full) flags |= View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+        dv.setSystemUiVisibility(flags);
+    }
+
+    @Override public void onWindowFocusChanged(boolean focus) {   // the system brings the bars back after a dialog or the share sheet: hide them again
+        super.onWindowFocusChanged(focus);
+        if (focus && backend != null) look(Native.themeColor(backend.engine), Native.fullscreen(backend.engine));
     }
 
     void pickFile() {

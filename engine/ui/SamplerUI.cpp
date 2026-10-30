@@ -50,7 +50,7 @@ void SamplerUI::pinch(int phase, float x1, float y1, float x2, float y2) {
     if (phase == 0) {
         pinchOn_ = false;
         if (!rollOn_ || cx < rollX0_ || cx > rollX0_ + rollW_ || cy < rollY0_ || cy > rollY0_ + rollH_) return;
-        haveActive_ = false; rollMoved_ = true; drag_ = {};   // the first finger was a touch of the roll: it must not become a tap or a stretched note
+        rollTouchAt_ = now_; haveActive_ = false; rollMoved_ = true; drag_ = {};   // the first finger was a touch of the roll: it must not become a tap or a stretched note
         if (auditionNote_ >= 0) { app_.session().noteOff(app_.track(), auditionNote_); auditionNote_ = -1; }
         pinchOn_ = true; pinchDx0_ = std::max(dx, minD); pinchDy0_ = std::max(dy, minD);
         pinchZoom0_ = rollZoom_; pinchRows0_ = rollRowsF_; pinchBase0_ = rollBase_;
@@ -145,7 +145,7 @@ void SamplerUI::trackList(Rect r) {
         // level and loop mark
         const float lv = std::min(1.f, st_.track_peak[i] * 1.5f);
         rrect({row.x + 30, row.y + rh - 12, r.w - 44, 3}, 0, OUTLINE);
-        rrect({row.x + 30, row.y + rh - 12, (r.w - 44) * lv, 3}, 0, TEXT);
+        rrect({row.x + 30, row.y + rh - 12, (r.w - 44) * lv, 3}, 0, theme::trackColor(i));
         if (st_.track_clip_rec[i]) circle(row.x + r.w - 10, row.y + 10, 4, ACCENT);
         else if (st_.track_has_clip[i]) circle(row.x + r.w - 10, row.y + 10, 3.5f, TEXT);
         tap(row, [this, i] { app_.selectTrack(i); });
@@ -301,10 +301,10 @@ void SamplerUI::sequencerView(Rect r) {
     const int rows = (int)std::lround(rollRowsF_), visible = std::max(2 * st, (int)(pt / rollZoom_)); const float zoom = (float)pt / visible;
     const float x0 = roll.x + 2 + keyW, y0 = roll.y + 2 + rulerH, W = roll.w - 4 - keyW, H = roll.h - 4 - rulerH, rh = H / rows;
     const double playTick = std::fmod(st_.beatPos * kPpq, (double)pt);
-    if (zoom > 1 && (st_.playing || state > 0) && !haveActive_ && (playTick < rollScroll_ || playTick >= rollScroll_ + visible)) rollScroll_ = (float)(std::floor(playTick / visible) * visible);   // the view pages along with the playhead
+    if (zoom > 1 && (st_.playing || state > 0) && !haveActive_ && now_ - rollTouchAt_ > 3000 && (playTick < rollScroll_ || playTick >= rollScroll_ + visible)) rollScroll_ = (float)(std::floor(playTick / visible) * visible);   // the view pages along with the playhead
     rollScroll_ = std::min((float)(pt - visible), std::max(0.f, rollScroll_));
     rollBase_ = std::min(127.f - rows, std::max(0.f, rollBase_));
-    const int base = (int)std::floor(rollBase_);
+    const int base = (int)std::floor(rollBase_); const float sc0 = rollScroll_;   // what is drawn is what a touch lands on, even if the view moves before the finger arrives
     auto px = [&](double tick) { return x0 + (float)((tick - rollScroll_) / visible * W); };
     clip(roll);
     for (int i = 0; i < rows; i++) {   // rows from the top: the highest note first; black keys are a little darker
@@ -344,12 +344,12 @@ void SamplerUI::sequencerView(Rect r) {
     rollOn_ = true; rollX0_ = x0; rollY0_ = y0; rollW_ = W; rollH_ = H; rollPt_ = pt; rollMinVisible_ = 2 * st;
     endClip();
     // ruler: drag sideways to scroll the time
-    hit({x0, roll.y + 2, W, rulerH}, [this](float x, float) { rulerDownX_ = x; rulerStartScroll_ = rollScroll_; },
-        [this, W, visible](float x, float) { rollScroll_ = rulerStartScroll_ - (x - rulerDownX_) / W * visible; });
+    hit({x0, roll.y + 2, W, rulerH}, [this, sc0](float x, float) { rollTouchAt_ = now_; rulerDownX_ = x; rulerStartScroll_ = sc0; },
+        [this, W, visible](float x, float) { rollTouchAt_ = now_; rollScroll_ = rulerStartScroll_ - (x - rulerDownX_) / W * visible; });
     // keyboard: a tap plays the note, a drag scrolls the pitch
     hit({roll.x + 2, y0, keyW - 2, H},
         [this, t, y0, rh, rows, base](float, float y) {
-            keyDownY_ = y; keyStartBase_ = rollBase_; keyMoved_ = false;
+            rollTouchAt_ = now_; keyDownY_ = y; keyStartBase_ = rollBase_; keyMoved_ = false;
             auditionNote_ = base + rows - 1 - std::min(rows - 1, std::max(0, (int)((y - y0) / rh)));
             app_.session().noteOn(t, auditionNote_, 100);
         },
@@ -359,11 +359,11 @@ void SamplerUI::sequencerView(Rect r) {
         },
         [this, t] { if (auditionNote_ >= 0) app_.session().noteOff(t, auditionNote_); auditionNote_ = -1; });
     // grid
-    auto tickAt = [this, x0, W, visible](float x) { return rollScroll_ + (x - x0) / W * visible; };
+    auto tickAt = [sc0, x0, W, visible](float x) { return sc0 + (x - x0) / W * visible; };
     hit({x0, y0, W, H},
         [this, v, n, tickAt, y0, rh, rows, base, st, pt](float x, float y) mutable {
             const int tick = std::min(pt - st, std::max(0, (int)tickAt(x) / st * st)), note = base + rows - 1 - std::min(rows - 1, std::max(0, (int)((y - y0) / rh)));
-            rollDownX_ = x; rollDownY_ = y; rollMoved_ = false;
+            rollTouchAt_ = now_; rollDownX_ = x; rollDownY_ = y; rollMoved_ = false;
             drag_ = {};
             drag_.on = true; drag_.tick = tick; drag_.note = note; drag_.len = st; drag_.origLen = st;
             for (int i = 0; i < n; i++) if (v[i].note == note && tick >= v[i].tick && tick < v[i].tick + std::max(1, v[i].len)) {   // a finger on a note: it is that note that changes
@@ -384,13 +384,19 @@ void SamplerUI::sequencerView(Rect r) {
             else app_.seqToggleAt(d.tick, d.note, st);   // a tap: add a one-step note, or remove the one that was touched
         });
     // buttons: record into the pattern (same as holding SEQ on the FM-1), mute, clear
-    const float bw = (r.w - 3 * 6) / 4, by = r.y + r.h - 38;
+    // bars: add or remove one at the end (new bars are empty; the notes behind a removed end are dropped, UNDO brings them back)
+    const float by = r.y + r.h - 38, bwBar = 40, lblW = 78, barsW = 2 * bwBar + lblW + 2 * 4, bw = (r.w - barsW - 4 * 6) / 4;
+    const int nb = app_.seqBarsOf(t);
+    button({r.x, by, bwBar, 38}, "-", false, [this, nb] { app_.seqSetBarCount(nb - 1); }, 16);
+    text(r.x + bwBar + 4 + lblW / 2, by + 13, 13, TEXT, std::to_string(nb) + (nb == 1 ? " BAR" : " BARS"), 1, true);
+    text(r.x + bwBar + 4 + lblW / 2, by + 28, 8.5f, DIM, "PATTERN LENGTH", 1, false);
+    button({r.x + bwBar + 4 + lblW + 4, by, bwBar, 38}, "+", false, [this, nb] { app_.seqSetBarCount(nb + 1); }, 16);
     int bx = 0;
-    auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 11, accent); bx++; };
-    b(state == 2 ? "RECORDING: TAP TO LOOP" : "RECORD PATTERN", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
-    b(state == 0 ? "PATTERN OFF" : "PATTERN ON", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
+    auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + barsW + 6 + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
+    b(state == 2 ? "STOP REC" : "RECORD", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
+    b(state == 0 ? "MUTED" : "PLAYING", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
     b("DICE", false, [this] { app_.seqDice(); });
-    b("CLEAR PATTERN", false, [this] { app_.seqClear(); });
+    b("CLEAR", false, [this] { app_.seqClear(); });
 }
 
 // ---- tombola: balls in a turning polygon; drag on the drum to turn it ----
@@ -447,7 +453,7 @@ void SamplerUI::pagePanel(Rect r) {
         if (p.isChoice) {   // segments are not known here: a notch at the current position
             rrect({s.x + p.norm * (s.w - 8), s.y, 8, s.h}, 0, ACCENT);
         } else {
-            rrect({s.x, s.y, std::max(2.f, s.w * clamp01(p.norm)), s.h}, 0, TEXT);
+            rrect({s.x, s.y, std::max(2.f, s.w * clamp01(p.norm)), s.h}, 0, theme::KNOB[i & 3]);
         }
         Rect hr{s.x, y + 14, s.w, 40};
         hit(hr, [this, i, hr](float x, float) { app_.knobs()[(size_t)i].set(clamp01((x - hr.x) / hr.w)); },
@@ -468,7 +474,7 @@ void SamplerUI::projectSheet() {
     text(box.x + 110, box.y + 21, T_CAPTION, DIM, cur == "autosave" ? "UNSAVED SESSION (KEPT AUTOMATICALLY)" : "OPEN: " + cur, 0, false);
     button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { projOpen_ = false; }, 10);
     const float colW = 196;
-    projListRect_ = {box.x + 6, box.y + 44, box.w - colW - 18, box.h - 52};
+    projListRect_ = {box.x + 6, box.y + 44, box.w - colW - 18, box.h - 52 - 54};
     rrect(projListRect_, R_CONTROL, BG);
     const float rh = 36;
     projScroll_ = std::min(std::max(0.f, projScroll_), std::max(0.f, projList_.size() * rh - projListRect_.h));
@@ -488,7 +494,7 @@ void SamplerUI::projectSheet() {
         [this, rh]() { if (projMoved_ > 8) return; const int idx = (int)((projLastY_ - projListRect_.y + projScroll_) / rh); if (idx >= 0 && idx < (int)projList_.size()) projSel_ = idx; });
     // actions
     const float bx = box.x + box.w - colW - 6, bw = colW;
-    float by = box.y + 44; const float bh = 34, gap = 6;
+    float by = box.y + 44; const float bh = 30, gap = 4;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({bx, by, bw, bh}, label, on, std::move(f), 10.5f, accent); by += bh + gap; };
     const bool haveSel = projSel_ >= 0 && projSel_ < (int)projList_.size();
     const bool deleting = projDelAt_ && now_ - projDelAt_ < 2500;
@@ -499,8 +505,13 @@ void SamplerUI::projectSheet() {
     b("EXPORT MIDI (PATTERNS)", false, [this] { app_.exportMidi(); });
     b("EXPORT MIX (WAV)", false, [this] { app_.exportMix(); });
     b("IMPORT MIDI FILE", false, [this] { app_.requestMidi(); });
+    // view: the look of the app and the full screen
+    const float vy = box.y + box.h - 50, vh = 34; const float vw = (box.w - 12 - 4 * 5 - 4) / 5.f;
+    text(box.x + 8, vy - 6, T_CAPTION, DIM, "VIEW", 0, true);
+    for (int i = 0; i < theme::kThemes; i++) button({box.x + 6 + i * (vw + 4), vy, vw, vh}, theme::name(i), app_.themeId() == i, [this, i] { app_.setTheme(i); }, 10);
+    button({box.x + 6 + theme::kThemes * (vw + 4), vy, vw, vh}, app_.fullscreen() ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", app_.fullscreen(), [this] { app_.setFullscreen(!app_.fullscreen()); }, 9.5f);
     const std::string t = app_.toast();
-    if (!t.empty()) text(box.x + 14, box.y + box.h - 12, 11, ACCENT, t, 0, true);
+    if (!t.empty()) text(box.x + 90, vy - 6, 11, ACCENT, t, 0, true);
 }
 
 void SamplerUI::librarySheet() {

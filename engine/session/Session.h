@@ -102,7 +102,7 @@ public:
     void seqCursorMove(int track, int steps); // step entry: move the cursor
     void seqCursorSet(int track, int tick);
     void seqBounce(int track);                // record the pattern onto the tape for one loop cycle (a loop of the pattern length if there is none), then mute it
-    void seqSetBars(int track, int bars);     // 1, 2, 4 or 8; a longer pattern repeats its content, a shorter one drops the rest
+    void seqSetBars(int track, int bars);     // 1..16; a longer pattern gets empty bars, a shorter one drops the notes behind its new end
     void seqClear(int track);
     void setSwing(float s);                                                  // 0.5 = straight .. 0.75: every second grid line of the pattern plays later
     struct TombolaBall { float x, y, hit; int track; };                      // drum coordinates: the drum has radius 1

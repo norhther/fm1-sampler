@@ -18,6 +18,8 @@ public final class Native {
     public static native String sharePath(long h);
     public static native boolean wantMidi(long h);
     public static native void importMidi(long h, String path);
+    public static native boolean fullscreen(long h);
+    public static native int themeColor(long h);
     public static native void say(long h, String message);
     public static native void uiLink(long h, boolean midi, boolean usbAudio);
     public static native Object[] uiFrame(long h, float w, float hh, float top, float bottom, long nowMs);

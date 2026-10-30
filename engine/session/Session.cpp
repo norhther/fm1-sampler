@@ -155,6 +155,7 @@ struct Session::Impl {
     }
     // ---- sequencer ----
     double samplesPerBeat() const { return 60.0 * sr / bpm; }
+    static constexpr int kMaxBars = 16;
     int patTicks(const Track& t) const { return patternTicks(t.seqBars); }
     void publishSeq(int ti) {
         Track& t = *tracks[(size_t)ti];
@@ -327,19 +328,16 @@ struct Session::Impl {
     }
     void seqBarsSet(int ti, int bars) {
         Track& t = *tracks[(size_t)ti];
-        bars = bars >= 8 ? 8 : bars >= 4 ? 4 : bars >= 2 ? 2 : 1;
+        bars = std::min(kMaxBars, std::max(1, bars));
         if (bars == t.seqBars) return;
         checkpoint(t);
         const int oldPt = patTicks(t);
         t.seqBars = bars;
         const int newPt = patTicks(t);
-        if (newPt > oldPt) {   // longer: the content repeats
-            const int n0 = t.snCount;
-            for (int k = 1; k < newPt / oldPt; k++) for (int i = 0; i < n0 && t.snCount < kSeqMax; i++) { SeqNote e = t.sn[i]; e.tick = (uint16_t)(e.tick + k * oldPt); t.sn[t.snCount++] = e; }
-        } else {               // shorter: the rest is dropped
+        if (newPt < oldPt) {   // shorter: what lies behind the new end is dropped
             int w = 0; for (int i = 0; i < t.snCount; i++) if (t.sn[i].tick < newPt) t.sn[w++] = t.sn[i];
             t.snCount = w;
-        }
+        }   // longer: the new bars are empty (copy a bar by hand, or with the dice)
         for (int& x : t.openIdx) x = 0;
         seqRelease(t); publishSeq(ti);
     }

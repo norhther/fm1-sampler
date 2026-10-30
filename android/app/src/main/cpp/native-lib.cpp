@@ -1,4 +1,5 @@
 // JNI glue: Session + Surface + Oboe output stream. Java feeds MIDI bytes from the FM-1 in and polls the SysEx bytes to send out.
+#include "Theme.h"
 #include <jni.h>
 #include <oboe/Oboe.h>
 #include <android/log.h>
@@ -153,6 +154,9 @@ FN(void, importMidi)(JNIEnv* env, jclass, jlong h, jstring path) {
     { std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->importMidi(c); }
     env->ReleaseStringUTFChars(path, c);
 }
+// the look: full screen on / off and the background colour of the theme (for the system bars)
+FN(jboolean, fullscreen)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); return e.app->fullscreen(); }
+FN(jint, themeColor)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); (void)e; return (jint)theme::BG; }
 FN(void, say)(JNIEnv* env, jclass, jlong h, jstring msg) {
     auto& e = *E(h); const char* c = env->GetStringUTFChars(msg, nullptr);
     { std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->say(c); }

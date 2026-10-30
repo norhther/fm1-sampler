@@ -2,6 +2,7 @@
 // tape_N.wav the loops (see Session::writeTape). "autosave" is written every 20 s and when the app goes to the background and is loaded at the start.
 #include "SamplerApp.h"
 #include "../dsp/Midi.h"
+#include "../ui/Theme.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -12,7 +13,7 @@
 
 namespace fs = std::filesystem;
 namespace {
-constexpr int kFormat = 1, kScaleCount = 22;   // (the number of scales in SamplerApp.cpp)
+constexpr int kFormat = 2, kScaleCount = 22;   // (the number of scales in SamplerApp.cpp)
 using KV = std::map<std::string, std::string>;
 
 // one description of the state serves both directions: saving writes the key, loading reads it (and clamps what it read)
@@ -82,7 +83,7 @@ std::string SamplerApp::stateText() {
         io.f(k + "vol", x.vol); io.f(k + "pan", x.pan); io.f(k + "sendR", x.sendR); io.f(k + "sendD", x.sendD);
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
-        int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 3);
+        int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (x.entry >= 0 && x.entry < (int)lib_.size()) io.out << k << "sample=" << lib_[(size_t)x.entry].group << '|' << lib_[(size_t)x.entry].label << '\n';
         Session::SeqView v[kSeqMax]; const int n = s_.seqNotes(t, v, kSeqMax);
         if (n > 0) { io.out << k << "notes="; for (int i = 0; i < n; i++) io.out << (i ? ";" : "") << v[i].tick << ',' << v[i].len << ',' << v[i].note << ',' << v[i].vel; io.out << '\n'; }
@@ -115,7 +116,8 @@ void SamplerApp::applyStateText(const std::string& text) {
         io.f(k + "vol", x.vol); io.f(k + "pan", x.pan); io.f(k + "sendR", x.sendR); io.f(k + "sendD", x.sendD);
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
-        int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 3);
+        int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
+        if (fmtv < 2) bars2 = std::min(3, bars2) == 0 ? 0 : (1 << std::min(3, bars2)) - 1;   // format 1 kept 0..3 for 1, 2, 4, 8 bars
         if (x.start > x.end - 0.02f) { x.start = 0.f; x.end = 1.f; }
         x.seqState = sq; x.seqBars = bars2;
         // the sample: found by group and name in the library (a recording has its file name)
@@ -238,11 +240,24 @@ bool SamplerApp::importMidi(const std::string& path) {
     for (auto& notes : song.tracks) {
         if (t >= kTracks) break;
         int end = 0; for (auto& n : notes) end = std::max(end, n.tick + n.len);
-        int bi = 0; while (bi < 3 && patternTicks(1 << bi) < end) bi++;
-        std::vector<Session::SeqView> v; const int pt = patternTicks(1 << bi);
+        int bars = 1; while (bars < 16 && patternTicks(bars) < end) bars++;
+        std::vector<Session::SeqView> v; const int pt = patternTicks(bars);
         for (auto& n : notes) if (n.tick < pt && (int)v.size() < kSeqMax) v.push_back({n.tick, std::min(n.len, pt - n.tick), std::min(127, std::max(0, n.note)), std::min(127, std::max(1, n.vel))});
-        ts_[t].seqBars = bi; ts_[t].seqState = 1; applyPattern(t);
+        ts_[t].seqBars = bars - 1; ts_[t].seqState = 1; applyPattern(t);
         s_.seqSet(t, v.data(), (int)v.size()); t++; used++;
     }
     say(std::to_string(used) + " TRACKS IMPORTED"); return used > 0;
 }
+
+// ---- settings: the look of the app, outside of any project ----
+void SamplerApp::loadSettings() {
+    const KV kv = parse(readFile(s_.dataDir() + "/settings.txt")); Io io{false, &kv, {}};
+    int th = 0, fs = 0; io.i("theme", th, 0, theme::kThemes - 1); io.i("fullscreen", fs, 0, 1);
+    theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_);
+}
+void SamplerApp::saveSettings() {
+    if (s_.dataDir().empty()) return;
+    std::error_code ec; fs::create_directories(s_.dataDir(), ec);
+    std::ofstream f(s_.dataDir() + "/settings.txt"); f << "theme=" << theme_ << "\nfullscreen=" << (fullscreen_ ? 1 : 0) << "\n";
+}
+void SamplerApp::setTheme(int id) { theme_ = std::min(theme::kThemes - 1, std::max(0, id)); theme::apply(theme_); saveSettings(); }

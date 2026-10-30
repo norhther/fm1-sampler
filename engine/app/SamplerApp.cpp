@@ -81,6 +81,7 @@ int SamplerApp::snapNote(int note, int scale, int root) { return snapToScale(not
 const char* SamplerApp::noteName(int r) { return kNote[((r % 12) + 12) % 12]; }
 
 SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
+    loadSettings();
     cells_.resize(320); rects_.assign(320, ~0ull);
     for (int& h : heldNote_) h = -1;
     for (int i = 0; i < kTracks; i++) { ts_[i].vol = 0.8f; }
@@ -214,7 +215,7 @@ void SamplerApp::applyTrackFx(int t) {
     FxParams p; p.filter = x.tfDj; p.chorus = x.tfChorus; p.crush = x.tfCrush; p.gate = x.tfGate;
     s_.setTrackFx(t, p);
 }
-void SamplerApp::applyPattern(int t) { s_.seqSetBars(t, 1 << ts_[t].seqBars); s_.seqSetState(t, ts_[t].seqState); }
+void SamplerApp::applyPattern(int t) { s_.seqSetBars(t, ts_[t].seqBars + 1); s_.seqSetState(t, ts_[t].seqState); }
 void SamplerApp::queueCommit(int t) { commitAt_ = nowMs_ + 350; commitTrack_ = t; }   // the offline stretch / pitch runs once the knob rests
 void SamplerApp::setAlgo(int a) { ts_[track_].algo = ((a % 6) + 6) % 6; applyAlgo(track_); }
 void SamplerApp::setVolume(int t, float v) { ts_[t].vol = cl(v); applyMix(t); }
@@ -389,7 +390,7 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
     case P_SQ: {
         std::vector<std::string> grids; for (int g = 0; g < kGrids; g++) grids.push_back(gridName(g));
         k[0] = choice("PATTERN", &x.seqState, {"OFF", "PLAY", "REC"}, [=] { applyPattern(t); });
-        k[1] = choice("BARS", &x.seqBars, {"1", "2", "4", "8"}, [=] { applyPattern(t); });
+        k[1] = choice("BARS", &x.seqBars, {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"}, [=] { applyPattern(t); });
         k[2] = choice("QUANTIZE", &seqGrid_, grids, [=] { applyTempo(); });
         Knob c; c.name = "CLEAR"; c.valid = true; c.isChoice = true;
         c.value = st_.seqCount[t] ? std::to_string(st_.seqCount[t]) + " NOTES" : "EMPTY";
@@ -890,7 +891,7 @@ void SamplerApp::hero(uint32_t now, const Knobs& k) {
         drawText(101, x0, y0 + 42, 2, PAPER, BLACK, b, 18);
     } else if (page_ == P_SQ) {   // the pattern: one column per slice, height = pitch, the playhead in amber
         Session::SeqView v[kSeqMax]; const int cnt = s_.seqNotes(track_, v, kSeqMax);
-        const int pt = patternTicks(1 << x.seqBars), cols = 57;
+        const int pt = patternTicks(seqBarsOf(track_)), cols = 57;
         const double ph = std::fmod(st_.beatPos * kPpq, (double)pt);
         const int pc = st_.playing || x.seqState ? (int)(ph / pt * cols) : -1;
         for (int i = 0; i < cols; i++) {
