@@ -573,12 +573,13 @@ void SamplerApp::sysex(int cmd, const std::vector<uint8_t>& p, bool urgent, int 
     if (urgent) pending_.push_front({key, std::move(m)}); else pending_.push_back({key, std::move(m)});
 }
 void SamplerApp::clear(uint16_t c) { sysex(2, col(c)); }
-void SamplerApp::rect(int id, int x, int y, int w, int h, uint16_t c) {
+bool SamplerApp::rect(int id, int x, int y, int w, int h, uint16_t c) {
     uint64_t sig = (uint64_t)c | (uint64_t)(w & 0xfff) << 16 | (uint64_t)(h & 0xfff) << 28 | (uint64_t)(x & 0xfff) << 40 | (uint64_t)(y & 0xfff) << 52;
-    if (!needClear_ && rects_[id] == sig) return;
+    if (!needClear_ && rects_[id] == sig) return false;
     rects_[id] = sig;
     std::vector<uint8_t> p; cat(p, n14(x)); cat(p, n14(y)); cat(p, n14(std::max(1, w))); cat(p, n14(std::max(1, h))); cat(p, col(c));
     sysex(3, p, false, id);
+    return true;
 }
 void SamplerApp::drawText(int id, int x, int y, int scale, uint16_t fg, uint16_t bg, const std::string& text, int width) {
     std::string t = pad(text, (size_t)width);
@@ -675,15 +676,14 @@ void SamplerApp::draw(uint32_t now) {
     // loop strip
     const int px = (int)(st_.track_has_clip[track_] ? st_.clipPos[track_] * 224 : (loopAny_ && st_.loopSamples > 0 ? st_.pos / st_.loopSamples * 224 : 0));
     static int lastPx = -1; if (px != lastPx) { lastPx = px; rects_[24] = ~0ull; }   // the bar is redrawn under the moving playhead
-    rect(24, 6, 122, 228, 6, BAR);
-    rects_[25] = ~0ull;
+    if (rect(24, 6, 122, 228, 6, BAR)) rects_[25] = ~0ull;                             // ...and the head on top of it again
     rect(25, 6 + px, 122, 4, 6, st_.freeRecording || st_.track_clip_rec[track_] ? ACCENT : st_.playing ? PAPER : DIM);
     drawText(23, 6, 132, 1, st_.freeRecording || st_.track_clip_rec[track_] || st_.freeArmed ? ACCENT : DIM, BLACK, loopText(), 38);
     // knobs: 2 x 2
     for (int i = 0; i < 4; i++) {
         const int cx = 6 + (i % 2) * 118, cy = 146 + (i / 2) * 42;
         const Knob& p = k[(size_t)i];
-        if (!p.valid) { drawText(40 + i * 2, cx, cy, 1, DIM, BLACK, "", 18); drawText(41 + i * 2, cx, cy + 9, 2, PAPER, BLACK, "", 9); rect(60 + i, cx, cy + 29, 110, 4, BLACK); rects_[70 + i] = ~0ull; rect(70 + i, cx, cy + 29, 1, 4, BLACK); continue; }
+        if (!p.valid) { drawText(40 + i * 2, cx, cy, 1, DIM, BLACK, "", 18); drawText(41 + i * 2, cx, cy + 9, 2, PAPER, BLACK, "", 9); if (rect(60 + i, cx, cy + 29, 110, 4, BLACK)) rects_[70 + i] = ~0ull; rect(70 + i, cx, cy + 29, 1, 4, BLACK); continue; }
         snprintf(b, sizeof b, "K%d %s", i + 1, p.name.c_str());
         drawText(40 + i * 2, cx, cy, 1, i == touchedKnob_ && now - touchedAt_ < 1000 ? ACCENT : DIM, BLACK, b, 18);
         drawText(41 + i * 2, cx, cy + 9, 2, p.isChoice ? ACCENT : PAPER, BLACK, p.value, 9);
@@ -691,8 +691,7 @@ void SamplerApp::draw(uint32_t now) {
         static int lastBw[4] = {-1, -1, -1, -1};
         if (bw < lastBw[i] || needClear_) rects_[60 + i] = ~0ull;   // the bar shrank: paint the track again under it
         lastBw[i] = bw;
-        rect(60 + i, cx, cy + 29, 110, 4, BAR);
-        rects_[70 + i] = ~0ull;
+        if (rect(60 + i, cx, cy + 29, 110, 4, BAR)) rects_[70 + i] = ~0ull;   // the fill goes on top of every repaint of the track
         rect(70 + i, cx, cy + 29, bw, 4, p.isChoice ? ACCENT : PAPER);
     }
     const char* hint = mic_ == 1 ? (page_ == P_SAVE ? "K4 = TRIGGER LEVEL  LINE = THRESHOLD" : "K1 = TRIGGER LEVEL  LINE = THRESHOLD") : mic_ == 2 ? "RECORDING  K1 ON LOOP PAGE STOPS"  : page_ == P_LEN ? "TURN K1: X2 OR /2  THE LOOP REPEATS" : page_ == P_SAVE ? "TAP SAVE = SAVE LOOP  HOLD = CLEAR ALL" : page_ == P_KEY ? "KEYS FOLLOW THE KEY  CHANGE ANY TIME"
@@ -765,7 +764,7 @@ void SamplerApp::hero(uint32_t now, const Knobs& k) {
         char b[32]; snprintf(b, sizeof b, st_.loopSamples > 0 ? "%.0f LOCK" : "%.0f BPM", st_.loopSamples > 0 ? st_.bpm : tempo_);
         drawText(100, x0, y0 + 2, 4, ACCENT, BLACK, b, 9);
         const int beat = ((int)st_.beatPos % 4 + 4) % 4;
-        for (int i = 0; i < 4; i++) column(i, x0 + i * 30, 24, 14, st_.metro && i == beat ? ACCENT : BAR, true);
+        for (int i = 0; i < 4; i++) rect(100 + i, x0 + i * 30, y0 + 46, 24, 12, st_.metro && i == beat ? ACCENT : BAR);
         drawText(101, x0 + 130, y0 + 42, 2, PAPER, BLACK, st_.metro ? "CLICK ON" : "CLICK OFF", 9);
     } else {   // the waveform with the playback window
         auto pk = peaks(track_, 57);

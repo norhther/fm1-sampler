@@ -108,7 +108,7 @@ private:
     // ---- FM-1 drawing ----
     void sysex(int cmd, const std::vector<uint8_t>& payload, bool urgent = false, int key = -1);
     void clear(uint16_t c);
-    void rect(int id, int x, int y, int w, int h, uint16_t c);
+    bool rect(int id, int x, int y, int w, int h, uint16_t c);   // true when it was queued (the cached copy on the FM-1 changed)
     void drawText(int id, int x, int y, int scale, uint16_t fg, uint16_t bg, const std::string& s, int width_chars);
     void draw(uint32_t now);
     void leds();
