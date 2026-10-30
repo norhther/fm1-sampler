@@ -606,6 +606,52 @@ static void testNoteEdit() {
     app.seqClear(); run(0.2); if (app.status().playing) btn(SamplerApp::PLAY);
 }
 
+static void testPads() {
+    const int sr = SAMPLERATE;
+    {   // the pad settings of the sampler: level, tune, decay, choke
+        auto render = [&](int pad, const Sampler::Pad& p, int idx, double sec) { Sampler sm(sr); sm.load("synth:" + std::to_string(idx)); sm.setPad(pad, p); std::vector<float> o((size_t)(sec * sr) * 2, 0.f); sm.noteOn(60 + pad, 110); for (size_t b = 0; b + 256 <= o.size() / 2; b += 256) sm.render(o.data() + b * 2, 256); return o; };
+        const int k = synthIndex("Synth Kit 808"); Sampler::Pad base, loud, quiet, tuned, shortp;
+        loud.vol = 1.5f; quiet.vol = 0.3f; tuned.pitch = 12.f; shortp.decay = 0.3f;
+        auto a = render(0, base, k, 1.0), l = render(0, loud, k, 1.0), q = render(0, quiet, k, 1.0), tn = render(0, tuned, k, 1.0), sh = render(0, shortp, k, 1.0);
+        CHECK(rms(l, 0, sr / 4) > rms(a, 0, sr / 4) * 1.3 && rms(q, 0, sr / 4) < rms(a, 0, sr / 4) * 0.5, "pad level: %.3f quiet, %.3f normal, %.3f loud", rms(q, 0, sr / 4), rms(a, 0, sr / 4), rms(l, 0, sr / 4));
+        CHECK(zcr(tn, 0, sr / 8) > zcr(a, 0, sr / 8) * 1.5, "pad tune +12: higher (%.4f vs %.4f crossings)", zcr(tn, 0, sr / 8), zcr(a, 0, sr / 8));
+        CHECK(rms(sh, sr / 2 * 2, sr) < rms(a, sr / 2 * 2, sr) * 0.5 + 1e-4, "pad decay 0.3x: gone sooner (%.4f vs %.4f)", rms(sh, sr, 2 * sr), rms(a, sr, 2 * sr));
+        // choke: the closed hat (pad 6) cuts the open hat (pad 7) when both are in group 1
+        auto choke = [&](int group) { Sampler sm(sr); sm.load("synth:" + std::to_string(k)); Sampler::Pad p; p.group = group; sm.setPad(6, p); sm.setPad(7, p);
+            std::vector<float> o((size_t)sr * 2, 0.f); sm.noteOn(67, 110); size_t b = 0; for (; b < (size_t)sr / 10; b += 256) sm.render(o.data() + b * 2, 256);
+            sm.noteOn(66, 1); for (; b + 256 <= (size_t)sr / 2; b += 256) sm.render(o.data() + b * 2, 256); return rms(o, (size_t)sr * 2 / 5, (size_t)sr); };
+        const double open = choke(0), cut = choke(1); CHECK(cut < open * 0.3, "choke: the closed hat cuts the open one (%.4f -> %.4f)", open, cut);
+    }
+    system("rm -rf /tmp/fm1sampler_te; mkdir -p /tmp/fm1sampler_te");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_te"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.5);
+    app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Synth Kit 808") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    CHECK(app.isKit(4) && app.padName(0) == "KICK" && app.padName(6) == "HAT", "a synth kit names its pads (%s, %s)", app.padName(0).c_str(), app.padName(6).c_str());
+    app.gotoPage(SamplerApp::P_PADS); CHECK(app.page() == SamplerApp::P_PADS && SamplerApp::modeOf(SamplerApp::P_PADS) == 2, "the PADS page is in the SEQ mode");
+    SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(now);
+    float px = 0, py = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "SNARE") { px = o.f[0]; py = o.f[1]; }
+    size_t m = all.size(); ui.touch(0, px, py + 20, now); run(0.4); ui.touch(2, px, py + 20, now); run(0.3);
+    CHECK(px > 0 && app.state(4).selPad == 2 && rms(all, m, all.size()) > 0.01, "tapping the SNARE pad plays it and selects it (pad %d, rms %.4f)", app.state(4).selPad + 1, rms(all, m, all.size()));
+    CHECK(std::string(app.knobs()[0].name) == "PAD 3 LEVEL", "the knobs follow the pad (%s)", app.knobs()[0].name.c_str());
+    // a hard hit (low on the pad) is louder than a soft one
+    auto hitAt = [&](float dy) { ui.frame(now); size_t m0 = all.size(); ui.touch(0, px, py + dy, now); run(0.4); ui.touch(2, px, py + dy, now); run(1.5); return rms(all, m0, m0 + (size_t)sr / 2); };
+    const double soft = hitAt(-25), hard = hitAt(25); CHECK(hard > soft * 1.4, "a hit low on the pad is harder (%.4f vs %.4f)", hard, soft);
+    // recording pads into the pattern, then the drum grid shows them
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.setSeqState(2); run(0.4); app.padHit(0, 100, true); run(0.15); app.padHit(0, 0, false); run(0.3); app.padHit(2, 100, true); run(0.15); app.padHit(2, 0, false); run(0.4); app.setSeqState(1); run(0.3);
+    CHECK(app.status().seqCount[4] == 2, "pads played while recording go into the pattern (%d notes)", app.status().seqCount[4]);
+    ui.frame(now); { float tx = 0, ty = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "DRUMS") { tx = o.f[0]; ty = o.f[1] - 3; } ui.touch(0, tx, ty, now); ui.touch(2, tx, ty, now); }
+    ui.frame(now); ui.frame(now);
+    float gx, gy, gw, gh; ui.rollGrid(gx, gy, gw, gh); CHECK(std::fabs(ui.rollRows() - 8.f) < 0.01f && ui.rollBase() == 60.f, "the roll turns into a drum grid of 8 pad rows (%.0f rows from %.0f)", ui.rollRows(), ui.rollBase());
+    bool names = false; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text.find("KICK") != std::string::npos) names = true; CHECK(names, "...with the pad names on the left");
+    const int cnt0 = app.status().seqCount[4]; const float rh = gh / 8, ty2 = gy + 7 * rh + rh / 2 /* pad 1 = the bottom row */ , tx2 = gx + 0.5f * gw * 0.6f;
+    ui.touch(0, tx2, ty2 - 3 * rh, now); ui.touch(2, tx2, ty2 - 3 * rh, now); run(0.3); CHECK(app.status().seqCount[4] == cnt0 + 1, "a tap on a pad row adds a hit (%d -> %d)", cnt0, app.status().seqCount[4]);
+    app.seqClear(); run(0.2);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -699,6 +745,7 @@ int main() {
     }
     testSynths();
     testOp1();
+    testPads();
     testNoteEdit();
     testLook();
     testSound();
@@ -764,6 +811,7 @@ int main() {
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TEMPO, "SEQ again: tempo");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TOMB, "SEQ again: tombola");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PADS, "SEQ again: pads");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ again: back to the pattern");
         app.gotoPage(SamplerApp::P_FX);
     }

@@ -978,6 +978,11 @@ void Session::setSlices(int t, int count, float sens) {
 }
 float Session::rootGuessOf(int t) const { if (t < 0 || t >= kTracks) return 0.f; std::lock_guard<std::mutex> l(d->tracks[(size_t)t]->infoMtx); return d->tracks[(size_t)t]->rootGuess; }
 std::vector<float> Session::slicesOf(int t) const { if (t < 0 || t >= kTracks) return {}; std::lock_guard<std::mutex> l(d->tracks[(size_t)t]->infoMtx); return d->tracks[(size_t)t]->slicePts; }
+void Session::setPad(int t, int pad, float vol, float pitchSemis, float pan, float decay, int group) {
+    if (t < 0 || t >= kTracks || pad < 0 || pad >= 16) return;
+    Sampler::Pad p; p.vol = clampf(vol, 0.f, 2.f); p.pitch = clampf(pitchSemis, -24.f, 24.f); p.pan = clampf(pan, -1.f, 1.f); p.decay = clampf(decay, 0.05f, 8.f); p.group = std::min(8, std::max(0, group));
+    d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setPad(pad, p); });
+}
 void Session::unloadSample(int t) {
     if (t < 0 || t >= kTracks) return;
     d->post([this, t] {

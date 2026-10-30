@@ -23,7 +23,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -80,6 +80,13 @@ public:
     void seqToggleAt(int tick, int note, int len = 0);   // touch: add / remove a note (length in ticks, 0 = one step)
     void tapeStopHold(bool on) { tapeStopHeld_ = on; applyMasterFx(); }   // live: while held the tape runs down, on release it spins up again
     bool tapeStopHeld() const { return tapeStopHeld_; }
+    std::string padName(int pad) const;                   // KICK, SNARE ... for the synth kits, the number for a sliced sample
+    bool isKit(int t) const { return ts_[t].algo == 3; }
+    void padHit(int pad, int vel, bool down) {   // a pad of the PADS page: the key 60 + pad with a velocity (records into a pattern that is recording)
+        const int note = 60 + std::min(15, std::max(0, pad));
+        if (down) { heldNote_[note] = track_; s_.noteOn(track_, note, std::min(127, std::max(1, vel))); } else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
+    }
+    void selectPad(int pad) { ts_[track_].selPad = std::min(15, std::max(0, pad)); }
     void tombolaDrop();                                   // a ball with a random note of the scale
     void tombolaReverse() { tSpin_ = 1.f - tSpin_; applyTomb(); }
     void tombolaClear() { s_.tombolaClear(); }
@@ -116,6 +123,8 @@ public:
         int entry = -1;
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
+        float padVol[16], padPitch[16], padDecay[16]; int padGroup[16] = {}; int selPad = 0;   // per pad of a kit (PADS page)
+        TrackState() { for (int i = 0; i < 16; i++) { padVol[i] = 2.f / 3.f; padPitch[i] = 0.5f; padDecay[i] = 0.5f; } }
         int seqState = 0, seqBars = 3;   // sequencer: OFF / PLAY / REC, pattern length - 1 (1..16 bars)
     };
     const TrackState& state(int t) const { return ts_[t]; }
@@ -172,7 +181,7 @@ private:
     void encoder(int i, int delta);
     // ---- parameters ----
     void applyAll(int t);
-    void applyShape(int t, bool reslice = false); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
+    void applyShape(int t, bool reslice = false); void applyPad(int t, int pad); void applyPads(int t); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
     void applyFx();
     void applyMasterFx();
     void applyTempo(); void applyTomb();

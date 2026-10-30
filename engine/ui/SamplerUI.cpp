@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -158,6 +158,7 @@ void SamplerUI::sampleArea(Rect r) {
     const std::string lab = app_.sampleLabel(t);
     text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - 120, T_TITLE), 0, true);
     text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);
+    if (app_.page() == SamplerApp::P_PADS) { padsView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_TOMB) { tombolaView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_SQ) { sequencerView({r.x, r.y + 28, r.w, r.h - 28}); return; }   // the sequencer page shows the pattern instead of the waveform, with all the room there is
     // algorithm (a synth has none)
@@ -281,7 +282,7 @@ void SamplerUI::sequencerView(Rect r) {
         else { rollRowsF_ = 10.f; rollBase_ = 55.f; }
     }
     // toolbar: undo, redo, zoom in time and pitch, fit, grid, select
-    const float tbh = 26, bw9 = (r.w - 6 * 4) / 7.9f;   // the last two buttons (GRID, SELECT) are a bit wider (zooming the rows is the vertical pinch)
+    const float tbh = 26, bw9 = (r.w - 7 * 4) / 8.9f;   // the last two buttons (GRID, SELECT) are a bit wider (zooming the rows is the vertical pinch)
     int tx = 0; float tbx = r.x;
     auto tb = [&](const std::string& label, bool on, std::function<void()> f, float wmul = 1.f) { button({tbx, r.y, bw9 * wmul, tbh}, label, on, std::move(f), 9.5f); tbx += bw9 * wmul + 4; tx++; };
     tb("UNDO", st_.seqUndoN[t] > 0, [this] { app_.seqUndo(); });
@@ -291,12 +292,14 @@ void SamplerUI::sequencerView(Rect r) {
     tb("TIME +", false, [this, zoomMax] { rollZoom_ = std::min(zoomMax, rollZoom_ * 1.6f); });
     tb("FIT", false, [this] { rollFitTrack_ = -1; });
     tb(std::string("GRID ") + gridName(app_.seqGridIndex() ? app_.seqGridIndex() : 4), false, [this] { app_.cycleSeqGrid(); }, 1.5f);
+    tb(drumView_ == 0 ? "DRUMS" : drumView_ == 1 ? "PADS 1-8" : "PADS 9-16", drumView_ != 0, [this] { drumView_ = (drumView_ + 1) % 3;  });
     tb("SELECT", selMode_, [this] { selMode_ = !selMode_; sel_.clear(); drag_ = {}; rbOn_ = false; }, 1.4f);
     // the roll
-    const float keyW = 34, rulerH = 14;
+    const float keyW = drumView_ ? 76.f : 34.f, rulerH = 14;
     const float panelH = selMode_ ? 86.f : 0.f;
     Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46 - panelH};
     rrect(roll, R_CARD, SURFACE); stroke(roll, R_CARD, OUTLINE, 1);
+    if (drumView_) { rollRowsF_ = 8.f; rollBase_ = 60.f + 8.f * (drumView_ - 1); }   // one row per pad, eight at a time
     rollZoom_ = std::min(zoomMax, std::max(1.f, rollZoom_)); rollRowsF_ = std::min(60.f, std::max(5.f, rollRowsF_));
     const int rows = (int)std::lround(rollRowsF_), visible = std::max(2 * st, (int)(pt / rollZoom_)); const float zoom = (float)pt / visible;
     const float x0 = roll.x + 2 + keyW, y0 = roll.y + 2 + rulerH, W = roll.w - 4 - keyW, H = roll.h - 4 - rulerH, rh = H / rows;
@@ -309,12 +312,13 @@ void SamplerUI::sequencerView(Rect r) {
     clip(roll);
     for (int i = 0; i < rows; i++) {   // rows from the top: the highest note first; black keys are a little darker
         const int nn = base + rows - 1 - i, pc = nn % 12; const bool black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
-        if (black) rrect({x0, y0 + i * rh, W, rh}, 0, theme::withAlpha(BG, 110));
+        if (black && !drumView_) rrect({x0, y0 + i * rh, W, rh}, 0, theme::withAlpha(BG, 110));
         line(x0, y0 + (i + 1) * rh, x0 + W, y0 + (i + 1) * rh, pc == 0 ? OUTLINE : theme::withAlpha(OUTLINE, 70), 1);
         // the keyboard strip
         rrect({roll.x + 2, y0 + i * rh, keyW - 2, rh}, 0, black ? BG : RAISED);
         line(roll.x + 2, y0 + (i + 1) * rh, roll.x + keyW, y0 + (i + 1) * rh, OUTLINE, 1);
-        if (pc == 0 || rh >= 13) text(roll.x + 5, y0 + i * rh + rh / 2, 8.5f, pc == 0 ? ACCENT : DIM, std::string(SamplerApp::noteName(pc)) + std::to_string(nn / 12 - 1), 0, pc == 0);
+        if (drumView_) text(roll.x + 4, y0 + i * rh + rh / 2, 8.5f, TEXT, fit(std::to_string(nn - 59) + " " + app_.padName(nn - 60), keyW - 6, 8.5f), 0, false);
+        else if (pc == 0 || rh >= 13) text(roll.x + 5, y0 + i * rh + rh / 2, 8.5f, pc == 0 ? ACCENT : DIM, std::string(SamplerApp::noteName(pc)) + std::to_string(nn / 12 - 1), 0, pc == 0);
     }
     // the ruler: bar numbers, a tick for each beat
     rrect({x0, roll.y + 2, W, rulerH}, 0, RAISED);
@@ -427,6 +431,23 @@ void SamplerUI::sequencerView(Rect r) {
     b(state == 0 ? "MUTED" : "PLAYING", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
     b("DICE", false, [this] { app_.seqDice(); });
     b("CLEAR", false, [this] { app_.seqClear(); });
+}
+
+// ---- pads: a 4 x 4 grid to play a kit with; the harder you hit (lower on the pad) the louder ----
+void SamplerUI::padsView(Rect r) {
+    const int t = app_.track(); const auto& ts = app_.state(t);
+    const float gap = 8, pw = (r.w - 3 * gap) / 4, ph = (r.h - 3 * gap) / 4;
+    for (int i = 0; i < 16; i++) {
+        const int row = i / 4, col = i % 4, pad = (3 - row) * 4 + col;   // pad 1 is bottom left, like on an MPC
+        const Rect b{r.x + col * (pw + gap), r.y + row * (ph + gap), pw, ph};
+        const bool sel = ts.selPad == pad, down = padDown_ == pad;
+        rrect(b, R_CARD, down ? ACCENT : sel ? RAISED : SURFACE); stroke(b, R_CARD, sel || down ? ACCENT : OUTLINE, sel ? 2 : 1);
+        text(b.x + 8, b.y + 14, 10, down ? ON_ACCENT : DIM, std::to_string(pad + 1), 0, true);
+        text(b.x + b.w / 2, b.y + b.h / 2, 13, down ? ON_ACCENT : TEXT, fit(app_.padName(pad), b.w - 10, 13), 1, true);
+        if (ts.padGroup[pad] > 0) text(b.x + b.w - 8, b.y + 14, 9, down ? ON_ACCENT : ACCENT, "CH" + std::to_string(ts.padGroup[pad]), 2, true);
+        hit(b, [this, pad, b](float, float y) { padDown_ = pad; app_.selectPad(pad); app_.padHit(pad, 40 + (int)(87.f * clamp01((y - b.y) / b.h)), true); },
+            nullptr, [this, pad] { padDown_ = -1; app_.padHit(pad, 0, false); });
+    }
 }
 
 // ---- tombola: balls in a turning polygon; drag on the drum to turn it ----

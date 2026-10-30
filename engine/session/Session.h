@@ -66,6 +66,7 @@ public:
     // ---- sampler (per track) ----
     void loadSamplePath(const std::string& path, bool kit, int track);          // worker thread builds it, then it replaces the track's sampler
     void setSynthMacros(int track, float tone, float body, float motion, float grit);   // -1..1 each; only a built-in synth listens
+    void setPad(int track, int pad, float volume, float pitchSemitones, float pan, float decay, int chokeGroup);   // KIT mode and the synth drum kits, pad 0..15
     void setRoot(int track, int midiNote);                                     // the key that plays the sample at its own pitch (60 = the library's tuning)
     void setSlices(int track, int count, float sensitivity);                   // KIT: cut the sample into `count` pads again
     float rootGuessOf(int track) const;                                        // pitch of the sample as a MIDI note, 0 = not a pitched sound

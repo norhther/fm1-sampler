@@ -99,6 +99,8 @@ void Sampler::resolveWindow(Voice& v, const SampleBuf*& buf, double& ws, double&
 void Sampler::noteOn(int note, int vel) {
     if (!orig_ && synth_ < 0) return;
     int vi = -1; uint32_t oldest = 0xffffffffu;
+    const int padIdx = ((note - 60) % 16 + 16) % 16; const Pad* pad = padMode() ? &pads_[padIdx] : nullptr;
+    if (pad && pad->group > 0) for (auto& o : voices_) if (o.on && !o.fading && o.group == pad->group) fadeOut(o);   // choke: a closed hat cuts the open one
     // too many sounding voices (each Paulstretch voice costs FFTs: at most four): the oldest one fades out in a few ms instead of being cut
     int active = 0; for (auto& v : voices_) active += v.on && !v.fading;
     if (active >= (mode_ == PAUL ? 4 : 8)) {
@@ -115,9 +117,10 @@ void Sampler::noteOn(int note, int vel) {
     Voice& v = voices_[vi];
     v = Voice();
     v.on = true; v.gate = true; v.note = note; v.vel = clampf(vel / 127.f, 0.f, 1.f); v.born = ++bornCounter_;
-    v.slice = ((note - 60) % 16 + 16) % 16;
+    v.slice = padIdx;
+    if (pad) { v.group = pad->group; v.padGain = pad->vol; v.padPitch = pad->pitch; const float a = (pad->pan + 1.f) * kPi / 4.f; v.panL = std::cos(a) * 1.414f; v.panR = std::sin(a) * 1.414f; }
     if (synth_ >= 0) {
-        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_, mac_);
+        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_, mac_, pad ? pad->pitch : 0.f, pad ? pad->decay : 1.f);
         v.env.set(atk_, dec_, sus_, rel_, (float)sr_);
         if (kSynths[synth_].engine == 3) v.env.set(0.001f, 0.01f, 1.f, 0.02f, (float)sr_);   // a drum hit plays itself out
         v.env.gateOn();
@@ -125,7 +128,8 @@ void Sampler::noteOn(int note, int vel) {
     }
     resolveWindow(v, v.buf, v.ws, v.we);
     v.pos = v.ws;
-    v.env.set(atk_, dec_, sus_, rel_, (float)sr_);
+    const float dscale = pad ? std::max(0.05f, pad->decay) : 1.f;
+    v.env.set(atk_, dec_ * dscale, sus_, rel_ * dscale, (float)sr_);
     if (mode_ == ONESHOT) v.env.set(0.002f, 0.01f, 1.f, 0.01f, (float)sr_);
     v.env.gateOn();
     if (mode_ == PAUL) { v.paulIdx = vi; paul_[(size_t)vi]->start(v.buf->d.data(), v.buf->frames, v.ws, v.we, 8.f); }
@@ -156,13 +160,13 @@ void Sampler::pumpPaul() {
 }
 
 void Sampler::renderSynth(Voice& v, SynthVoice& sv, float* out, int n) {
-    const float gain = 0.8f * v.vel * synthNorm_ * 0.9f;
+    const float gain = 0.8f * v.vel * synthNorm_ * 0.9f * v.padGain;
     for (int i = 0; i < n; i++) {
         const float e = v.env.next();
         if (v.env.done() && !v.gate) { v.on = false; return; }
         float l, r; sv.next(bend_, mac_, l, r);
         if (sv.finished()) { v.on = false; return; }
-        out[2 * i] += l * e * gain; out[2 * i + 1] += r * e * gain;
+        out[2 * i] += l * e * gain * v.panL; out[2 * i + 1] += r * e * gain * v.panR;
     }
 }
 
@@ -176,14 +180,14 @@ void Sampler::render(float* out, int n) {
 void Sampler::renderVoice(Voice& v, float* out, int n) {
     const float* d = v.buf->d.data(); const int frames = v.buf->frames;
     const double srcRate = (double)v.buf->sr / sr_;
-    const double pitch = mode_ == KIT ? 1.0 : std::pow(2.0, (v.note - root_ + bend_) / 12.0);
+    const double pitch = mode_ == KIT ? std::pow(2.0, v.padPitch / 12.0) : std::pow(2.0, (v.note - root_ + bend_) / 12.0);
     const double rate = srcRate * pitch;
     auto readAt = [&](double p, float& l, float& r) {
         const int i0 = std::min(frames - 2, std::max(0, (int)p)); const float f = (float)(p - i0);
         l = d[(size_t)i0 * 2] + (d[(size_t)i0 * 2 + 2] - d[(size_t)i0 * 2]) * f;
         r = d[(size_t)i0 * 2 + 1] + (d[(size_t)i0 * 2 + 3] - d[(size_t)i0 * 2 + 1]) * f;
     };
-    const float gain = 0.8f * v.vel;
+    const float gain = 0.8f * v.vel * v.padGain;
     for (int i = 0; i < n; i++) {
         float l = 0.f, r = 0.f;
         if (mode_ == PAUL && !v.paulReady) {   // a new voice is silent until its first hop is there (a few blocks at most)
@@ -233,7 +237,7 @@ void Sampler::renderVoice(Voice& v, float* out, int n) {
                 v.pos += rate;
             }
         }
-        out[2 * i] += l * e * gain; out[2 * i + 1] += r * e * gain;
+        out[2 * i] += l * e * gain * v.panL; out[2 * i + 1] += r * e * gain * v.panR;
     }
 }
 

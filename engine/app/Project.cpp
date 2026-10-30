@@ -82,6 +82,7 @@ std::string SamplerApp::stateText() {
         io.i(k + "arpRate", x.arpRate, 0, 12); io.i(k + "arpPatt", x.arpPatt, 0, 6); io.i(k + "arpOct", x.arpOct, 0, 3); io.f(k + "arpLen", x.arpLen);
         io.f(k + "vol", x.vol); io.f(k + "pan", x.pan); io.f(k + "sendR", x.sendR); io.f(k + "sendD", x.sendD);
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
+        for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (x.entry >= 0 && x.entry < (int)lib_.size()) io.out << k << "sample=" << lib_[(size_t)x.entry].group << '|' << lib_[(size_t)x.entry].label << '\n';
@@ -115,6 +116,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         io.i(k + "arpRate", x.arpRate, 0, 12); io.i(k + "arpPatt", x.arpPatt, 0, 6); io.i(k + "arpOct", x.arpOct, 0, 3); io.f(k + "arpLen", x.arpLen);
         io.f(k + "vol", x.vol); io.f(k + "pan", x.pan); io.f(k + "sendR", x.sendR); io.f(k + "sendD", x.sendD);
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
+        for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (fmtv < 2) bars2 = std::min(3, bars2) == 0 ? 0 : (1 << std::min(3, bars2)) - 1;   // format 1 kept 0..3 for 1, 2, 4, 8 bars

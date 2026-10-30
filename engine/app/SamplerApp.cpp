@@ -10,7 +10,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -66,10 +66,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
+    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
     return p[m & 3];
 }
-int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 || (m & 3) == 0 ? 5 : 4; }
+int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 ? 6 : (m & 3) == 0 ? 5 : 4; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -147,7 +147,7 @@ void SamplerApp::importFile(const std::string& wav) {
 
 // ---- parameters ----
 void SamplerApp::applyAll(int t) {
-    applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t);
+    applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t); applyPads(t);
 }
 void SamplerApp::applyShape(int t, bool reslice) {
     const TrackState& x = ts_[t];
@@ -162,6 +162,17 @@ void SamplerApp::autoTune() {
     if (g < 24.f || g > 96.f) { say("NOT A PITCHED SOUND"); return; }
     const int root = (int)std::lround(g); ts_[track_].rootN = (root - 24) / 72.f; applyShape(track_);
     say(std::string("ROOT KEY ") + noteName(root) + std::to_string(root / 12 - 1));
+}
+void SamplerApp::applyPad(int t, int pad) {
+    const TrackState& x = ts_[t];
+    s_.setPad(t, pad, x.padVol[pad] * 1.5f, (x.padPitch[pad] - 0.5f) * 24.f, 0.f, std::pow(4.f, (x.padDecay[pad] - 0.5f) * 2.f), x.padGroup[pad]);
+}
+void SamplerApp::applyPads(int t) { for (int i = 0; i < 16; i++) applyPad(t, i); }
+std::string SamplerApp::padName(int pad) const {
+    static const char* n[16] = {"KICK", "KICK 2", "SNARE", "SNARE 2", "CLAP", "RIM", "HAT", "OPEN HAT", "TOM LO", "TOM MID", "TOM HI", "COWBELL", "CLAVE", "SHAKER", "CRASH", "ZAP"};
+    const int e = ts_[track_].entry;
+    if (e >= 0 && e < (int)lib_.size() && lib_[(size_t)e].path.rfind("synth:", 0) == 0 && lib_[(size_t)e].kit) return n[pad & 15];
+    return std::to_string(pad + 1);
 }
 void SamplerApp::applyAlgo(int t) { s_.setMode(t, ts_[t].algo); }
 void SamplerApp::applyEnv(int t) {
@@ -430,6 +441,15 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
             k[3] = cont("SLICE SENS", &x.sliceSens, [](float v) { return fmt("%.1fX", std::pow(2.f, (v - 0.5f) * 2.f)); }, [=] { applyShape(t, true); }, 0.05f);
         }
         break;
+    case P_PADS: {   // the selected pad of a kit
+        const int pd = x.selPad;
+        const std::string head = "PAD " + std::to_string(pd + 1) + " ";
+        k[0] = cont((head + "LEVEL").c_str(), &x.padVol[pd], [](float v) { return pct(v * 1.5f); }, [=] { applyPad(t, pd); });
+        k[1] = cont((head + "TUNE").c_str(), &x.padPitch[pd], [](float v) { return fmt("%+.1f ST", (v - 0.5f) * 24.f); }, [=] { applyPad(t, pd); }, 1.f / 48.f);
+        k[2] = cont((head + "DECAY").c_str(), &x.padDecay[pd], [](float v) { return fmt("%.2fX", std::pow(4.f, (v - 0.5f) * 2.f)); }, [=] { applyPad(t, pd); });
+        k[3] = choice((head + "CHOKE").c_str(), &x.padGroup[pd], {"OFF", "GROUP 1", "GROUP 2", "GROUP 3", "GROUP 4"}, [=] { applyPad(t, pd); });
+        break;
+    }
     case P_FX3:   // the OP-1 effects
         k[0] = cont("SPRING", &spring_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
         k[1] = cont("SPRING DAMP", &springDamp_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });

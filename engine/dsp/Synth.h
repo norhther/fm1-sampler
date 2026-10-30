@@ -101,11 +101,11 @@ struct WaveTable {
 
 class SynthVoice {
 public:
-    void start(const SynthPatch& p, int note, float vel, float sr, uint32_t seed, const SynthMacros& m) {
+    void start(const SynthPatch& p, int note, float vel, float sr, uint32_t seed, const SynthMacros& m, float padPitch = 0.f, float padDecay = 1.f) {
         *this = SynthVoice();
         p_ = &p; sr_ = sr; note_ = (float)note; vel_ = vel; rng_ = seed * 2654435761u + 12345u;
         for (int k = 0; k < 5; k++) ph_[k] = rnd();   // free-running phases: a stack does not sound like one thick oscillator
-        if (p.engine == 3) { pad_ = ((note - 60) % 16 + 16) % 16; return; }
+        if (p.engine == 3) { pad_ = ((note - 60) % 16 + 16) % 16; padPitch_ = padPitch; padDecay_ = padDecay; return; }
         if (p.engine == 2) {
             const float f = freq(0.f);
             for (int k = 0; k < 6; k++) { mph_[k] = 0.f; mAmp_[k] = p.ma[k] > 0.f ? p.ma[k] : 0.f; }
@@ -254,7 +254,7 @@ private:
         const int kit = p_->kit;
         if (kit == 2) { d.dec *= 0.6f; d.f0 *= 1.15f; d.noise *= 1.1f; d.pdec *= 0.7f; }          // punch: tighter and higher
         else if (kit == 3) { d.dec *= 1.3f; d.f0 *= 0.8f; d.f1 *= 0.85f; d.noise *= 1.4f; d.hp *= 0.6f; }   // lo-fi: lower, noisier, duller
-        d.dec *= std::pow(2.f, 0.8f * m.body); const float pit = std::pow(2.f, 0.3f * m.tone); d.f0 *= pit; d.f1 *= pit; d.hp = clampf(d.hp + 0.25f * m.tone, 0.02f, 0.97f);
+        d.dec *= std::pow(2.f, 0.8f * m.body) * std::max(0.05f, padDecay_); const float pit = std::pow(2.f, 0.3f * m.tone + padPitch_ / 12.f); d.f0 *= pit; d.f1 *= pit; d.hp = clampf(d.hp + 0.25f * m.tone, 0.02f, 0.97f);
         float s = 0.f;
         if (d.tone > 0.f) {
             const float f = d.f1 + (d.f0 - d.f1) * std::exp(-t_ / std::max(0.003f, d.pdec));
@@ -282,5 +282,5 @@ private:
     Lowpass lp_; int coefCount_ = 0; uint32_t rng_ = 1; bool done_ = false;
     float dl_[kDl] = {}; int plW_ = 0; float plN_ = 100.f, plDec_ = 0.99f, plZ_ = 0.f;
     float mph_[6] = {}, mAmp_[6] = {}, mf_ = 261.6f;                            // modal
-    int pad_ = 0; float hpz_ = 0.f, nlp_ = 0.f, mphd_[6] = {};                  // drums
+    int pad_ = 0; float padPitch_ = 0.f, padDecay_ = 1.f; float hpz_ = 0.f, nlp_ = 0.f, mphd_[6] = {};                  // drums
 };
