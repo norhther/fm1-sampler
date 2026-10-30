@@ -131,6 +131,7 @@ void SamplerUI::sampleArea(Rect r) {
         Rect c{r.x + a * (cw + 4), r.y + 30, cw, 28};
         button(c, a == 5 ? "PAUL" : SamplerApp::algoName(a), ts.algo == a, [this, a] { app_.setAlgo(a); }, 9.5f);
     }
+    if (app_.page() == SamplerApp::P_SQ) { sequencerView({r.x, r.y + 66, r.w, r.h - 66}); return; }   // the sequencer page shows the pattern instead of the waveform
     // waveform with the playback window
     Rect w{r.x, r.y + 66, r.w, 118};
     rrect(w, R_CARD, SURFACE); stroke(w, R_CARD, OUTLINE, 1);
@@ -175,7 +176,7 @@ void SamplerUI::sampleArea(Rect r) {
     }
     after_wave:
     // start / end handles (not while the microphone take is shown)
-    for (int h = 0; h < (app_.micState() == 1 || app_.micState() == 2 ? 0 : 2); h++) {
+    for (int h = 0; h < (app_.micState() == 1 || app_.micState() == 2 ? 0 : 2); h++) {   // (SQ page returned earlier)
         const float v = h ? ts.end : ts.start, hx = w.x + 2 + v * (w.w - 4);
         line(hx, w.y + 4, hx, w.y + w.h - 4, ACCENT, 2);
         rrect({hx - (h ? 10 : 0), w.y + 4, 10, 14}, 1, ACCENT);
@@ -222,6 +223,56 @@ void SamplerUI::sampleArea(Rect r) {
     button({br.x + br.w * 0.6f + 3, br.y, br.w * 0.4f - 3, br.h}, "LOAD FILE FROM DISK", false, [this] { app_.requestFile(); }, 11);
     const std::string ts_ = app_.toast();
     if (!ts_.empty()) text(r.x, br.y + br.h + 14, 11, ACCENT, ts_, 0, true);
+}
+
+// ---- sequencer: piano roll with touch editing ----
+void SamplerUI::sequencerView(Rect r) {
+    const int t = app_.track();
+    const auto ts = app_.state(t);
+    const int bars = app_.seqBarsOf(t), pt = patternTicks(bars), st = app_.stepTicks(), steps = std::max(1, pt / st);
+    const int state = ts.seqState;
+    // the roll
+    Rect roll{r.x, r.y, r.w, r.h - 46};
+    rrect(roll, R_CARD, SURFACE); stroke(roll, R_CARD, OUTLINE, 1);
+    const int rows = 24; const float rh = (roll.h - 4) / rows, cw = (roll.w - 4) / steps, x0 = roll.x + 2, y0 = roll.y + 2;
+    rollBase_ = std::min(127.f - rows, std::max(0.f, rollBase_));
+    const int base = (int)std::floor(rollBase_);
+    clip(roll);
+    for (int i = 0; i < rows; i++) {   // rows from the top: the highest note first; black keys are a little darker
+        const int n = base + rows - 1 - i, pc = n % 12;
+        if (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10) rrect({x0, y0 + i * rh, roll.w - 4, rh}, 0, theme::withAlpha(BG, 110));
+        if (pc == 0) { line(x0, y0 + (i + 1) * rh, x0 + roll.w - 4, y0 + (i + 1) * rh, OUTLINE, 1); text(x0 + 3, y0 + i * rh + rh / 2, 8.5f, DIM, std::string("C") + std::to_string(n / 12 - 1), 0, false); }
+    }
+    for (int b = 0; b <= bars * 4; b++) { const float gx = x0 + (float)b * kPpq / pt * (roll.w - 4); line(gx, y0, gx, y0 + roll.h - 4, b % 4 == 0 ? DIM : OUTLINE, b % 4 == 0 ? 1.5f : 1); }
+    // step cursor and playhead
+    if (state == 3) rrect({x0 + (float)st_.seqCursor[t] / pt * (roll.w - 4), y0, std::max(2.f, cw), roll.h - 4}, 0, theme::withAlpha(ACCENT, 90));
+    Session::SeqView v[kSeqMax]; const int n = app_.session().seqNotes(t, v, kSeqMax);
+    int newest = 0; for (int i = 0; i < n; i++) newest = std::max(newest, v[i].layer);
+    for (int i = 0; i < n; i++) {   // the newest layer is amber: that is what UNDO takes away
+        const int row = base + rows - 1 - v[i].note;
+        if (row < 0 || row >= rows) continue;
+        rrect({x0 + (float)v[i].tick / pt * (roll.w - 4), y0 + row * rh + 0.5f, std::max(3.f, (float)v[i].len / pt * (roll.w - 4)), std::max(2.f, rh - 1)}, 1, v[i].layer == newest ? ACCENT : TEXT);
+    }
+    if (st_.playing || state > 0) { const float px = x0 + (float)std::fmod(st_.beatPos * kPpq, (double)pt) / pt * (roll.w - 4); line(px, y0, px, y0 + roll.h - 4, TEXT, 1.5f); }
+    if (n == 0) text(roll.x + roll.w / 2, roll.y + roll.h / 2, T_BODY, DIM, state == 2 ? "PLAY KEYS: THEY ARE RECORDED" : state == 3 ? "PLAY KEYS: THEY LAND ON THE CURSOR  REC = REST" : "TAP THE GRID TO ADD NOTES, OR PRESS REC AND PLAY", 1, false);
+    endClip();
+    // touch: tap adds / removes a note on the step, drag up and down scrolls the pitch range
+    hit(roll, [this](float x, float y) { rollDownX_ = x; rollDownY_ = y; rollMoved_ = false; rollStartBase_ = rollBase_; },
+        [this, rh](float, float y) { if (std::fabs(y - rollDownY_) > 8) rollMoved_ = true; if (rollMoved_) rollBase_ = rollStartBase_ + (y - rollDownY_) / rh; },
+        [this, roll, x0, y0, cw, rh, rows, base, st, steps] {
+            if (rollMoved_) return;
+            const int col = std::min(steps - 1, std::max(0, (int)((rollDownX_ - x0) / cw))), row = std::min(rows - 1, std::max(0, (int)((rollDownY_ - y0) / rh)));
+            app_.seqToggleAt(col * st, base + rows - 1 - row);
+        });
+    // buttons
+    const float bw = (r.w - 4 * 6) / 5, by = r.y + r.h - 38;
+    int bx = 0;
+    auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
+    b("UNDO", false, [this] { app_.seqUndo(); });
+    b("CLEAR", false, [this] { app_.seqClear(); });
+    b(state == 3 ? "REST" : state == 2 ? "RECORDING" : "OVERDUB", state == 2, [this] { app_.seqRecToggle(); });
+    b("STEP", state == 3, [this, state] { app_.setSeqState(state == 3 ? 1 : 3); });
+    b(st_.bounce == 2 ? "ON TAPE..." : st_.bounce == 1 ? "WAITING..." : "TO TAPE", st_.bounce != 0, [this] { app_.seqBounce(); }, true);
 }
 
 void SamplerUI::pagePanel(Rect r) {

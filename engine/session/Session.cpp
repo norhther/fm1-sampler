@@ -46,6 +46,7 @@ struct Session::Impl {
         std::atomic<float> peak{0.f};
         // note sequencer pattern (audio thread owns it)
         SeqNote sn[kSeqMax]; int snCount = 0, seqState = 0, seqBars = 1; bool sounding[128] = {}; int openIdx[128] = {};
+        int seqCursor = 0, stepHeld = 0; uint8_t curLayer = 0; bool stepDown[128] = {};   // step entry
         // live quantize: notes held back to the grid, and the shift each held key got (its release gets the same)
         struct Delayed { int left, note, vel; };
         static constexpr int kDelayMax = 32;
@@ -69,6 +70,8 @@ struct Session::Impl {
     int takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
     // count-in: clicks for countIn bars, then the take (kind 1) or the sequencer recording (kind 2) starts
     int countIn = 0, countKind = 0; bool counting = false; double countLeft = 0;
+    // bounce: the pattern of one track is recorded onto its tape clip for exactly one loop cycle
+    int bounceTrack = -1, bounceSrc = 1; int64_t bounceLeft = 0; bool bounceArmed = false, bounceNew = false;
     std::vector<TickHit> hits;
     double pos = 0; int32_t loopSamples = 0;
     std::atomic<float> tapeSpeed{1.f}; double tapePos = 0;   // ONE tape pointer for every loop clip, so they never drift apart
@@ -103,7 +106,7 @@ struct Session::Impl {
     std::atomic<float> a_clipPos{0.f}, a_lfo[kTracks];
     std::atomic<double> a_beat{0.0};
     std::atomic<bool> a_metro{false};
-    std::atomic<int> a_countBeats{0};
+    std::atomic<int> a_countBeats{0}, a_bounce{0}, a_bounceDone{0}, a_seqCursor[kTracks];
     std::atomic<uint64_t> a_seq[kTracks][kSeqMax]; std::atomic<int> a_seqN[kTracks], a_seqBars[kTracks], a_seqState[kTracks];
     std::atomic<int> a_voiceN[kTracks]; std::atomic<float> a_voicePos[kTracks][kVoiceMax];
 
@@ -117,7 +120,7 @@ struct Session::Impl {
         for (auto& a : a_lfo) a = 0.f;
         for (auto& a : a_voiceN) a = 0;
         for (auto& r : a_seq) for (auto& a : r) a = 0;
-        for (int i = 0; i < kTracks; i++) { a_seqN[i] = 0; a_seqBars[i] = 1; a_seqState[i] = 0; }
+        for (int i = 0; i < kTracks; i++) { a_seqN[i] = 0; a_seqBars[i] = 1; a_seqState[i] = 0; a_seqCursor[i] = 0; }
         hits.reserve(64);
         worker = std::thread([this] {
             for (;;) {
@@ -147,7 +150,7 @@ struct Session::Impl {
     int patTicks(const Track& t) const { return patternTicks(t.seqBars); }
     void publishSeq(int ti) {
         Track& t = *tracks[(size_t)ti];
-        for (int i = 0; i < t.snCount; i++) { const SeqNote& n = t.sn[i]; a_seq[ti][i].store((uint64_t)n.tick | (uint64_t)n.len << 16 | (uint64_t)n.note << 32 | (uint64_t)n.vel << 40); }
+        for (int i = 0; i < t.snCount; i++) { const SeqNote& n = t.sn[i]; a_seq[ti][i].store((uint64_t)n.tick | (uint64_t)n.len << 16 | (uint64_t)n.note << 32 | (uint64_t)n.vel << 40 | (uint64_t)n.layer << 48); }
         a_seqN[ti].store(t.snCount); a_seqBars[ti].store(t.seqBars); a_seqState[ti].store(t.seqState);
     }
     void noteTo(Track& t, int note, int vel, int offset, std::vector<Arp::Ev>& evs) {   // a sequencer note: through the arpeggiator when it is on
@@ -177,13 +180,80 @@ struct Session::Impl {
             }
         }
     }
+    int maxLayer(const Track& t) const { int m = 0; for (int i = 0; i < t.snCount; i++) m = std::max<int>(m, t.sn[i].layer); return m; }
+    int stepTicks() const { const int g = gridTicks(seqGrid); return g ? g : kPpq / 4; }   // step entry advances by the quantize grid (1/16 when it is off)
+    void seqRemove(Track& t, int i) { for (int k = i; k + 1 < t.snCount; k++) t.sn[k] = t.sn[k + 1]; t.snCount--; for (int& o : t.openIdx) if (o > i + 1) o--; else if (o == i + 1) o = 0; }
+    void seqCursorTo(int ti, int tick) {
+        Track& t = *tracks[(size_t)ti]; const int pt = patTicks(t);
+        t.seqCursor = ((tick % pt) + pt) % pt; a_seqCursor[ti].store(t.seqCursor);
+    }
+    void seqStepMove(int ti, int steps) {
+        Track& t = *tracks[(size_t)ti]; const int st = stepTicks();
+        seqCursorTo(ti, t.seqCursor / st * st + steps * st);
+    }
+    // step entry: a key writes at the cursor (the same key on the same step erases it); the cursor moves on when the last key of a chord is up
+    void seqStepNote(int ti, int note, int vel) {
+        Track& t = *tracks[(size_t)ti];
+        if (vel > 0) {
+            if (t.stepHeld == 0) t.curLayer = (uint8_t)std::min(255, maxLayer(t) + 1);
+            t.stepHeld++; t.stepDown[note] = true;
+            for (int i = 0; i < t.snCount; i++) if (t.sn[i].note == note && t.sn[i].tick == t.seqCursor) { seqRemove(t, i); seqRelease(t); publishSeq(ti); return; }
+            if (t.snCount < kSeqMax) { t.sn[t.snCount++] = {(uint16_t)t.seqCursor, (uint16_t)std::max(6, stepTicks() * 3 / 4), (uint8_t)note, (uint8_t)vel, t.curLayer}; publishSeq(ti); }
+        } else if (t.stepDown[note]) {
+            t.stepDown[note] = false;
+            if (--t.stepHeld <= 0) { t.stepHeld = 0; seqStepMove(ti, 1); }
+        }
+    }
+    void seqUndoLast(int ti) {
+        Track& t = *tracks[(size_t)ti]; const int m = maxLayer(t);
+        if (t.snCount == 0) return;
+        int w = 0; for (int i = 0; i < t.snCount; i++) if (t.sn[i].layer != m) t.sn[w++] = t.sn[i];
+        t.snCount = w; seqRelease(t); publishSeq(ti);
+    }
+    void seqToggleNote(int ti, int tick, int len, int note, int vel) {
+        Track& t = *tracks[(size_t)ti]; const int pt = patTicks(t); tick = ((tick % pt) + pt) % pt;
+        for (int i = 0; i < t.snCount; i++) if (t.sn[i].note == note && tick >= t.sn[i].tick && tick < t.sn[i].tick + std::max<int>(1, t.sn[i].len)) { seqRemove(t, i); seqRelease(t); publishSeq(ti); return; }
+        if (t.snCount >= kSeqMax) return;
+        t.sn[t.snCount++] = {(uint16_t)tick, (uint16_t)std::max(1, len), (uint8_t)note, (uint8_t)std::min(127, std::max(1, vel)), (uint8_t)std::min(255, maxLayer(t) + 1)};
+        publishSeq(ti);
+    }
+    // ---- bounce: pattern -> tape ----
+    void bounceStart(int ti) {
+        Track& t = *tracks[(size_t)ti];
+        if (t.snCount == 0 || freeRec || freeArmed || counting || bounceTrack >= 0) return;
+        bounceSrc = loopSrc; loopSrc = 1;   // the tape takes the sound of the track, not the microphone
+        bounceTrack = ti; bounceNew = loopSamples == 0;
+        if (t.seqState != 1) seqState(ti, 1);
+        for (auto& tr : tracks) releaseAll(*tr);
+        if (bounceNew) {   // no loop yet: it gets the length of the pattern
+            const double spb = samplesPerBeat();
+            loopSamples = (int32_t)std::lround(t.seqBars * 4 * spb); a_loop = loopSamples;
+            loopBars = std::min(32, t.seqBars); a_bars = loopBars;
+            t.clip.assign((size_t)loopSamples * 2, 0.f); t.clipHas = true; t.clipRec = true;
+            pos = 0; tapePos = 0; playing = true; bounceLeft = loopSamples; a_bounce = 2;
+        } else { bounceArmed = true; playing = true; a_bounce = 1; }   // recording starts when the loop comes round
+    }
+    void bounceFinish() {
+        if (bounceTrack < 0) return;
+        Track& t = *tracks[(size_t)bounceTrack];
+        t.clipRec = false; t.recPrevOk = false; loopSrc = bounceSrc;
+        seqState(bounceTrack, 0);   // the tape holds the pattern now: it is muted so it does not play twice
+        bounceTrack = -1; bounceArmed = false; bounceLeft = 0; a_bounce = 0; a_bounceDone++;
+    }
+    void bounceCancel() {
+        if (bounceTrack < 0) return;
+        Track& t = *tracks[(size_t)bounceTrack];
+        t.clipRec = false; loopSrc = bounceSrc;
+        if (bounceNew) { t.clip.clear(); t.clipHas = false; clearIfEmpty(); }
+        bounceTrack = -1; bounceArmed = false; bounceLeft = 0; a_bounce = 0;
+    }
     void seqCapture(int ti, int note, int vel, int shift) {   // shift: samples to the quantized moment (live quantize), else 0
         Track& t = *tracks[(size_t)ti];
         const int pt = patTicks(t);
         const int cur = (int)std::fmod(std::max(0.0, (pos + shift) / samplesPerBeat() * kPpq) + 0.5, (double)pt);
         if (vel > 0) {
             if (t.snCount >= kSeqMax) return;
-            t.sn[t.snCount] = {(uint16_t)cur, (uint16_t)(kPpq / 4), (uint8_t)note, (uint8_t)vel};
+            t.sn[t.snCount] = {(uint16_t)cur, (uint16_t)(kPpq / 4), (uint8_t)note, (uint8_t)vel, t.curLayer};
             t.openIdx[note] = ++t.snCount;
         } else if (t.openIdx[note]) {
             SeqNote& n = t.sn[t.openIdx[note] - 1];
@@ -194,13 +264,15 @@ struct Session::Impl {
     }
     void seqState(int ti, int state) {
         Track& t = *tracks[(size_t)ti];
-        state = std::min(2, std::max(0, state));
+        state = std::min(3, std::max(0, state));
+        if (state == 2 || state == 3) t.curLayer = (uint8_t)std::min(255, maxLayer(t) + 1);   // one recording pass = one undo step
+        t.stepHeld = 0; for (bool& b : t.stepDown) b = false;
         if (state == 2) {
             if (seqRecTrack >= 0 && seqRecTrack != ti) { Track& o = *tracks[(size_t)seqRecTrack]; if (o.seqState == 2) { o.seqState = 1; for (int& x : o.openIdx) x = 0; publishSeq(seqRecTrack); } }
             seqRecTrack = ti;
             if (!playing && !counting) { if (countIn > 0 && loopSamples == 0) startCount(2); else { playing = true; if (loopSamples == 0) pos = 0; } }   // from a stopped transport the pattern starts at bar 1
         }
-        if (state == 0 || state == 1) for (int& x : t.openIdx) x = 0;
+        if (state != 2) for (int& x : t.openIdx) x = 0;
         if (state == 0) { seqRelease(t); if (counting && countKind == 2) { counting = false; countKind = 0; } }
         t.seqState = state; publishSeq(ti);
     }
@@ -236,6 +308,7 @@ struct Session::Impl {
             else { shift = t.lastShift[note]; delay = t.lastDelay[note]; t.lastShift[note] = t.lastDelay[note] = 0; }
         }
         if (t.seqState == 2 && playing) seqCapture(ti, note, vel, shift);
+        else if (t.seqState == 3) seqStepNote(ti, note, vel);
         if (delay > 0 && t.nDelayed < Track::kDelayMax) { t.delayed[t.nDelayed++] = {delay, note, vel}; return; }   // the key sounds on the grid line
         if (t.arpOn) { if (vel) t.arp.noteOn(note); else t.arp.noteOff(note); }
         else t.pending.push_back({note, vel});
@@ -499,6 +572,7 @@ struct Session::Impl {
                             t.recPrevOk = false;
                         }
                         t.clipHas = true;
+                        if (bounceTrack == ti && bounceLeft > 0 && --bounceLeft == 0) bounceFinish();
                     } else t.recPrevOk = false;
                 }
             }
@@ -539,9 +613,11 @@ struct Session::Impl {
         for (int i = 0; i < n * 2; i++) { const float v = std::tanh(out[i] * masterVol); out[i] = v; mp = std::max(mp, std::fabs(v)); }
         a_master.store(std::max(mp, a_master.load() * 0.92f));
         if (playing) {
+            const double pos0 = pos;
             pos += n;
             if (freeRec) a_freeSec = (float)(pos / sr);
             else if (loopSamples > 0 && pos >= loopSamples) pos -= loopSamples;
+            if (bounceArmed && loopSamples > 0 && pos < pos0) { bounceArmed = false; tracks[(size_t)bounceTrack]->clipRec = true; bounceLeft = loopSamples; a_bounce = 2; }   // recording covers every position of the loop once
         }
         freeBeat = playing ? pos / spb : freeBeat + n / spb;
         a_beat.store(freeBeat);
@@ -576,7 +652,7 @@ void Session::process(float* out, const float* in, int frames) {
 // ---- transport and notes ----
 void Session::play(bool on) {
     d->post([this, on] {
-        if (!on) { d->counting = false; d->countKind = 0; }
+        if (!on) { d->counting = false; d->countKind = 0; d->bounceCancel(); }
         if (!on && (d->freeRec || d->freeArmed)) d->freeStop();
         d->playing = on;
         if (!on) for (auto& t : d->tracks) d->releaseAll(*t);
@@ -632,11 +708,17 @@ void Session::seqSetBars(int t, int b) { if (t >= 0 && t < kTracks) d->post([=] 
 void Session::seqClear(int t) {
     if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; d->seqRelease(tr); tr.snCount = 0; d->publishSeq(t); });
 }
+void Session::seqUndo(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqUndoLast(t); }); }
+void Session::seqToggle(int t, int tick, int len, int note, int vel) { if (t >= 0 && t < kTracks && note >= 0 && note < 128) d->post([=] { d->seqToggleNote(t, tick, len, note, vel); }); }
+void Session::seqRest(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, 1); }); }
+void Session::seqCursorMove(int t, int steps) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, steps); }); }
+void Session::seqCursorSet(int t, int tick) { if (t >= 0 && t < kTracks) d->post([=] { d->seqCursorTo(t, tick); }); }
+void Session::seqBounce(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->bounceStart(t); }); }
 void Session::setQuantize(int g) { d->post([=] { d->seqGrid = std::min(kGrids - 1, std::max(0, g)); }); }
 int Session::seqNotes(int t, SeqView* out, int maxNotes) const {
     if (t < 0 || t >= kTracks) return 0;
     const int n = std::min(maxNotes, std::min(kSeqMax, d->a_seqN[t].load()));
-    for (int i = 0; i < n; i++) { const uint64_t v = d->a_seq[t][i].load(); out[i] = {(int)(v & 0xffff), (int)(v >> 16 & 0xffff), (int)(v >> 32 & 0xff), (int)(v >> 40 & 0xff)}; }
+    for (int i = 0; i < n; i++) { const uint64_t v = d->a_seq[t][i].load(); out[i] = {(int)(v & 0xffff), (int)(v >> 16 & 0xffff), (int)(v >> 32 & 0xff), (int)(v >> 40 & 0xff), (int)(v >> 48 & 0xff)}; }
     return n;
 }
 void Session::setInputQuant(int g) { d->post([=] { d->inQuant = std::min(kGrids - 1, std::max(0, g)); }); }
@@ -775,7 +857,8 @@ Session::Status Session::status() const {
         s.clipPos[i] = d->a_clipPos; s.lfoValue[i] = d->a_lfo[i];
         s.voiceN[i] = std::min(kVoiceMax, d->a_voiceN[i].load()); for (int j = 0; j < s.voiceN[i]; j++) s.voicePos[i][j] = d->a_voicePos[i][j];
     }
-    s.beatPos = d->a_beat; s.metro = d->a_metro; s.countBeats = d->a_countBeats;
+    s.beatPos = d->a_beat; s.metro = d->a_metro; s.countBeats = d->a_countBeats; s.bounce = d->a_bounce; s.bounceDone = d->a_bounceDone;
+    for (int i = 0; i < kTracks; i++) s.seqCursor[i] = d->a_seqCursor[i];
     for (int i = 0; i < kTracks; i++) { s.seqState[i] = d->a_seqState[i]; s.seqBars[i] = d->a_seqBars[i]; s.seqCount[i] = d->a_seqN[i]; }
     s.freeRecording = d->a_free; s.freeArmed = d->a_freeArmed; s.freeSeconds = d->a_freeSec;
     s.sampleState = d->a_sampleState; s.sampleTrack = d->a_sampleTrack; s.sampleSeconds = d->a_sampleSec; s.inputPeak = d->a_inPeak;

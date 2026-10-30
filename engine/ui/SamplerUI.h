@@ -38,6 +38,7 @@ private:
     void sampleArea(Rect r);
     void pagePanel(Rect r);
     void librarySheet();
+    void sequencerView(Rect r);
 
     SamplerApp& app_;
     float W_ = 860, H_ = 400, top_ = 0, bottom_ = 0;
@@ -50,4 +51,5 @@ private:
     bool linkMidi_ = false, linkAudio_ = false, sheetOpen_ = false;
     float sheetScroll_ = 0, sheetLastY_ = 0, sheetMoved_ = 0;
     Rect sheetList_{0, 0, 0, 0};
+    float rollBase_ = 48, rollDownX_ = 0, rollDownY_ = 0, rollStartBase_ = 48; bool rollMoved_ = false;   // piano roll: lowest note shown, touch state
 };

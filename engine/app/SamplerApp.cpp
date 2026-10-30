@@ -334,12 +334,12 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         break;
     case P_SQ: {
         std::vector<std::string> grids; for (int g = 0; g < kGrids; g++) grids.push_back(gridName(g));
-        k[0] = choice("PATTERN", &x.seqState, {"OFF", "PLAY", "REC"}, [=] { applyPattern(t); });
+        k[0] = choice("PATTERN", &x.seqState, {"MUTE", "PLAY", "REC", "STEP"}, [=] { applyPattern(t); });
         k[1] = choice("BARS", &x.seqBars, {"1", "2", "4", "8"}, [=] { applyPattern(t); });
-        k[2] = choice("QUANTIZE", &seqGrid_, grids, [=] { applyTempo(); });
-        Knob c; c.name = "CLEAR"; c.valid = true; c.isChoice = true;
-        c.value = st_.seqCount[t] ? std::to_string(st_.seqCount[t]) + " NOTES" : "EMPTY";
-        c.step = [this, t](int) { s_.seqClear(t); say("PATTERN CLEARED"); }; c.set = [this, t](float) { s_.seqClear(t); say("PATTERN CLEARED"); };
+        k[2] = choice(x.seqState == 3 ? "STEP SIZE" : "QUANTIZE", &seqGrid_, grids, [=] { applyTempo(); });
+        Knob c; c.name = "TO TAPE"; c.valid = true; c.isChoice = true;
+        c.value = st_.bounce == 1 ? "WAITING" : st_.bounce == 2 ? "RECORDING" : st_.seqCount[t] ? "TURN" : "EMPTY";
+        c.step = [this](int) { seqBounce(); }; c.set = [this](float) { seqBounce(); };
         k[3] = c;
         break;
     }
@@ -392,6 +392,20 @@ void SamplerApp::loopRecord() {
     s_.clipRecord(track_, !st_.track_clip_rec[track_]);
     say(st_.track_clip_rec[track_] ? "OVERDUB OFF" : "OVERDUB");
 }
+void SamplerApp::seqRecToggle() {
+    TrackState& x = ts_[track_];
+    if (x.seqState == 3) { s_.seqRest(track_); return; }   // step entry: REC is a rest
+    x.seqState = x.seqState == 2 ? 1 : 2; applyPattern(track_);
+    say(x.seqState == 2 ? "PATTERN REC: PLAY KEYS" : "PATTERN PLAYS");
+}
+void SamplerApp::seqBounce() {
+    if (!st_.seqCount[track_]) { say("PATTERN IS EMPTY"); return; }
+    if (st_.bounce) { say("ALREADY RECORDING"); return; }
+    ts_[track_].seqState = 1;
+    s_.seqBounce(track_);
+    say(loopAny_ ? "TO TAPE AT THE LOOP START" : "PATTERN TO TAPE");
+}
+void SamplerApp::seqToggleAt(int tick, int note) { s_.seqToggle(track_, tick, stepTicks(), note, 100); }
 void SamplerApp::lenAction(bool dbl) {   // loop x2 (the content repeats) or /2; guarded so a dragged slider does not double it again and again
     if (st_.loopSamples <= 0 || nowMs_ - lenAt_ < 300) return;
     lenAt_ = nowMs_ ? nowMs_ : 1;
@@ -418,6 +432,9 @@ void SamplerApp::micSample() {
 }
 std::string SamplerApp::loopText() const {
     if (st_.countBeats > 0) return "COUNT-IN " + std::to_string(st_.countBeats);
+    if (st_.bounce) return st_.bounce == 1 ? "PATTERN TO TAPE: WAITING FOR THE LOOP START" : "PATTERN TO TAPE: RECORDING";
+    if (st_.seqState[track_] == 2) return "PATTERN REC  SAVE UNDO";
+    if (st_.seqState[track_] == 3) return "STEP ENTRY: PLAY KEYS";
     if (st_.freeArmed) return loopSrc_ ? "PLAY A KEY TO START" : "WAITING FOR SOUND";
     if (st_.freeRecording) return fmt("RECORDING %.1fS", st_.freeSeconds);
     if (st_.track_clip_rec[track_]) return "OVERDUB";
@@ -487,8 +504,8 @@ void SamplerApp::onSysex(const uint8_t* m, size_t n) {
 void SamplerApp::button(int b, bool down) {
     if (down) held_ |= 1u << b; else held_ &= ~(1u << b);
     if (b == SAVE) {   // tap = save the loop, hold = clear it
-        if (down) { saveDownAt_ = nowMs_ ? nowMs_ : 1; saveHeld_ = true; saveHoldDone_ = false; page_ = P_SAVE; }
-        else { saveHeld_ = false; if (!saveHoldDone_) loopSave(); }
+        if (down) { saveDownAt_ = nowMs_ ? nowMs_ : 1; saveHeld_ = true; saveHoldDone_ = false; saveSeq_ = page_ == P_SQ; if (!saveSeq_) page_ = P_SAVE; }
+        else { saveHeld_ = false; if (!saveHoldDone_) { if (saveSeq_) seqUndo(); else loopSave(); } saveSeq_ = false; }   // sequencer page: tap = undo the last pass, hold = clear the pattern
         return;
     }
     if (!down) return;
@@ -503,14 +520,14 @@ void SamplerApp::button(int b, bool down) {
     case GLO: page_ = page_ == P_KEY ? P_TEMPO : page_ == P_TEMPO ? P_TIMING : P_KEY; break;   // GLO cycles: key, tempo, timing
     case SEL: page_ = P_LEN; break;
     case PLAY: transportPlay(); break;
-    case REC: loopRecord(); break;
+    case REC: if (page_ == P_SQ) seqRecToggle(); else loopRecord(); break;
     default: break;
     }
 }
 void SamplerApp::encoder(int i, int delta) {
     if (!delta) return;
     if (i == 0) { selectTrack(track_ + (delta > 0 ? 1 : -1)); return; }
-    if (i == 6) { browse(delta); return; }
+    if (i == 6) { if (page_ == P_SQ && ts_[track_].seqState == 3) s_.seqCursorMove(track_, delta > 0 ? 1 : -1); else browse(delta); return; }   // step entry: PRESETS moves the cursor
     if (i == 1) { setAlgo(ts_[track_].algo + (delta > 0 ? 1 : -1)); return; }
     if (i == 2 && mic_ == 1 && page_ != P_SAVE) { setMicThreshold01(micThr_ + (delta > 0 ? 0.03f : -0.03f)); touchedKnob_ = 0; touchedAt_ = nowMs_; return; }   // K1 = trigger level while the microphone listens
     Knobs k = knobs();
@@ -526,10 +543,12 @@ void SamplerApp::tick(uint32_t now) {
     st_ = s_.status();
     loopAny_ = false;
     for (int t = 0; t < kTracks; t++) loopAny_ |= st_.track_has_clip[t];
+    for (int t = 0; t < kTracks; t++) if (st_.seqState[t] != seqSeen_[t]) { seqSeen_[t] = st_.seqState[t]; ts_[t].seqState = st_.seqState[t]; }   // the engine changed it (a bounce mutes the pattern)
+    if (st_.bounceDone != lastBounceDone_) { lastBounceDone_ = st_.bounceDone; say("PATTERN IS ON THE TAPE (MUTED)"); }
     if (st_.loopSamples != lastLoopSamples_) { lastLoopSamples_ = st_.loopSamples; tempo_ = st_.bpm; }   // a take or a clear changed the tempo
     if (now - lastLoss_ > 4000 && now - lastRaise_ > 2000 && gap_ > 16) { gap_ = std::max<uint32_t>(16, gap_ * 9 / 10); lastRaise_ = now; }
     if (now - lastPing_ >= 500) { lastPing_ = now; pingId_ = (pingId_ + 1) & 0x3fff; sysex(5, n14(pingId_)); }
-    if (saveHeld_ && !saveHoldDone_ && now - saveDownAt_ > 700) { saveHoldDone_ = true; loopClear(); }
+    if (saveHeld_ && !saveHoldDone_ && now - saveDownAt_ > 700) { saveHoldDone_ = true; if (saveSeq_) seqClear(); else loopClear(); }
     // audition: the cursor rested, load the entry on the selected track and play it
     if (auditionAt_ && now >= auditionAt_) loadEntry(libCursor_);
     if (st_.sampleVersion != lastSampleVersion_) {   // a sample landed on a track: give it this track's settings
@@ -621,7 +640,7 @@ void SamplerApp::leds() {
     static const int pageBtn[] = {HOME, FX, ENV, LFO, ARP, SEQ, EDIT, GLO, SAVE, SEL, FX, FX, ARP, GLO, FX, GLO};
     m |= 1ull << pageBtn[page_];
     if (st_.playing) m |= 1ull << PLAY;
-    if (st_.freeRecording || st_.track_clip_rec[track_] || mic_ == 2) { if (blinkFast) m |= 1ull << REC; }
+    if (st_.freeRecording || st_.track_clip_rec[track_] || mic_ == 2 || st_.seqState[track_] == 2 || st_.bounce == 2) { if (blinkFast) m |= 1ull << REC; }
     else if (st_.freeArmed || mic_ == 1) { if (blinkSlow) m |= 1ull << REC; }
     else if (loopAny_) m |= 1ull << REC;
     // keys follow the tonality: the keyboard stays chromatic, only the keys that belong to the scale light, the root of each octave blinks slowly;
@@ -694,7 +713,7 @@ void SamplerApp::draw(uint32_t now) {
         if (rect(60 + i, cx, cy + 29, 110, 4, BAR)) rects_[70 + i] = ~0ull;   // the fill goes on top of every repaint of the track
         rect(70 + i, cx, cy + 29, bw, 4, p.isChoice ? ACCENT : PAPER);
     }
-    const char* hint = mic_ == 1 ? (page_ == P_SAVE ? "K4 = TRIGGER LEVEL  LINE = THRESHOLD" : "K1 = TRIGGER LEVEL  LINE = THRESHOLD") : mic_ == 2 ? "RECORDING  K1 ON LOOP PAGE STOPS"  : page_ == P_LEN ? "TURN K1: X2 OR /2  THE LOOP REPEATS" : page_ == P_SAVE ? "TAP SAVE = SAVE LOOP  HOLD = CLEAR ALL" : page_ == P_KEY ? "KEYS FOLLOW THE KEY  CHANGE ANY TIME"
+    const char* hint = mic_ == 1 ? (page_ == P_SAVE ? "K4 = TRIGGER LEVEL  LINE = THRESHOLD" : "K1 = TRIGGER LEVEL  LINE = THRESHOLD") : mic_ == 2 ? "RECORDING  K1 ON LOOP PAGE STOPS"  : page_ == P_LEN ? "TURN K1: X2 OR /2  THE LOOP REPEATS" : page_ == P_SAVE ? "TAP SAVE = SAVE LOOP  HOLD = CLEAR ALL" : page_ == P_SQ ? (ts_[track_].seqState == 3 ? "KEY NOTE  REC REST  PRE MOVE  SAVE UNDO" : "REC OVERDUB  SAVE UNDO  HOLD CLEAR") : page_ == P_KEY ? "KEYS FOLLOW THE KEY  CHANGE ANY TIME"
                      : "SEL TRACK  PRE BROWSE  ALG ALGORITHM";
     drawText(90, 6, 230, 1, DIM, BLACK, hint, 38);
     needClear_ = false;
@@ -758,7 +777,8 @@ void SamplerApp::hero(uint32_t now, const Knobs& k) {
         for (int i = 0; i < cols; i++) {
             int top = 0;
             for (int j = 0; j < cnt; j++) { const int c = v[j].tick * cols / pt; if (c == i) top = std::max(top, 12 + (v[j].note % 36) * (H - 12) / 36); }
-            column(i, x0 + i * 4, 3, std::max(2, top), i == pc ? ACCENT : top ? PAPER : BAR, true);
+            const int cc = (int)((double)st_.seqCursor[track_] / pt * cols), cursor = x.seqState == 3 && i == cc;
+            column(i, x0 + i * 4, 3, cursor ? std::max(8, top) : std::max(2, top), cursor || i == pc ? ACCENT : top ? PAPER : BAR, true);
         }
     } else if (page_ == P_TEMPO) {   // the tempo in big letters and four beat lamps
         char b[32]; snprintf(b, sizeof b, st_.loopSamples > 0 ? "%.0f LOCK" : "%.0f BPM", st_.loopSamples > 0 ? st_.bpm : tempo_);

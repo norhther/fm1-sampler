@@ -62,6 +62,15 @@ public:
     // looper and recorder
     void transportPlay();
     void loopRecord();                            // REC: arm / end the first take, or toggle overdub once a loop exists
+    // sequencer (also used by the phone's piano roll)
+    void seqRecToggle();                          // REC on the sequencer page: pattern overdub on / off (in step mode: a rest)
+    void seqUndo() { s_.seqUndo(track_); say("UNDO"); }
+    void seqClear() { s_.seqClear(track_); say("PATTERN CLEARED"); }
+    void seqBounce();                             // pattern -> tape for one loop cycle
+    void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
+    void seqToggleAt(int tick, int note);         // touch: add / remove a note (length = one step)
+    int stepTicks() const { const int g = gridTicks(seqGrid_); return g ? g : kPpq / 4; }
+    int seqBarsOf(int t) const { return 1 << ts_[t].seqBars; }
     void lenAction(bool dbl);
     void loopSave();
     void loopClear();
@@ -154,7 +163,8 @@ private:
     Session::Status st_{};
     bool loopAny_ = false;
     int mic_ = 0, micTrack_ = 0;
-    uint32_t saveDownAt_ = 0; bool saveHeld_ = false, saveHoldDone_ = false;
+    uint32_t saveDownAt_ = 0; bool saveHeld_ = false, saveHoldDone_ = false, saveSeq_ = false;   // saveSeq_: SAVE was pressed on the sequencer page (undo / clear)
+    int seqSeen_[kTracks] = {}, lastBounceDone_ = 0;
     int lastSampleVersion_ = 0, lastSampleFails_ = 0;
     uint32_t commitAt_ = 0; int commitTrack_ = -1;
     std::string toast_; uint32_t toastUntil_ = 0;

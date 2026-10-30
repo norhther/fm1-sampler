@@ -10,7 +10,7 @@ constexpr int kPpq = 192;      // ticks per beat: divides by 3 and 4, so every g
 constexpr int kSeqMax = 256;   // notes per pattern
 constexpr int kGrids = 8;
 
-struct SeqNote { uint16_t tick, len; uint8_t note, vel; };
+struct SeqNote { uint16_t tick, len; uint8_t note, vel, layer; };   // layer: the recording pass / step it came from, undo removes the newest
 
 // 0 OFF, 1 1/4, 2 1/8, 3 1/8T, 4 1/16, 5 1/16T, 6 1/32, 7 1/32T
 inline int gridTicks(int g) { static const int t[kGrids] = {0, 192, 96, 64, 48, 32, 24, 16}; return t[g < 0 ? 0 : g >= kGrids ? kGrids - 1 : g]; }
