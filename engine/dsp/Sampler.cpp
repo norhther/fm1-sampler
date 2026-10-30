@@ -53,12 +53,19 @@ void Sampler::resolveWindow(Voice& v, const SampleBuf*& buf, double& ws, double&
 void Sampler::noteOn(int note, int vel) {
     if (!orig_) return;
     int vi = -1; uint32_t oldest = 0xffffffffu;
-    if (mode_ == PAUL) {   // each voice costs FFTs: at most four at once
-        int active = 0; for (auto& v : voices_) active += v.on;
-        if (active >= 4) { for (int i = 0; i < kVoices; i++) if (voices_[i].on && voices_[i].born < oldest) { oldest = voices_[i].born; vi = i; } }
+    // too many sounding voices (each Paulstretch voice costs FFTs: at most four): the oldest one fades out in a few ms instead of being cut
+    int active = 0; for (auto& v : voices_) active += v.on && !v.fading;
+    if (active >= (mode_ == PAUL ? 4 : 8)) {
+        int victim = -1;
+        for (int i = 0; i < kVoices; i++) if (voices_[i].on && !voices_[i].fading && voices_[i].born < oldest) { oldest = voices_[i].born; victim = i; }
+        if (victim >= 0) fadeOut(voices_[victim]);
     }
-    if (vi < 0) for (int i = 0; i < kVoices; i++) if (!voices_[i].on) { vi = i; break; }
-    if (vi < 0) { oldest = 0xffffffffu; for (int i = 0; i < kVoices; i++) if (voices_[i].born < oldest) { oldest = voices_[i].born; vi = i; } }
+    for (int i = 0; i < kVoices; i++) if (!voices_[i].on) { vi = i; break; }
+    if (vi < 0) {   // every slot is busy (voices still fading): the oldest fading one, else the oldest of all, has to go
+        oldest = 0xffffffffu;
+        for (int i = 0; i < kVoices; i++) if (voices_[i].fading && voices_[i].born < oldest) { oldest = voices_[i].born; vi = i; }
+        if (vi < 0) { oldest = 0xffffffffu; for (int i = 0; i < kVoices; i++) if (voices_[i].born < oldest) { oldest = voices_[i].born; vi = i; } }
+    }
     Voice& v = voices_[vi];
     v = Voice();
     v.on = true; v.gate = true; v.note = note; v.vel = clampf(vel / 127.f, 0.f, 1.f); v.born = ++bornCounter_;
@@ -70,6 +77,11 @@ void Sampler::noteOn(int note, int vel) {
     v.env.gateOn();
     if (mode_ == PAUL) { v.paulIdx = vi; paul_[(size_t)vi]->start(v.buf->d.data(), v.buf->frames, v.ws, v.we, 8.f); }
 }
+void Sampler::fadeOut(Voice& v) {
+    v.gate = false; v.fading = true;
+    v.env.relCoef = std::exp(-4.6f / (0.008f * (float)sr_));   // 8 ms
+    v.env.gateOff();
+}
 void Sampler::noteOff(int note) {
     if (mode_ == ONESHOT) return;   // always plays out
     for (auto& v : voices_) if (v.on && v.gate && v.note == note) { v.gate = false; v.env.gateOff(); }
@@ -77,8 +89,21 @@ void Sampler::noteOff(int note) {
 void Sampler::allOff() { for (auto& v : voices_) v = Voice(); }
 bool Sampler::hasVoices() const { for (auto& v : voices_) if (v.on) return true; return false; }
 
+void Sampler::pumpPaul() {
+    // the stream with the least data first; one half hop per block, two when a stream is getting low, more only when one is about to run dry
+    for (int done = 0; done < 4; done++) {
+        PaulStream* worst = nullptr; size_t low = ~(size_t)0;
+        for (auto& v : voices_) if (v.on && v.paulIdx >= 0) { PaulStream& ps = *paul_[(size_t)v.paulIdx]; const size_t l = ps.lookahead(); if (l < 2 * PaulStream::HOP && l < low) { low = l; worst = &ps; } }
+        if (!worst) return;
+        const int allowed = low < 512 ? 4 : low < (size_t)PaulStream::HOP ? 2 : 1;
+        if (done >= allowed) return;
+        worst->stage();
+    }
+}
+
 void Sampler::render(float* out, int n) {
     if (!orig_) return;
+    if (mode_ == PAUL) pumpPaul();
     for (auto& v : voices_) if (v.on) renderVoice(v, out, n);
 }
 
@@ -95,6 +120,10 @@ void Sampler::renderVoice(Voice& v, float* out, int n) {
     const float gain = 0.8f * v.vel;
     for (int i = 0; i < n; i++) {
         float l = 0.f, r = 0.f;
+        if (mode_ == PAUL && !v.paulReady) {   // a new voice is silent until its first hop is there (a few blocks at most)
+            if (!paul_[(size_t)v.paulIdx]->ready()) continue;
+            v.paulReady = true;
+        }
         const float e = v.env.next();
         if (v.env.done() && !v.gate) { v.on = false; return; }
         if (mode_ == PAUL) {
