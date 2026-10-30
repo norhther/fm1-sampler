@@ -74,6 +74,7 @@ std::string SamplerApp::stateText() {
         x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
     };
     common(io);
+    { std::string sg; for (size_t i = 0; i < songChain_.size(); i++) sg += (i ? "," : "") + std::to_string(songChain_[i]); io.out << "song=" << sg << '\n'; int on = songOn_; io.i("songOn", on, 0, 1); }
     for (int t = 0; t < kTracks; t++) {
         TrackState& x = ts_[t]; const std::string k = "t" + std::to_string(t) + ".";
         io.i(k + "algo", x.algo, 0, 5); io.f(k + "a", x.a); io.f(k + "d", x.d); io.f(k + "s", x.s); io.f(k + "r", x.r);
@@ -89,8 +90,13 @@ std::string SamplerApp::stateText() {
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (x.entry >= 0 && x.entry < (int)lib_.size()) io.out << k << "sample=" << lib_[(size_t)x.entry].group << '|' << lib_[(size_t)x.entry].label << '\n';
-        Session::SeqView v[kSeqMax]; const int n = s_.seqNotes(t, v, kSeqMax);
-        if (n > 0) { io.out << k << "notes="; for (int i = 0; i < n; i++) io.out << (i ? ";" : "") << v[i].tick << ',' << v[i].len << ',' << v[i].note << ',' << v[i].vel; io.out << '\n'; }
+        io.out << k << "slot=" << st_.seqSlot[t] << '\n';
+        for (int q = 0; q < 8; q++) {   // every pattern bank of the track
+            Session::SeqView v[kSeqMax]; int bars = 1; const int n = s_.seqSlotNotes(t, q, v, kSeqMax, &bars);
+            if (n == 0 && bars <= 1) continue;
+            io.out << k << "s" << q << ".bars=" << bars << '\n';
+            if (n > 0) { io.out << k << "s" << q << ".notes="; for (int i = 0; i < n; i++) io.out << (i ? ";" : "") << v[i].tick << ',' << v[i].len << ',' << v[i].note << ',' << v[i].vel << ',' << v[i].prob << ',' << v[i].ratchet << ',' << v[i].nudge; io.out << '\n'; }
+        }
     }
     return io.out.str();
 }
@@ -134,16 +140,32 @@ void SamplerApp::applyStateText(const std::string& text) {
         }
         if (x.entry >= 0 && !resolvePath(x.entry).empty()) s_.loadSamplePath(resolvePath(x.entry), lib_[(size_t)x.entry].kit, t); else s_.unloadSample(t);
         applyAll(t); applyTrackFx(t); applyPattern(t);
-        std::vector<Session::SeqView> notes;
-        const auto nt = kv.find(k + "notes");
-        if (nt != kv.end()) {
-            std::istringstream ns(nt->second); std::string item;
-            while (std::getline(ns, item, ';') && (int)notes.size() < kSeqMax) {
-                int a, b, c, d; if (sscanf(item.c_str(), "%d,%d,%d,%d", &a, &b, &c, &d) == 4 && a >= 0 && a < patternTicks(8) && b > 0 && c >= 0 && c < 128) notes.push_back({a, std::min(b, 65535), c, std::min(127, std::max(1, d))});
+        auto parseNotes = [&](const std::string& text) {
+            std::vector<Session::SeqView> out; std::istringstream ns(text); std::string item;
+            while (std::getline(ns, item, ';') && (int)out.size() < kSeqMax) {
+                int a, b, c, d, pr = 100, ra = 1, nu = 0; const int got = sscanf(item.c_str(), "%d,%d,%d,%d,%d,%d,%d", &a, &b, &c, &d, &pr, &ra, &nu);
+                if (got >= 4 && a >= 0 && a < patternTicks(16) && b > 0 && c >= 0 && c < 128) out.push_back({a, std::min(b, 65535), c, std::min(127, std::max(1, d)), std::min(100, std::max(0, pr)), std::min(8, std::max(1, ra)), std::min(15, std::max(-16, nu))});
             }
+            return out;
+        };
+        s_.seqSelectPattern(t, 0, true);
+        bool anySlot = false; for (int q = 0; q < 8; q++) anySlot |= kv.count(k + "s" + std::to_string(q) + ".bars") > 0;
+        if (anySlot) {
+            for (int q = 0; q < 8; q++) {
+                const std::string sk = k + "s" + std::to_string(q) + "."; const auto bi = kv.find(sk + "bars"), ni = kv.find(sk + "notes");
+                const int bars = bi == kv.end() ? 1 : std::min(16, std::max(1, std::atoi(bi->second.c_str())));
+                auto v = ni == kv.end() ? std::vector<Session::SeqView>() : parseNotes(ni->second);
+                s_.seqSetSlot(t, q, v.data(), (int)v.size(), bars);
+            }
+            int cur = 0; { Io io2{false, &kv, {}}; io2.i(k + "slot", cur, 0, 7); }
+            s_.seqSelectPattern(t, cur, true);
+        } else {
+            const auto nt = kv.find(k + "notes"); auto notes = nt == kv.end() ? std::vector<Session::SeqView>() : parseNotes(nt->second);
+            s_.seqSet(t, notes.data(), (int)notes.size());
         }
-        s_.seqSet(t, notes.data(), (int)notes.size());
+
     }
+    songChain_.clear(); { const auto sg = kv.find("song"); if (sg != kv.end()) { std::istringstream ss(sg->second); std::string item; while (std::getline(ss, item, ',') && songChain_.size() < 64) if (!item.empty()) songChain_.push_back(std::min(7, std::max(0, std::atoi(item.c_str())))); } int on = 0; Io io3{false, &kv, {}}; io3.i("songOn", on, 0, 1); songOn_ = on && !songChain_.empty(); applySong(); }
     applyFx(); applyMasterFx(); applySeq(0); applyTomb(); applyTempo(); applyMaster(); s_.setLoopSource(loopSrc_);
     setScale(scale_.scale, scale_.root, scale_.octave, scale_.mode);
     track_ = track;

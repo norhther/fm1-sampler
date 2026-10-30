@@ -89,6 +89,7 @@ void SamplerUI::frame(uint32_t now) {
     pagePanel({W_ - right, tb + MARGIN, right - MARGIN, H_ - tb - 2 * MARGIN});
     if (sheetOpen_) librarySheet();
     if (projOpen_) projectSheet();
+    if (songOpen_) songSheet();
 }
 
 void SamplerUI::topBar(Rect r) {
@@ -312,8 +313,8 @@ void SamplerUI::sequencerView(Rect r) {
     tb("SELECT", selMode_, [this] { selMode_ = !selMode_; sel_.clear(); drag_ = {}; rbOn_ = false; }, 1.4f);
     // the roll
     const float keyW = drumView_ ? 76.f : 34.f, rulerH = 14;
-    const float panelH = selMode_ ? 86.f : 0.f;
-    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46 - panelH};
+    const float panelH = selMode_ ? 86.f : 0.f, slotH = 26.f;
+    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46 - panelH - slotH - 4};
     rrect(roll, R_CARD, SURFACE); stroke(roll, R_CARD, OUTLINE, 1);
     if (drumView_) { rollRowsF_ = 8.f; rollBase_ = 60.f + 8.f * (drumView_ - 1); }   // one row per pad, eight at a time
     rollZoom_ = std::min(zoomMax, std::max(1.f, rollZoom_)); rollRowsF_ = std::min(60.f, std::max(5.f, rollRowsF_));
@@ -433,6 +434,25 @@ void SamplerUI::sequencerView(Rect r) {
             else app_.seqToggleAt(d.tick, d.note, st);   // a tap: add a one-step note, or remove the one that was touched
         });
     // buttons: record into the pattern (same as holding SEQ on the FM-1), mute, clear
+    // pattern banks A..H: tap one to play it next (at the end of the pattern while it plays); COPY then a bank copies this pattern there; SONG chains banks
+    {
+        const float sy = roll.y + roll.h + 4 + (selMode_ ? 0.f : 0.f) + panelH;
+        const int cur = app_.patternSlot(t), pend = st_.seqSlotPending[t];
+        const float cw = 34, sw = 56, gap = 4; float cx = r.x;
+        text(cx + 2, sy + slotH / 2, 8.5f, DIM, "PATTERN", 0, true); cx += 52;
+        for (int q = 0; q < 8; q++) {
+            Session::SeqView tmp[1]; int bb = 0; const int cnt = app_.session().seqSlotNotes(t, q, tmp, 1, &bb);
+            const Rect c{cx + q * (cw + gap), sy, cw, slotH};
+            const bool on = q == cur;
+            rrect(c, R_CONTROL, on ? ACCENT : SURFACE); stroke(c, R_CONTROL, pend == q ? ACCENT : copyArm_ ? DIM : OUTLINE, pend == q || copyArm_ ? 2 : 1);
+            text(c.x + c.w / 2, c.y + c.h / 2, 11, on ? ON_ACCENT : TEXT, std::string(1, (char)('A' + q)), 1, true);
+            if (cnt > 0) circle(c.x + c.w - 6, c.y + 6, 2.5f, on ? ON_ACCENT : ACCENT);
+            tap(c, [this, q] { if (copyArm_) { app_.copyPattern(q); copyArm_ = false; app_.say(std::string("COPIED TO ") + (char)('A' + q)); } else app_.selectPattern(q); });
+        }
+        const float ex = cx + 8 * (cw + gap) + 6;
+        button({ex, sy, sw, slotH}, copyArm_ ? "COPY TO..." : "COPY", copyArm_, [this] { copyArm_ = !copyArm_; }, 9.5f);
+        button({ex + sw + gap, sy, sw, slotH}, st_.songOn ? "SONG ON" : "SONG", st_.songOn, [this] { songOpen_ = true; }, 9.5f);
+    }
     // bars: add or remove one at the end (new bars are empty; the notes behind a removed end are dropped, UNDO brings them back)
     const float by = r.y + r.h - 38, bwBar = 40, lblW = 78, cpW = 50, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 4 * 6) / 4;
     const int nb = app_.seqBarsOf(t);
@@ -447,6 +467,37 @@ void SamplerUI::sequencerView(Rect r) {
     b(state == 0 ? "MUTED" : "PLAYING", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
     b("DICE", false, [this] { app_.seqDice(); });
     b("CLEAR", false, [this] { app_.seqClear(); });
+}
+
+// ---- song: banks of patterns one after the other ----
+void SamplerUI::songSheet() {
+    rrect({0, 0, W_, H_}, 0, theme::withAlpha(BG, 215));
+    tap({0, 0, W_, H_}, [this] { songOpen_ = false; });
+    const Rect box{W_ * 0.14f, 40, W_ * 0.72f, H_ - 80};
+    rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 1);
+    tap(box, [] {});
+    text(box.x + 14, box.y + 20, T_TITLE, TEXT, "SONG", 0, true);
+    text(box.x + 80, box.y + 21, T_CAPTION, DIM, "EVERY STEP PLAYS ITS PATTERN BANK ON ALL TRACKS, AS LONG AS THE LONGEST PATTERN", 0, false);
+    button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { songOpen_ = false; }, 10);
+    const auto& chain = app_.songChain();
+    // the chain: one chip per step, the playing one lit; tap a chip to take it out
+    const float cw = 40, gap = 6; const int perRow = std::max(1, (int)((box.w - 28 + gap) / (cw + gap)));
+    if (chain.empty()) text(box.x + box.w / 2, box.y + 74, T_BODY, DIM, "EMPTY: ADD BANKS BELOW", 1, false);
+    for (size_t i = 0; i < chain.size(); i++) {
+        const Rect c{box.x + 14 + (i % (size_t)perRow) * (cw + gap), box.y + 52 + (i / (size_t)perRow) * (cw + gap - 2), cw, cw - 4};
+        const bool now = st_.songOn && (int)i == st_.songPos;
+        rrect(c, R_CONTROL, now ? ACCENT : RAISED); stroke(c, R_CONTROL, OUTLINE, 1);
+        text(c.x + c.w / 2, c.y + c.h / 2 - 3, 13, now ? ON_ACCENT : TEXT, std::string(1, (char)('A' + chain[i])), 1, true);
+        text(c.x + c.w / 2, c.y + c.h - 7, 7.5f, now ? ON_ACCENT : DIM, std::to_string(i + 1), 1, false);
+    }
+    // adding
+    const float by = box.y + box.h - 112;
+    text(box.x + 14, by - 6, T_CAPTION, DIM, "ADD A STEP", 0, true);
+    for (int q = 0; q < 8; q++) button({box.x + 14 + q * (cw + gap), by, cw, 34}, std::string(1, (char)('A' + q)), false, [this, q] { app_.songAdd(q); }, 12);
+    const float bw = (box.w - 28 - 2 * 8) / 3, y2 = box.y + box.h - 66;
+    button({box.x + 14, y2, bw, 42}, st_.songOn ? "SONG: ON" : "SONG: OFF", st_.songOn, [this] { app_.songSet(!app_.songOn()); }, 12, true);
+    button({box.x + 14 + bw + 8, y2, bw, 42}, "REMOVE LAST", false, [this] { app_.songPop(); }, 11);
+    button({box.x + 14 + 2 * (bw + 8), y2, bw, 42}, "CLEAR SONG", false, [this] { app_.songClear(); }, 11);
 }
 
 // ---- pads: a 4 x 4 grid to play a kit with; the harder you hit (lower on the pad) the louder ----

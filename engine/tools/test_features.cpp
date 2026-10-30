@@ -785,6 +785,48 @@ static void testSynthEdit() {
     CHECK(app.sampleLabel(2) == "Saw Bass", "...and loads with the synth on the track (%s)", app.sampleLabel(2).c_str());
 }
 
+static void testBanks() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_ti; mkdir -p /tmp/fm1sampler_ti");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_ti"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
+    run(2.5);
+    app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.2);
+    app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Synth Kit 808") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }   // a track plays its pattern when it has a sound
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); run(0.3);
+    Session::SeqView v[kSeqMax]; auto cnt = [&]() { return s.seqNotes(4, v, kSeqMax); };
+    app.seqToggleAt(0, 60); app.seqToggleAt(192, 62); run(0.3); CHECK(cnt() == 2 && app.status().seqSlot[4] == 0, "bank A holds two notes");
+    app.selectPattern(1); run(0.3); CHECK(app.status().seqSlot[4] == 1 && cnt() == 0, "bank B is empty (slot %d, %d notes)", app.status().seqSlot[4], cnt());
+    app.seqToggleAt(96, 64); run(0.3); CHECK(cnt() == 1, "...and has its own notes");
+    app.selectPattern(0); run(0.3); CHECK(app.status().seqSlot[4] == 0 && cnt() == 2, "back to A: its two notes are still there (%d)", cnt());
+    app.copyPattern(2); run(0.3); { Session::SeqView w[kSeqMax]; int bars = 0; const int n = s.seqSlotNotes(4, 2, w, kSeqMax, &bars); CHECK(n == 2 && bars == 1, "COPY: bank C is a copy of A (%d notes, %d bars)", n, bars); }
+    app.selectPattern(2); run(0.3); CHECK(app.status().seqSlot[4] == 2 && cnt() == 2, "C plays the copy"); app.selectPattern(0); run(0.3);
+    // while it plays the next bank waits for the end of the pattern
+    { auto k = app.knobs(); k[0].set(1.f / 3); } run(0.2); if (!app.status().playing) btn(SamplerApp::PLAY);
+    run(0.5); app.selectPattern(1); run(0.1);
+    CHECK(app.status().seqSlotPending[4] == 1 && app.status().seqSlot[4] == 0, "B is queued while A plays (pending %d, now %d)", app.status().seqSlotPending[4], app.status().seqSlot[4]);
+    run(2.5);
+    CHECK(app.status().seqSlot[4] == 1 && app.status().seqSlotPending[4] == -1, "...and starts at the end of the pattern (now %d)", app.status().seqSlot[4]);
+    // the song: A, B, C, A
+    app.selectPattern(0); run(2.5);
+    app.songClear(); app.songAdd(0); app.songAdd(1); app.songAdd(2); app.songAdd(0); app.songSet(true); run(0.2);
+    CHECK(app.songChain().size() == 4 && app.songOn(), "a song of four steps");
+    bool order = true; std::vector<int> seen; int last = -1; for (int i = 0; i < 40; i++) { run(0.25); const int sp = app.status().songPos, sl = app.status().seqSlot[4]; if (app.status().songOn && sp >= 0 && sp < 4) { static const int want[4] = {0, 1, 2, 0}; if (sl != want[sp]) order = false; if (sp != last) { seen.push_back(sp); last = sp; } } }
+    bool advanced = seen.size() >= 3; for (size_t i = 1; i < seen.size(); i++) advanced &= seen[i] == (seen[i - 1] + 1) % 4;
+    CHECK(order && advanced, "the song plays its banks in order (%zu steps seen, bank follows the step: %d)", seen.size(), order);
+    // a project keeps the banks and the song
+    CHECK(app.saveProject("Bank Test"), "saved"); run(1.5);
+    app.songClear(); app.selectPattern(0); app.seqClear(); run(0.3); app.selectPattern(1); app.seqClear(); run(0.3); app.selectPattern(0);
+    app.loadProject("Bank Test"); for (int i = 0; i < 40; i++) { run(0.1); std::this_thread::sleep_for(std::chrono::milliseconds(30)); }
+    { Session::SeqView w[kSeqMax]; int bars = 0; const int a = s.seqSlotNotes(4, 0, w, kSeqMax, &bars), b = s.seqSlotNotes(4, 1, w, kSeqMax, &bars), c = s.seqSlotNotes(4, 2, w, kSeqMax, &bars);
+      CHECK(a == 2 && b == 1 && c == 2 && app.songChain().size() == 4 && app.songOn(), "loaded: banks %d / %d / %d notes, song of %zu steps", a, b, c, app.songChain().size()); }
+    app.songClear(); run(0.2); if (app.status().playing) btn(SamplerApp::PLAY);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -878,6 +920,7 @@ int main() {
     }
     testSynths();
     testOp1();
+    testBanks();
     testSynthEdit();
     testMixer();
     testSampleEdit();

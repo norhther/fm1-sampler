@@ -90,6 +90,16 @@ public:
     void resampleNow();                                   // the sound you hear (bars of the loop or of the pattern) becomes a sample on this track
     void applyEdit(int t);
     void setSliceStarts(const std::vector<float>& pts) { s_.setSliceStarts(track_, pts); }
+    // pattern banks A..H and the song (a chain of banks played one after the other on every track)
+    int patternSlot(int t) const { return st_.seqSlot[t]; }
+    void selectPattern(int slot) { s_.seqSelectPattern(track_, slot, false); }
+    void copyPattern(int toSlot) { s_.seqCopyPattern(track_, st_.seqSlot[track_], toSlot); }
+    const std::vector<int>& songChain() const { return songChain_; }
+    bool songOn() const { return songOn_; }
+    void songAdd(int slot) { if (songChain_.size() < 64) { songChain_.push_back(std::min(7, std::max(0, slot))); applySong(); } }
+    void songPop() { if (!songChain_.empty()) { songChain_.pop_back(); applySong(); } }
+    void songClear() { songChain_.clear(); songOn_ = false; applySong(); }
+    void songSet(bool on) { songOn_ = on && !songChain_.empty(); applySong(); }
     void tombolaDrop();                                   // a ball with a random note of the scale
     void tombolaReverse() { tSpin_ = 1.f - tSpin_; applyTomb(); }
     void tombolaClear() { s_.tombolaClear(); }
@@ -100,8 +110,8 @@ public:
     int seqGridIndex() const { return seqGrid_; }
     void cycleSeqGrid() { seqGrid_ = seqGrid_ >= kGrids - 1 || seqGrid_ < 1 ? 1 : seqGrid_ + 1; applyTempo(); }   // 1/4, 1/8, 1/8T ... 1/32T (the grid of the roll and of the quantize)
     int seqBarsOf(int t) const { return ts_[t].seqBars + 1; }
-    void seqAddBarCopy() { if (ts_[track_].seqBars < 15) { ts_[track_].seqBars++; s_.seqAddBar(track_, true); } }   // one more bar holding a copy of the last one
-    void seqSetBarCount(int bars) { ts_[track_].seqBars = std::min(15, std::max(0, bars - 1)); applyPattern(track_); }   // add or remove bars (1..16)
+    void seqAddBarCopy() { if (ts_[track_].seqBars < 15) { ts_[track_].seqBars++; barsLocalAt_[track_] = nowMs_; s_.seqAddBar(track_, true); } }   // one more bar holding a copy of the last one
+    void seqSetBarCount(int bars) { ts_[track_].seqBars = std::min(15, std::max(0, bars - 1)); barsLocalAt_[track_] = nowMs_; applyPattern(track_); }   // add or remove bars (1..16)
     void lenAction(bool dbl);
     void loopSave();
     void loopClear();
@@ -221,6 +231,7 @@ private:
     // master fx (FX 2, LIVE FX), tempo page, sequencer grid
     float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
     float flanger_ = 0.f, drive_ = 0.f, eqLow_ = 0.5f, eqMid_ = 0.5f, eqHigh_ = 0.5f, tremolo_ = 0.f, wah_ = 0.f, ringmod_ = 0.f, tapeStop_ = 0.f;
+    std::vector<int> songChain_; bool songOn_ = false; void applySong(); uint32_t barsLocalAt_[kTracks] = {};
     int duckSrc_ = 0, limiter_ = 0; float duckRel_ = 0.3f;   // sidechain source (0 off, 1..8) and its release, master limiter (0 off, then ceilings)
     void applyMaster();
     int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;

@@ -24,6 +24,7 @@ public:
         double loopSamples;      // 0 = no loop yet
         float bpm;
         int loopBars;
+        int seqSlot[kTracks], seqSlotPending[kTracks]; bool songOn; int songPos, songLen;   // pattern banks A..H (index 0..7): the current one, the one queued for the pattern end (-1 none); the song
         float master_peak; bool clip;   // clip: the master was pushed past full level a moment ago
 
         float track_peak[kTracks];
@@ -112,6 +113,11 @@ public:
     void seqRedo(int track);
     void seqSet(int track, const SeqView* notes, int n);                      // replace the whole pattern (one undo step)
     void seqApply(int track, const SeqRef* notes, int n, int op, int arg);    // edits a selection in one undo step: delete, transpose (semitones), shift / duplicate by `arg` ticks, set velocity / probability / ratchet / nudge
+    void seqSelectPattern(int track, int slot, bool immediate);               // pattern bank 0..7 (A..H): at once, or (while it plays) when the current pattern ends
+    void seqCopyPattern(int track, int fromSlot, int toSlot);
+    int seqSlotNotes(int track, int slot, SeqView* out, int maxNotes, int* bars) const;   // the notes of any bank
+    void seqSetSlot(int track, int slot, const SeqView* notes, int n, int bars);          // fills a bank (a project is loaded)
+    void setSong(const uint8_t* chain, int n, bool on);                       // the song: banks one after the other for every track, each as long as its longest pattern
     void seqAddBar(int track, bool copyLast);                                 // one more bar at the end (up to 16), empty or a copy of the last one
     void seqResize(int track, int tick, int note, int len);                   // touch edit: a note gets a new length in ticks
     void seqToggle(int track, int tick, int len, int note, int vel);   // touch edit: a note under that tick is removed, else one is added

@@ -225,6 +225,7 @@ void SamplerApp::applySynthEdit(int t) {
     const TrackState& x = ts_[t]; static const int uni[4] = {-1, 1, 3, 5}; static const float gl[4] = {0.f, 0.f, 0.06f, 0.25f};
     s_.setSynthEdit(t, x.edW1 - 1, x.edW2 - 1, (x.edDet2 - 0.5f) * 100.f, (x.edCut - 0.5f) * 6.f, x.edRes * 6.f, x.edType, uni[std::min(3, std::max(0, x.edUni))], x.edVoice > 0, gl[std::min(3, std::max(0, x.edVoice))]);
 }
+void SamplerApp::applySong() { std::vector<uint8_t> c; for (int x : songChain_) c.push_back((uint8_t)x); s_.setSong(c.data(), (int)c.size(), songOn_); }
 void SamplerApp::applyEdit(int t) { const TrackState& x = ts_[t]; s_.setSampleLevel(t, x.levelN * 3.f, (x.fineN - 0.5f) * 100.f); }
 void SamplerApp::resampleNow() {
     if (mic_ != 0) return;
@@ -771,6 +772,7 @@ void SamplerApp::tick(uint32_t now) {
     if (fwDirty_) { fwDirty_ = false; sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true); }
     if (repaintAt_ && now >= repaintAt_) { repaintAt_ = repaintAt_ + 2500 < now + 2500 && repaintCount_++ < 1 ? now + 2500 : 0; needClear_ = true; }
     st_ = s_.status();
+    for (int t = 0; t < kTracks; t++) if (st_.seqBars[t] > 0 && nowMs_ - barsLocalAt_[t] > 250) ts_[t].seqBars = std::min(15, st_.seqBars[t] - 1);   // the engine is the truth for the length (a bank can have another one)
     projectTick();
     loopAny_ = false;
     for (int t = 0; t < kTracks; t++) loopAny_ |= st_.track_has_clip[t];
