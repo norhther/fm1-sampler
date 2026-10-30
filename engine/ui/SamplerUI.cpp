@@ -42,6 +42,31 @@ void SamplerUI::touch(int action, float x, float y, uint32_t now) {
         haveActive_ = false;
     }
 }
+// two fingers on the piano roll: the distance between them in x zooms the time, in y the pitch range; what is under the fingers stays under them
+void SamplerUI::pinch(int phase, float x1, float y1, float x2, float y2) {
+    if (phase == 2) { pinchOn_ = false; return; }
+    const float cx = 0.5f * (x1 + x2), cy = 0.5f * (y1 + y2), dx = std::fabs(x1 - x2), dy = std::fabs(y1 - y2), minD = 60.f;   // (tiny distances would make the zoom jump)
+    if (phase == 0) {
+        pinchOn_ = false;
+        if (!rollOn_ || cx < rollX0_ || cx > rollX0_ + rollW_ || cy < rollY0_ || cy > rollY0_ + rollH_) return;
+        haveActive_ = false; rollMoved_ = true;   // the first finger was a touch of the roll: it must not become a tap
+        pinchOn_ = true; pinchDx0_ = std::max(dx, minD); pinchDy0_ = std::max(dy, minD);
+        pinchZoom0_ = rollZoom_; pinchRows0_ = rollRowsF_; pinchBase0_ = rollBase_;
+        const float vis0 = rollPt_ / rollZoom_;
+        pinchTick0_ = rollScroll_ + (cx - rollX0_) / rollW_ * vis0;
+        pinchYFrac0_ = (cy - rollY0_) / rollH_;
+        pinchNote0_ = rollBase_ + rollRowsF_ * (1.f - pinchYFrac0_);
+        return;
+    }
+    if (!pinchOn_) return;
+    const float zoomMax = std::min(32.f, std::max(1.f, rollPt_ / (float)rollMinVisible_));
+    rollZoom_ = std::min(zoomMax, std::max(1.f, pinchZoom0_ * std::max(dx, minD) / pinchDx0_));
+    rollRowsF_ = std::min(60.f, std::max(6.f, pinchRows0_ * pinchDy0_ / std::max(dy, minD)));    // fingers apart = fewer, bigger rows
+    const float vis = rollPt_ / rollZoom_, yFrac = (cy - rollY0_) / rollH_;
+    rollScroll_ = pinchTick0_ - (cx - rollX0_) / rollW_ * vis;                                      // the tick that was between the fingers still is
+    rollBase_ = pinchNote0_ - rollRowsF_ * (1.f - yFrac);
+}
+
 void SamplerUI::button(Rect r, const std::string& label, bool on, std::function<void()> f, float size, bool accent) {
     rrect(r, R_CONTROL, on ? ACCENT : SURFACE);
     if (!on) stroke(r, R_CONTROL, accent ? ACCENT : OUTLINE, 1);
@@ -53,7 +78,7 @@ void SamplerUI::button(Rect r, const std::string& label, bool on, std::function<
 void SamplerUI::frame(uint32_t now) {
     now_ = now;
     st_ = app_.status();
-    ops_.clear(); hits_.clear();
+    ops_.clear(); hits_.clear(); rollOn_ = false;
     rrect({0, 0, W_, H_}, 0, BG);
     const float tb = 44, left = 176, right = 252;
     topBar({0, 0, W_, tb});
@@ -231,21 +256,22 @@ void SamplerUI::sequencerView(Rect r) {
     const int bars = app_.seqBarsOf(t), pt = patternTicks(bars), st = app_.stepTicks();
     const int state = ts.seqState;
     // toolbar: undo, redo, zoom in time, zoom in pitch, grid
-    static const int kRows[] = {12, 18, 24, 36};
     const float tbh = 26, bw7 = (r.w - 6 * 4) / 7.6f;   // the last button (GRID) is a bit wider
     int tx = 0;
     auto tb = [&](const std::string& label, bool on, std::function<void()> f) { button({r.x + tx * (bw7 + 4), r.y, tx == 6 ? bw7 * 1.6f : bw7, tbh}, label, on, std::move(f), 9.5f); tx++; };
     tb("UNDO", st_.seqUndoN[t] > 0, [this] { app_.seqUndo(); });
     tb("REDO", st_.seqRedoN[t] > 0, [this] { app_.seqRedo(); });
-    tb("TIME -", false, [this] { rollZoomX_ = std::max(0, rollZoomX_ - 1); });
-    tb("TIME +", false, [this] { rollZoomX_ = std::min(3, rollZoomX_ + 1); });
-    tb("PITCH -", false, [this] { const float mid = rollBase_ + kRows[rollRows_] / 2.f; rollRows_ = std::min(3, rollRows_ + 1); rollBase_ = mid - kRows[rollRows_] / 2.f; });   // more rows = smaller
-    tb("PITCH +", false, [this] { const float mid = rollBase_ + kRows[rollRows_] / 2.f; rollRows_ = std::max(0, rollRows_ - 1); rollBase_ = mid - kRows[rollRows_] / 2.f; });
+    const float zoomMax = std::min(32.f, std::max(1.f, pt / (2.f * st)));
+    tb("TIME -", false, [this] { rollZoom_ = std::max(1.f, rollZoom_ / 1.6f); });
+    tb("TIME +", false, [this, zoomMax] { rollZoom_ = std::min(zoomMax, rollZoom_ * 1.6f); });
+    tb("PITCH -", false, [this] { const float mid = rollBase_ + rollRowsF_ / 2.f; rollRowsF_ = std::min(60.f, rollRowsF_ * 1.4f); rollBase_ = mid - rollRowsF_ / 2.f; });   // more rows = smaller
+    tb("PITCH +", false, [this] { const float mid = rollBase_ + rollRowsF_ / 2.f; rollRowsF_ = std::max(6.f, rollRowsF_ / 1.4f); rollBase_ = mid - rollRowsF_ / 2.f; });
     tb(std::string("GRID ") + gridName(app_.seqGridIndex() ? app_.seqGridIndex() : 4), false, [this] { app_.cycleSeqGrid(); });
     // the roll
     Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46};
     rrect(roll, R_CARD, SURFACE); stroke(roll, R_CARD, OUTLINE, 1);
-    const int rows = kRows[rollRows_], zoom = 1 << rollZoomX_, visible = std::max(st, pt / zoom);
+    rollZoom_ = std::min(zoomMax, std::max(1.f, rollZoom_)); rollRowsF_ = std::min(60.f, std::max(6.f, rollRowsF_));
+    const int rows = (int)std::lround(rollRowsF_), visible = std::max(2 * st, (int)(pt / rollZoom_)); const float zoom = (float)pt / visible;
     const float W = roll.w - 4, rh = (roll.h - 4) / rows, x0 = roll.x + 2, y0 = roll.y + 2;
     const double playTick = std::fmod(st_.beatPos * kPpq, (double)pt);
     if (zoom > 1 && (st_.playing || state > 0) && !haveActive_ && (playTick < rollScroll_ || playTick >= rollScroll_ + visible)) rollScroll_ = (float)(std::floor(playTick / visible) * visible);   // the view pages along with the playhead
@@ -270,7 +296,8 @@ void SamplerUI::sequencerView(Rect r) {
     }
     if (st_.playing || state > 0) { const float pxx = px(playTick); if (pxx >= x0 && pxx <= x0 + W) line(pxx, y0, pxx, y0 + roll.h - 4, ACCENT, 1.5f); }
     if (n == 0) text(roll.x + roll.w / 2, roll.y + roll.h / 2, T_BODY, DIM, state == 2 ? "PLAY KEYS: THEY ARE RECORDED" : "TAP THE GRID TO ADD NOTES, OR RECORD PATTERN AND PLAY KEYS", 1, false);
-    if (zoom > 1) text(roll.x + roll.w - 6, roll.y + 10, 8.5f, DIM, std::to_string(zoom) + "X  DRAG SIDEWAYS TO SCROLL", 2, false);
+    text(roll.x + roll.w - 6, roll.y + 10, 8.5f, DIM, zoom > 1.05f ? num("%.1f", zoom) + "X  DRAG SIDEWAYS TO SCROLL" : std::string("PINCH TO ZOOM"), 2, false);
+    rollOn_ = true; rollX0_ = x0; rollY0_ = y0; rollW_ = W; rollH_ = roll.h - 4; rollPt_ = pt; rollMinVisible_ = 2 * st;
     endClip();
     // touch: tap adds / removes a note on the step, drag up and down scrolls the pitch range, sideways the time (when zoomed in)
     hit(roll, [this](float x, float y) { rollDownX_ = x; rollDownY_ = y; rollMoved_ = false; rollStartBase_ = rollBase_; rollStartScroll_ = rollScroll_; },

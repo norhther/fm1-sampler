@@ -133,7 +133,9 @@ struct Session::Impl {
             }
         });
     }
-    ~Impl() { { std::lock_guard<std::mutex> l(wMtx); wStop = true; } wCv.notify_all(); if (worker.joinable()) worker.join(); }
+    // finishes the queued jobs and ends the worker; the jobs use Session::d, so this has to run while that pointer is still set (~Session), not in ~Impl
+    void stopWorker() { { std::lock_guard<std::mutex> l(wMtx); wStop = true; } wCv.notify_all(); if (worker.joinable()) worker.join(); }
+    ~Impl() { stopWorker(); }
     void job(std::function<void()> f) { { std::lock_guard<std::mutex> l(wMtx); jobs.push_back(std::move(f)); } wCv.notify_one(); }
     void post(std::function<void()> f) { std::lock_guard<std::mutex> l(cmdMtx); cmds.push_back(std::move(f)); }
     template <class T> void bury(std::unique_ptr<T> p) { if (p) { auto sp = std::make_shared<std::unique_ptr<T>>(std::move(p)); job([sp] { sp->reset(); }); } }   // freed on the worker, not in the audio callback
@@ -651,7 +653,7 @@ struct Session::Impl {
 };
 
 Session::Session(int sampleRate) : d(new Impl(sampleRate)) {}
-Session::~Session() = default;
+Session::~Session() { d->stopWorker(); }
 
 void Session::process(float* out, const float* in, int frames) {
     const auto t0 = std::chrono::steady_clock::now();

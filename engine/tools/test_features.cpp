@@ -1,6 +1,7 @@
 // Host tests of the added features: tick grid and quantize, master fx, metronome, sequencer, tempo and take snap, scales and snap mode, page cycling.
 #include <Session.h>
 #include <SamplerApp.h>
+#include <SamplerUI.h>
 #include <MasterFx.h>
 #include <Sampler.h>
 #include <Paul.h>
@@ -171,8 +172,46 @@ static void testLibrary() {
         CHECK(sl.size() == 16 && good == 16, "%s: the slicer finds all 16 hits (%d of 16 on time)", kit, good);
     }
 }
+// the piano roll: pinch with two fingers zooms (horizontal = time, vertical = pitch), the buttons zoom too, a pinch never writes a note
+static void testRollZoom() {
+    const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 0;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(0.5); app.gotoPage(SamplerApp::P_SQ); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 96, 60 + i); run(0.2);
+    ui.frame(now);
+    CHECK(ui.rollZoom() == 1.f && ui.rollRows() == 24.f, "the roll starts unzoomed (%.1fx, %.0f rows)", ui.rollZoom(), ui.rollRows());
+    // two fingers 100 px apart horizontally, then 300 px: three times as much time zoom
+    ui.pinch(0, 350, 250, 450, 250); ui.pinch(1, 250, 250, 550, 250); ui.frame(now);
+    CHECK(std::fabs(ui.rollZoom() - 3.f) < 0.05f && ui.rollRows() == 24.f, "pinching apart sideways zooms the time 3x (%.2fx, %.0f rows)", ui.rollZoom(), ui.rollRows());
+    ui.pinch(1, 330, 250, 470, 250); ui.frame(now);
+    CHECK(std::fabs(ui.rollZoom() - 1.4f) < 0.05f, "pinching together zooms out again (%.2fx)", ui.rollZoom());
+    ui.pinch(1, 400, 250, 400, 250); ui.pinch(2, 0, 0, 0, 0); ui.frame(now);
+    CHECK(ui.rollZoom() == 1.f, "it stops at the whole pattern (%.2fx)", ui.rollZoom());
+    // vertical: fingers 100 px apart, then 200 px: half as many pitch rows
+    ui.pinch(0, 400, 200, 400, 300); ui.pinch(1, 400, 150, 400, 350); ui.frame(now);
+    CHECK(std::fabs(ui.rollRows() - 12.f) < 0.5f && ui.rollZoom() == 1.f, "pinching apart up and down shows half the pitch rows (%.1f rows)", ui.rollRows());
+    ui.pinch(2, 0, 0, 0, 0);
+    // one finger lands on the roll, a second one joins: a pinch, not a tap
+    const int before = app.status().seqCount[0];
+    ui.touch(0, 300, 250, now); ui.pinch(0, 300, 250, 500, 250); ui.pinch(1, 280, 250, 520, 250); ui.pinch(2, 0, 0, 0, 0); ui.touch(2, 300, 250, now); run(0.1);
+    CHECK(app.status().seqCount[0] == before, "a pinch does not add a note (%d -> %d)", before, app.status().seqCount[0]);
+    // fingers outside the roll are ignored
+    const float z0 = ui.rollZoom(); ui.frame(now); ui.pinch(0, 20, 20, 80, 20); ui.pinch(1, 0, 20, 200, 20); ui.pinch(2, 0, 0, 0, 0); ui.frame(now);
+    CHECK(ui.rollZoom() == z0, "a pinch outside the roll does nothing");
+    // the buttons
+    float tx = 0, ty = 0; ui.frame(now); for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "TIME +") { tx = o.f[0]; ty = o.f[1] - 4; }
+    ui.touch(0, tx, ty, now); ui.touch(2, tx, ty, now); ui.frame(now);
+    CHECK(tx > 0 && ui.rollZoom() > 1.5f, "the TIME + button zooms (%.2fx)", ui.rollZoom());
+}
 int main() {
+    setvbuf(stdout, nullptr, _IONBF, 0);   // a crash must not swallow the lines before it
     Denormals::enableOnThisThread();
+    {   // a session that is destroyed while its samples are still loading used to crash (the worker job read Session::d after unique_ptr had cleared it)
+        for (int i = 0; i < 4; i++) { Session sess(SAMPLERATE); sess.setDataDir("/tmp/fm1sampler_t5"); sess.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a(sess, [](const uint8_t*, size_t) {}); }
+        CHECK(true, "a session can be destroyed right after it started (4 times)");
+    }
+    testRollZoom();
     testLibrary();
     testPaul();
     testGrid();

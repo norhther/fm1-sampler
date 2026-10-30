@@ -80,8 +80,21 @@ public class SamplerView extends View {
         postInvalidateOnAnimation();
     }
 
+    private boolean pinching;   // two fingers are down (or were, and not all of them are up yet): the single finger events are ignored meanwhile
+
     @Override public boolean onTouchEvent(MotionEvent e) {
         int act = e.getActionMasked();
+        if (act == MotionEvent.ACTION_POINTER_DOWN && e.getPointerCount() == 2) {   // a second finger: pinch (the piano roll zooms)
+            pinching = true;
+            Native.uiPinch(h, 0, e.getX(0) / d, e.getY(0) / d, e.getX(1) / d, e.getY(1) / d);
+            return true;
+        }
+        if (pinching) {
+            if (act == MotionEvent.ACTION_MOVE && e.getPointerCount() >= 2) Native.uiPinch(h, 1, e.getX(0) / d, e.getY(0) / d, e.getX(1) / d, e.getY(1) / d);
+            else if (act == MotionEvent.ACTION_POINTER_UP && e.getPointerCount() == 2) Native.uiPinch(h, 2, 0, 0, 0, 0);
+            else if (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) { Native.uiPinch(h, 2, 0, 0, 0, 0); pinching = false; }
+            return true;
+        }
         int a = act == MotionEvent.ACTION_DOWN ? 0 : act == MotionEvent.ACTION_MOVE ? 1 : (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) ? 2 : -1;
         if (a < 0) return super.onTouchEvent(e);
         Native.uiTouch(h, a, e.getX() / d, e.getY() / d, SystemClock.uptimeMillis());
