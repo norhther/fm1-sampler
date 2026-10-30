@@ -36,6 +36,9 @@ public class Backend {
     /** A MIDI file was asked for (PROJECT sheet), and a file is ready for the share sheet. */
     public volatile Runnable onMidiRequest;
     public volatile java.util.function.Consumer<String> onShare;
+    /** The look changed (theme colour for the system bars, full screen on / off); also called once at the start. */
+    public volatile java.util.function.BiConsumer<Integer, Boolean> onLook;
+    int lastLookColor = 0; boolean lastLookFull = false, lookSent = false;
 
     public static synchronized Backend get(Context c) {
         if (instance == null) instance = new Backend(c.getApplicationContext());
@@ -80,6 +83,8 @@ public class Backend {
                 Native.uiLink(engine, toFm1 != null, usbAudioId != 0);
                 if (Native.wantFile(engine)) { Runnable r = onFileRequest; if (r != null) main.post(r); }
                 if (Native.wantMidi(engine)) { Runnable r = onMidiRequest; if (r != null) main.post(r); }
+                { int col = Native.themeColor(engine); boolean full = Native.fullscreen(engine);
+                  if (!lookSent || col != lastLookColor || full != lastLookFull) { java.util.function.BiConsumer<Integer, Boolean> f = onLook; if (f != null) { lookSent = true; lastLookColor = col; lastLookFull = full; main.post(() -> f.accept(col, full)); } } }
                 String share = Native.sharePath(engine);
                 if (share != null && !share.isEmpty()) { java.util.function.Consumer<String> c = onShare; if (c != null) main.post(() -> c.accept(share)); }
                 try { Thread.sleep(16); } catch (InterruptedException ignored) { }

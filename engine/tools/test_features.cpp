@@ -12,6 +12,7 @@
 #include <Arp.h>
 #include <Tombola.h>
 #include <Midi.h>
+#include <Theme.h>
 #include <fstream>
 #include <cmath>
 #include <thread>
@@ -522,6 +523,31 @@ static void testSound() {
     CHECK(std::string(app.knobs()[0].name) == "TONE" && std::string(app.knobs()[3].name) == "GRIT", "a synth track shows its macros (%s .. %s)", app.knobs()[0].name.c_str(), app.knobs()[3].name.c_str());
 }
 
+static void testLook() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_tc; mkdir -p /tmp/fm1sampler_tc");
+    {
+        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {});
+        CHECK(app.themeId() == 0 && !app.fullscreen() && theme::BG == theme::argb(20, 20, 26), "the default look is DARK, not full screen");
+        uint32_t seen[theme::kThemes]; bool distinct = true;
+        for (int i = 0; i < theme::kThemes; i++) { app.setTheme(i); seen[i] = theme::BG; for (int j = 0; j < i; j++) distinct &= seen[j] != seen[i]; }
+        CHECK(distinct, "four themes with four different backgrounds (%s, %s, %s, %s)", theme::name(0), theme::name(1), theme::name(2), theme::name(3));
+        app.setTheme(2); CHECK(theme::BG == theme::argb(12, 12, 14) && theme::ACCENT == theme::argb(255, 106, 19) && theme::KNOB[0] == theme::argb(47, 125, 225) && theme::KNOB[1] == theme::argb(62, 196, 109), "OP-1: black screen, orange accent, blue and green encoders");
+        app.setTheme(3); CHECK(theme::light && theme::TEXT == theme::argb(26, 26, 28), "OP-1 BODY is a light theme with dark ink");
+        SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(1000); ui.openProjectSheet(); ui.frame(1033);
+        bool names = false; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "OP-1 BODY") names = true;
+        CHECK(names, "the project sheet lists the themes");
+        { float fx = 0, fy = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "FULLSCREEN: OFF") { fx = o.f[0]; fy = o.f[1] - 4; }
+          ui.touch(0, fx, fy, 1100); ui.touch(2, fx, fy, 1100); CHECK(fx > 0 && app.fullscreen(), "the FULLSCREEN button switches it on"); }
+        app.setTheme(2);
+    }
+    {   // a new start keeps both
+        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {});
+        CHECK(app.themeId() == 2 && app.fullscreen() && theme::BG == theme::argb(12, 12, 14), "the theme and the full screen are remembered (%s, fullscreen %d)", theme::name(app.themeId()), app.fullscreen());
+        app.setTheme(0); app.setFullscreen(false);
+    }
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -574,6 +600,14 @@ static void testRollZoom() {
         ui.frame(now); ui.touch(0, X(110), Y(note), now); ui.touch(1, X(200), Y(note), now); ui.touch(1, X(250), Y(note), now); ui.frame(now); ui.touch(2, X(250), Y(note), now); run(0.2);
         c = notes(v); CHECK(c == 1 && v[0].len == 192, "...and shortens it again: len %d (expect 192)", c ? v[0].len : -1);
         app.seqUndo(); run(0.2); c = notes(v); CHECK(c == 1 && v[0].len == 336, "a resize is one undo step (len %d)", c ? v[0].len : -1);
+        {   // a pattern of 3 bars: a tap in the third bar adds the note there
+            app.seqClear(); app.seqSetBarCount(3); run(0.3); SamplerUI u3(app); u3.setSize(860, 400, 0, 0); u3.frame(now); u3.frame(now);
+            float x3, y3, w3, h3; u3.rollGrid(x3, y3, w3, h3); const float rows3 = std::round(u3.rollRows()), rh3 = h3 / rows3; const int pt3 = patternTicks(3), vis3 = (int)(pt3 / u3.rollZoom());
+            const int note3 = (int)std::floor(u3.rollBase()) + 4; const float tx3 = x3 + (float)((1900.0 - u3.rollScroll()) / vis3 * w3), ty3 = y3 + (rows3 - 1 - (note3 - std::floor(u3.rollBase()))) * rh3 + rh3 / 2;
+            u3.touch(0, tx3, ty3, now); u3.touch(2, tx3, ty3, now); run(0.2); Session::SeqView v3[kSeqMax]; const int n3 = notes(v3);
+            CHECK(n3 == 1 && v3[0].tick >= 1536 && v3[0].tick < 2304 && v3[0].note == note3, "tapping in the third bar adds the note in the third bar (tick %d)", n3 ? v3[0].tick : -1);
+            app.seqClear(); app.seqSetBarCount(4);
+        }
         // a long note plays for its length: the engine holds it, a short one does not
         app.seqClear(); app.seqToggleAt(0, 60, 384); run(0.1);
         app.setSeqState(1); run(0.1);
@@ -588,6 +622,7 @@ int main() {
     }
     testSynths();
     testOp1();
+    testLook();
     testSound();
     testProject();
     testTombola();
@@ -742,10 +777,15 @@ int main() {
         CHECK(rms(all, m, all.size()) > 0.003, "pattern plays with no live notes (rms %.4f)", rms(all, m, all.size()));
         { auto k = app.knobs(); k[2].set(4.f / 7.f); }   // quantize 1/16
         run(0.3); m = all.size(); run(2.0); CHECK(rms(all, m, all.size()) > 0.003, "pattern plays with quantize 1/16");
-        { auto k = app.knobs(); k[1].set(1.f / 3.f); } run(0.3);   // 2 bars: content repeats
-        CHECK(app.status().seqBars[0] == 2 && app.status().seqCount[0] == 4, "2 bars: content repeated (%d notes)", app.status().seqCount[0]);
-        { auto k = app.knobs(); k[1].set(0.f); } run(0.3);
-        CHECK(app.status().seqBars[0] == 1 && app.status().seqCount[0] == 2, "back to 1 bar: second half dropped (%d notes)", app.status().seqCount[0]);
+        app.seqSetBarCount(2); run(0.3);   // a new bar is empty
+        CHECK(app.status().seqBars[0] == 2 && app.status().seqCount[0] == 2, "2 bars: the new bar is empty (%d notes)", app.status().seqCount[0]);
+        app.seqSetBarCount(3); run(0.2); app.seqToggleAt(2 * 768 + 100, 62); run(0.2);
+        CHECK(app.status().seqBars[0] == 3 && app.status().seqCount[0] == 3, "3 bars exist now, and a note lands in the third (%d notes)", app.status().seqCount[0]);
+        { Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax); bool third = false; for (int i = 0; i < n; i++) third |= v[i].tick >= 1536 && v[i].note == 62; CHECK(third, "...at its own tick, not folded into bar 2"); }
+        app.seqSetBarCount(1); run(0.3);
+        CHECK(app.status().seqBars[0] == 1 && app.status().seqCount[0] == 2, "back to 1 bar: the notes behind the end are dropped (%d notes)", app.status().seqCount[0]);
+        app.seqUndo(); run(0.2); CHECK(app.status().seqBars[0] == 3 && app.status().seqCount[0] == 3, "undo gets the removed bars and their notes back (%d bars, %d notes)", app.status().seqBars[0], app.status().seqCount[0]);
+        app.seqSetBarCount(1); run(0.3);
         app.seqClear(); run(0.5);
         CHECK(app.status().seqCount[0] == 0, "clear empties the pattern");
         run(5.0); m = all.size(); run(1.5); CHECK(rms(all, m, all.size()) < 0.004, "...and nothing plays any more once the fx tails are gone (rms %.5f)", rms(all, m, all.size()));

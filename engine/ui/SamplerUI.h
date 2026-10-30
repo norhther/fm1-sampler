@@ -67,6 +67,7 @@ private:
     struct NoteDrag { bool on = false, existing = false, moved = false; int tick = 0, note = 0, len = 0, origLen = 0; } drag_;
     int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
     bool projOpen_ = false; int projSel_ = -1; float projScroll_ = 0, projLastY_ = 0, projMoved_ = 0; uint32_t projDelAt_ = 0; std::vector<std::string> projList_; Rect projListRect_{0, 0, 0, 0};
+    uint32_t rollTouchAt_ = 0;   // the view does not page along with the playhead for a while after a touch on the roll
     float rulerDownX_ = 0, rulerStartScroll_ = 0, drumLastAngle_ = 0;   // piano roll zoom: how many times the pattern is stretched in time, how many pitch rows are shown
     // the roll of the last frame (for the pinch) and the state of a pinch in progress
     bool rollOn_ = false, pinchOn_ = false; float rollX0_ = 0, rollY0_ = 0, rollW_ = 1, rollH_ = 1; int rollPt_ = 1, rollMinVisible_ = 1;

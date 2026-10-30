@@ -14,6 +14,7 @@ int main(int argc, char** argv) {
     const int sr = SAMPLERATE;
     Session s(sr); s.setDataDir("/tmp/fm1sampler_test"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {});
+    if (argc > 2) app.setTheme(atoi(argv[2]));
     SamplerUI ui(app);
     const float W = 860, H = 400;
     ui.setSize(W, H, 0, 0); ui.setLink(true, true);
