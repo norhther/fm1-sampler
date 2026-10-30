@@ -11,6 +11,7 @@
 #include "TapeInsert.h"
 #include "Wav.h"
 #include <algorithm>
+#include "Tombola.h"
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -70,6 +71,7 @@ struct Session::Impl {
     // beat clock, metronome, sequencer
     double freeBeat = 0;   // beat position while the transport is stopped
     bool metroOn = false; float metroVol = 0.6f, clickEnv = 0, clickFreq = 1000, clickPh = 0;
+    uint32_t tombolaSeed = 1; float swing = 0.5f;
     int takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
     // count-in: clicks for countIn bars, then the take (kind 1) or the sequencer recording (kind 2) starts
     int countIn = 0, countKind = 0; bool counting = false; double countLeft = 0;
@@ -168,6 +170,12 @@ struct Session::Impl {
         for (auto& e : evs) t.pending.push_back({e.note, 0});
         for (int& o : t.openIdx) o = 0;
     }
+    // where a note starts when it plays: on the quantize grid, every second grid line pushed back by the swing (only while quantize is on)
+    int onTick(const SeqNote& e, int pt) const {
+        const int q = snapTick(e.tick, seqGrid, pt), g = gridTicks(seqGrid);
+        if (g == 0 || swing <= 0.5f || (q / g) % 2 == 0) return q;
+        return (q + (int)std::lround((swing - 0.5f) * 2.f * g)) % pt;
+    }
     // audio thread, per block: fire the notes whose tick is hit
     void seqRun(Track& t, std::vector<Arp::Ev>& evs) {
         const int pt = patTicks(t);
@@ -175,11 +183,11 @@ struct Session::Impl {
             const int jt = (int)(h.tick % pt);
             for (int i = 0; i < t.snCount; i++) {   // note offs first, so a repeated note retriggers
                 const SeqNote& e = t.sn[i];
-                if (t.sounding[e.note] && (snapTick(e.tick, seqGrid, pt) + e.len) % pt == jt) { t.sounding[e.note] = false; noteTo(t, e.note, 0, h.offset, evs); }
+                if (t.sounding[e.note] && (onTick(e, pt) + e.len) % pt == jt) { t.sounding[e.note] = false; noteTo(t, e.note, 0, h.offset, evs); }
             }
             for (int i = 0; i < t.snCount; i++) {
                 const SeqNote& e = t.sn[i];
-                if (snapTick(e.tick, seqGrid, pt) != jt) continue;
+                if (onTick(e, pt) != jt) continue;
                 if (t.sounding[e.note]) noteTo(t, e.note, 0, h.offset, evs);
                 t.sounding[e.note] = true; noteTo(t, e.note, e.vel, h.offset, evs);
             }
@@ -338,6 +346,20 @@ struct Session::Impl {
     int quantShift() const {
         const double spb = samplesPerBeat(), tl = spb / kPpq, g = gridTicks(inQuant), tick = (playing ? pos : freeBeat * spb) / tl;
         return (int)std::lround((std::round(tick / g) * g - tick) * tl);
+    }
+    // tombola: the balls play the notes they carry when they hit a wall; the UI reads a snapshot of the balls
+    Tombola tomb; std::vector<Tombola::Hit> tombHits; struct TombOff { int track, note; float left; }; std::vector<TombOff> tombOffs;
+    std::atomic<uint32_t> a_ball[Tombola::kMaxBalls][4]; std::atomic<int> a_ballN{0}; std::atomic<uint32_t> a_drum{0};
+    static uint32_t bitsOf(float f) { uint32_t u; std::memcpy(&u, &f, 4); return u; }
+    static float floatOf(uint32_t u) { float f; std::memcpy(&f, &u, 4); return f; }
+    void runTombola(int n) {
+        for (size_t i = tombOffs.size(); i-- > 0;) if ((tombOffs[i].left -= (float)n / sr) <= 0.f) { liveNote(tombOffs[i].track, tombOffs[i].note, 0); tombOffs.erase(tombOffs.begin() + (long)i); }
+        if (tomb.balls().empty() && a_ballN.load() == 0) return;
+        tombHits.clear(); tomb.run((float)n / sr, tombHits);
+        for (auto& h : tombHits) { liveNote(h.track, h.note, h.vel); tombOffs.push_back({h.track, h.note, h.len / 1000.f}); }
+        const auto& bl = tomb.balls(); const int cnt = (int)bl.size();
+        for (int i = 0; i < cnt; i++) { a_ball[i][0] = bitsOf(bl[(size_t)i].x); a_ball[i][1] = bitsOf(bl[(size_t)i].y); a_ball[i][2] = bitsOf(bl[(size_t)i].hit); a_ball[i][3] = (uint32_t)bl[(size_t)i].track; }
+        a_ballN = cnt; a_drum = bitsOf(tomb.angle());
     }
     void liveNote(int ti, int note, int vel) {
         Track& t = *tracks[ti];
@@ -522,6 +544,7 @@ struct Session::Impl {
         tickHits(playing ? pos : freeBeat * spb, n, spb / kPpq, playing ? (double)loopSamples : 0.0, hits);
         const double beat0 = playing ? pos / spb : freeBeat;
         const bool tl = playing && !freeRec && loopSamples > 0;
+        runTombola(n);
         updateLoopPeaks();
         const double spd = tapeSpeed.load();
         const bool locked = std::fabs(spd - 1.0) < 0.01;
@@ -759,10 +782,21 @@ void Session::seqSet(int t, const SeqView* nv, int n) {
     d->post([=] { d->seqSetNotes(t, list); });
 }
 void Session::seqResize(int t, int tick, int note, int len) { if (t >= 0 && t < kTracks) d->post([=] { d->seqResizeNote(t, tick, note, len); }); }
+void Session::tombolaAdd(int t, int note) { if (t >= 0 && t < kTracks && note >= 0 && note < 128) d->post([=] { d->tomb.add(t, note, (uint32_t)(d->tombolaSeed++ + note)); }); }
+void Session::tombolaSet(float spin, float grav, float mass, float shape) { d->post([=] { d->tomb.spin = spin; d->tomb.grav = grav; d->tomb.mass = mass; d->tomb.shape = shape; }); }
+void Session::tombolaTurn(float rad) { d->post([=] { d->tomb.turn(rad); }); }
+void Session::tombolaClear() { d->post([=] { d->tomb.clear(); d->a_ballN = 0; }); }
+int Session::tombolaView(TombolaBall* out, int maxN, float* drumAngle) const {
+    const int n = std::min(maxN, std::min(Tombola::kMaxBalls, d->a_ballN.load()));
+    for (int i = 0; i < n; i++) out[i] = {Impl::floatOf(d->a_ball[i][0]), Impl::floatOf(d->a_ball[i][1]), Impl::floatOf(d->a_ball[i][2]), (int)d->a_ball[i][3].load()};
+    if (drumAngle) *drumAngle = Impl::floatOf(d->a_drum.load());
+    return n;
+}
 void Session::seqRest(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, 1); }); }
 void Session::seqCursorMove(int t, int steps) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, steps); }); }
 void Session::seqCursorSet(int t, int tick) { if (t >= 0 && t < kTracks) d->post([=] { d->seqCursorTo(t, tick); }); }
 void Session::seqBounce(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->bounceStart(t); }); }
+void Session::setSwing(float s) { d->post([=] { d->swing = clampf(s, 0.5f, 0.75f); }); }
 void Session::setQuantize(int g) { d->post([=] { d->seqGrid = std::min(kGrids - 1, std::max(0, g)); }); }
 int Session::seqNotes(int t, SeqView* out, int maxNotes) const {
     if (t < 0 || t >= kTracks) return 0;

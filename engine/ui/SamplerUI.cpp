@@ -1,5 +1,6 @@
 #include "SamplerUI.h"
 #include <algorithm>
+#include "../dsp/Tombola.h"
 #include <cmath>
 #include <cstdio>
 
@@ -8,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -150,6 +151,7 @@ void SamplerUI::sampleArea(Rect r) {
     const std::string lab = app_.sampleLabel(t);
     text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - 120, T_TITLE), 0, true);
     text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);
+    if (app_.page() == SamplerApp::P_TOMB) { tombolaView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_SQ) { sequencerView({r.x, r.y + 28, r.w, r.h - 28}); return; }   // the sequencer page shows the pattern instead of the waveform, with all the room there is
     // algorithm (a synth has none)
     const float cw = (r.w - 5 * 4) / 6;
@@ -378,6 +380,33 @@ void SamplerUI::sequencerView(Rect r) {
     b(state == 0 ? "PATTERN OFF" : "PATTERN ON", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
     b("DICE", false, [this] { app_.seqDice(); });
     b("CLEAR PATTERN", false, [this] { app_.seqClear(); });
+}
+
+// ---- tombola: balls in a turning polygon; drag on the drum to turn it ----
+void SamplerUI::tombolaView(Rect r) {
+    const float bh = 38;
+    Rect box{r.x, r.y, r.w, r.h - bh - 6};
+    rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, OUTLINE, 1);
+    const float R = std::min(box.w, box.h) * 0.46f, cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    Session::TombolaBall balls[Tombola::kMaxBalls]; float ang = 0; const int nb = app_.session().tombolaView(balls, Tombola::kMaxBalls, &ang);
+    const int N = app_.tombolaSides();
+    clip(box);
+    const float apo = std::cos(kPi / N), half = std::sin(kPi / N);
+    for (int k = 0; k < N; k++) {   // the walls
+        const float a = ang + k * 2.f * kPi / N, px = std::cos(a) * apo, py = std::sin(a) * apo, da = a + kPi / 2.f, dx = std::cos(da), dy = std::sin(da);
+        line(cx + (px - dx * half) * R, cy + (py - dy * half) * R, cx + (px + dx * half) * R, cy + (py + dy * half) * R, TEXT, 4);
+    }
+    for (int i = 0; i < nb; i++) { const float s = std::max(5.f, R * 0.03f * 1.4f); circle(cx + balls[i].x * R, cy + balls[i].y * R, s, balls[i].hit > 0.05f ? ACCENT : TEXT); }
+    if (!nb) text(cx, cy, T_BODY, DIM, "DROP A BALL, OR PLAY KEYS. DRAG TO TURN THE DRUM", 1, false);
+    endClip();
+    hit(box, [this, cx, cy](float x, float y) { drumLastAngle_ = std::atan2(y - cy, x - cx); },
+        [this, cx, cy](float x, float y) { const float a = std::atan2(y - cy, x - cx); float d = a - drumLastAngle_; d = std::atan2(std::sin(d), std::cos(d)); app_.session().tombolaTurn(d); drumLastAngle_ = a; });
+    const float bw = (r.w - 2 * 6) / 3, by = r.y + r.h - bh;
+    int bx = 0;
+    auto b = [&](const std::string& label, std::function<void()> f, bool accent = false) { button({r.x + bx * (bw + 6), by, bw, bh}, label, false, std::move(f), 11, accent); bx++; };
+    b("DROP A BALL", [this] { app_.tombolaDrop(); }, true);
+    b("REVERSE", [this] { app_.tombolaReverse(); });
+    b("EMPTY THE DRUM", [this] { app_.tombolaClear(); });
 }
 
 void SamplerUI::pagePanel(Rect r) {

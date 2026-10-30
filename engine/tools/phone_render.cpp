@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
     tab(11); ui.frame(now); dump("live");
     tab(12); { int notes[] = {60, 64, 67, 72, 67, 64, 55, 62}; for (int i = 0; i < 8; i++) app.seqToggleAt(i * 96, notes[i], i % 3 == 0 ? 192 : 0); app.setSeqState(1); run(0.5); app.playNote(65, true); } ui.frame(now); dump("seq");
     tab(13); ui.frame(now); dump("tempo");
+    tab(19); for (int i = 0; i < 5; i++) app.tombolaDrop(); run(1.2); ui.frame(now); dump("tomb"); app.tombolaClear();
     tab(16); ui.frame(now); dump("tone");
     tab(18); ui.frame(now); dump("live2");
     tab(0);

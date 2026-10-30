@@ -98,6 +98,13 @@ public:
     void seqBounce(int track);                // record the pattern onto the tape for one loop cycle (a loop of the pattern length if there is none), then mute it
     void seqSetBars(int track, int bars);     // 1, 2, 4 or 8; a longer pattern repeats its content, a shorter one drops the rest
     void seqClear(int track);
+    void setSwing(float s);                                                  // 0.5 = straight .. 0.75: every second grid line of the pattern plays later
+    struct TombolaBall { float x, y, hit; int track; };                      // drum coordinates: the drum has radius 1
+    void tombolaAdd(int track, int note);                                    // a ball that plays `note` on that track whenever it hits the drum wall
+    void tombolaSet(float spin, float gravity, float mass, float shape);
+    void tombolaTurn(float radians);
+    void tombolaClear();
+    int tombolaView(TombolaBall* out, int maxN, float* drumAngle) const;
     void setQuantize(int grid);               // playback grid of all patterns (see Sequencer.h gridName); the recorded timing is kept
     int seqNotes(int track, SeqView* out, int maxNotes) const;
 

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <Sequencer.h>
 #include <Arp.h>
+#include <Tombola.h>
 #include <cmath>
 #include <thread>
 #include <chrono>
@@ -253,6 +254,80 @@ static void testOp1() {
     CHECK(n3 == n, "one undo brings the previous pattern back (%d notes)", n3);
 }
 
+static void testTombola() {
+    const int sr = SAMPLERATE;
+    {   // physics: balls stay in the drum, hit the walls and stop being added at 18
+        Tombola tb; std::vector<Tombola::Hit> hits;
+        for (int i = 0; i < 25; i++) tb.add(0, 60 + i, (uint32_t)i);
+        CHECK((int)tb.balls().size() == Tombola::kMaxBalls, "at most %d balls", Tombola::kMaxBalls);
+        for (int i = 0; i < 400; i++) tb.run(1.f / 100.f, hits);   // 4 s
+        bool inside = true; for (auto& b : tb.balls()) inside &= std::hypot(b.x, b.y) < 1.2f;
+        CHECK(inside && hits.size() > 20, "balls bounce inside a sealed drum: %zu hits in 4 s", hits.size());
+        bool sane = true; for (auto& h : hits) sane &= h.vel >= 20 && h.vel <= 120 && h.len >= 200 && h.len <= 600 && std::fabs(h.pan) <= 1.f;
+        CHECK(sane, "hit velocity, length and pan are in range");
+        Tombola t2; t2.grav = 0.f; t2.spin = 0.f; hits.clear(); t2.add(0, 60, 1); for (int i = 0; i < 100; i++) t2.run(0.01f, hits);
+        CHECK(!t2.balls().empty() && hits.size() < 40, "no gravity, no spin: a ball drifts about (%zu hits)", hits.size());
+    }
+    system("rm -rf /tmp/fm1sampler_t8; mkdir -p /tmp/fm1sampler_t8");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_t8"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.5); app.gotoPage(SamplerApp::P_TOMB);
+    CHECK(app.page() == SamplerApp::P_TOMB && SamplerApp::modeOf(SamplerApp::P_TOMB) == 2, "the tombola page is in the SEQ mode");
+    run(4.0);
+    size_t m = all.size(); for (int i = 0; i < 4; i++) app.tombolaDrop(); run(0.1);
+    Session::TombolaBall bl[Tombola::kMaxBalls]; float ang = 0;
+    CHECK(s.tombolaView(bl, Tombola::kMaxBalls, &ang) == 4, "four balls in the drum (%d)", s.tombolaView(bl, Tombola::kMaxBalls, &ang));
+    run(3.0);
+    CHECK(rms(all, m, all.size()) > 0.003 && finite(all), "the balls play the track (rms %.4f)", rms(all, m, all.size()));
+    app.playNote(64, true); app.playNote(64, false); run(0.1);
+    CHECK(s.tombolaView(bl, Tombola::kMaxBalls, &ang) == 5, "a key played on the tombola page drops a ball");
+    { auto k = app.knobs(); k[2].set(0.f); } run(0.1);
+    CHECK(std::string(app.knobs()[2].value) == "3 SIDES", "SHAPE knob: %s", app.knobs()[2].value.c_str());
+    const float a0 = ang; s.tombolaTurn(1.0f); run(0.1); s.tombolaView(bl, Tombola::kMaxBalls, &ang);
+    CHECK(std::fabs(ang - a0) > 0.5f, "turning the drum by hand changes its angle");
+    app.tombolaClear(); run(0.2); CHECK(s.tombolaView(bl, Tombola::kMaxBalls, &ang) == 0, "emptying the drum");
+    // played into the sequencer: a pattern recording catches the hits
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); run(0.2); app.setSeqState(2); run(0.3);
+    app.gotoPage(SamplerApp::P_TOMB); for (int i = 0; i < 3; i++) app.tombolaDrop(); run(4.0);
+    app.gotoPage(SamplerApp::P_SQ); app.setSeqState(1); run(0.2);
+    CHECK(app.status().seqCount[0] > 3, "a pattern records what the balls play (%d notes)", app.status().seqCount[0]);
+    app.tombolaClear(); app.seqClear(); run(0.2);
+}
+
+static void testSwing() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_t9; mkdir -p /tmp/fm1sampler_t9");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_t9"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
+    run(2.5);
+    app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.2);
+    app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(0.f); k[1].set(4.f / 7.f); k[2].set(0.f); k[3].set(0.f); } run(0.2);   // quantize 1/16, no swing
+    app.selectTrack(1); app.gotoPage(SamplerApp::P_SQ); app.seqClear(); run(0.2);
+    { auto k = app.knobs(); k[0].set(1.f / 3); k[1].set(0.f); }   // PLAY, 1 bar
+    app.seqToggleAt(48, 60); run(0.2);   // the second 1/16 step: the one swing delays
+    // the transport keeps its phase between stops, so compare the onsets of one run: they come once per pattern pass; the pass in which the swing is switched on is late by the swing delay
+    run(3.0); if (!app.status().playing) btn(SamplerApp::PLAY);
+    run(3.2);
+    const size_t mark = all.size();
+    app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[3].set(1.f); } run(0.05);
+    CHECK(std::string(app.knobs()[3].value) == "75 PCT", "SWING knob: %s", app.knobs()[3].value.c_str());
+    run(4.0);
+    std::vector<long> on; long quietFor = 1 << 30;
+    for (size_t i = 0; i < all.size(); i += 2) { if (std::fabs(all[i]) > 0.01f) { if (quietFor > sr / 4) on.push_back((long)(i / 2)); quietFor = 0; } else quietFor++; }
+    std::vector<long> gaps; for (size_t i = 1; i < on.size(); i++) gaps.push_back(on[i] - on[i - 1]);
+    const double want = 0.5 * 48.0 / kPpq * 60.0 / 120.0 * sr;   // swing 75 %: the off-beat 1/16 moves by half a step = 24 ticks
+    const long pass = 2 * sr;   // 1 bar at 120 bpm
+    bool straightGap = false, lateGap = false; for (long gp : gaps) { straightGap |= std::labs(gp - pass) < 4; lateGap |= std::fabs((double)(gp - pass) - want) < 0.002 * sr; }
+    CHECK(gaps.size() >= 3 && straightGap && lateGap, "swing 75 pct: passes are %ld samples apart, the pass where it switched on is %.0f later (%zu onsets)", pass, want, on.size());
+    (void)mark;
+    app.seqClear(); run(0.2); if (app.status().playing) btn(SamplerApp::PLAY);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -319,6 +394,8 @@ int main() {
     }
     testSynths();
     testOp1();
+    testTombola();
+    testSwing();
     testRollZoom();
     testLibrary();
     testPaul();
@@ -375,6 +452,7 @@ int main() {
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SEQ, "SEQ again: tape");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TEMPO, "SEQ again: tempo");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TOMB, "SEQ again: tombola");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ again: back to the pattern");
         app.gotoPage(SamplerApp::P_FX);
     }
