@@ -24,19 +24,31 @@ APK and the flash page of the matching firmware are attached to the [releases](.
 | ALGORITHM (encoder 1) | MELODIC, ONE-SHOT, LOOPED, KIT/SLICE, GRANULAR, PAULSTRETCH (the Sampler's MODE; KIT slices on transients, equal parts if there are none) |
 | K1..K4 (encoders 2..5) | the four parameters of the current page (below) |
 | HOME | sample: START, END, SPEED (time stretch 0.25..4x), PITCH (+-24 st). Speed and pitch are offline stretches, applied 350 ms after the knob rests |
-| FX | REVERB SIZE, REVERB D/W (return level), DELAY TIME, DELAY FEEDBACK (global sends; per-track send levels are on MIXER) |
+| FX | REVERB SIZE, REVERB D/W (return level), DELAY TIME, DELAY FEEDBACK (global sends; per-track send levels are on MIXER). **Press FX again** for FX 2, again for LIVE FX, again for TRACK FX |
+| FX 2 | master inserts: CHORUS, PHASER, COMPRESSOR (4:1, threshold 0..-24 dB with half make-up), WIDTH (0 = mono, 50% = untouched, 100% = double) |
+| LIVE FX | performance effects on the master, for turning while playing: DJ FILTER (centre = off, left low-pass, right high-pass), BEAT REPEAT (loops the last 1/4, 1/8, 1/16 or 1/32 beat until switched off), TRANCE GATE (1/8, 1/16, 1/32 on the beat clock), CRUSH (sample rate + bit depth). They are not recorded into the loop |
+| TRACK FX | the same kind of effects on the selected track only: DJ FILTER, CHORUS, TRANCE GATE, CRUSH (after the cassette, before volume and sends) |
 | ENV | ATTACK, DECAY, SUSTAIN, RELEASE of the selected track |
 | LFO | RATE (0.1..20 Hz), DEPTH, TARGET (PITCH, FILTER, VOLUME, PAN), SHAPE (SINE, TRI, SQUARE, S&H) |
-| ARP | RATE (OFF, 1..64 with triplets), PATTERN, OCTAVES, LENGTH (own arpeggiator on the tempo grid, free running) |
+| ARP | RATE (OFF, 1..64 with triplets), PATTERN, OCTAVES, LENGTH (own arpeggiator on the tempo grid, free running). **Press ARP again** for the SEQUENCER |
+| SEQUENCER | per track note pattern on the beat clock, locked to the loop: PATTERN (OFF, PLAY, REC: record starts the transport, notes played on the keys are captured, overdub while it loops), BARS (1, 2, 4, 8; longer repeats the content, shorter drops the rest), QUANTIZE (OFF, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32, 1/32T: applied when playing, the recorded timing is kept, so it can be changed or switched off later), CLEAR (turn). Notes go through the track's arpeggiator when it is on. 256 notes per track |
 | SEQ ("TAPE") | LOOP SPEED (0.25..2x tape-style varispeed of the loop, GLOBAL for all tracks), EXCITER (cassette saturation), LO-FI (bit crush + hiss + dark tone), WOBBLE |
 | EDIT | mixer of the selected track: VOLUME, PAN, REVERB SEND, DELAY SEND |
-| GLO | key and scale: SCALE, ROOT, OCTAVE, MODE (KEY/CHORD). Drives the firmware's key mapping (SysEx 06) |
+| GLO | key and scale: SCALE (22: the 7 firmware tables, DORIAN, LYDIAN, LOCR, PENT+, PENT-, BLUES, WHOLE, DIM, PHRDOM, HMAJ, MELMIN, HUNG, HIRA, DHARM, OFF last), ROOT, OCTAVE, MODE (KEY, CHORD, SNAP: keys outside the scale play the nearest scale note). **Press GLO again** for TEMPO, again for TIMING |
+| TEMPO | TEMPO (30..300; locked while a loop exists, the loop defines it), METRONOME (click on the beat clock, accent on the bar), CLICK LEVEL, TAKE SNAP (OFF: the first take sets the tempo as before; BEAT / BAR: the tempo stays and the take is cut or padded to whole beats / bars, i.e. the loop is quantized). The arpeggiator follows the tempo too |
+| TIMING | LIVE QUANTIZE (OFF, 1/4 ... 1/32T: a played key sounds on the nearest grid line of the beat clock, a key that is a little late plays at once; sequencer recording stores the snapped time), SEQ QUANTIZE (same setting as on the sequencer page), COUNT-IN (OFF, 1 or 2 bars of clicks, with the metronome off too, before a free take or a sequencer recording from a stopped transport; keys played during the count-in do not start the take) |
 | SAVE | page LOOP. Tap = save the loop of the selected track into the library, hold 0.7 s = clear ALL loops (every track), also the phone CLEAR button. Knobs: MIC SAMPLE, LOOP SOURCE, SAVE LOOP, MIC THRESHOLD (-46..-6 dB, level that starts a mic take; used by mic sampling and mic loop source) |
 | PLAY | play / stop |
 | REC | clean looper: arms the first take (it starts with the first key or sound and sets the loop length and tempo; REC again ends it). Loop exists: toggles overdub on the selected track |
 | SEL (the button after FX; index 3, the protocol and the firmware call it SCL) | page LENGTH: K1 LENGTH (turn up = loop x2 with its content repeated, down = /2), K2 DUPLICATE, K3 HALVE, K4 bars/bpm (read-only). Needs the firmware built here (`firmware/FM1-Sampler-Workbench.html`): it forwards SCL as button 3 and has no scale screen; the stock/fm1-daw firmware keeps SCL local |
 | OCT -/+ | handled by the firmware (octave) |
 | keys | KIT algorithm: all 27 keys are pads (note 60 + key, 16 slices repeat over the keys), every key lit, tonality and octave ignored. Otherwise the firmware is kept on a plain chromatic keyboard (scale OFF, SysEx 06 always sends 7; notes 53+key) so keys outside the tonality still play; the app adds the octave, builds triads itself in CHORD mode and lights ONLY keys that belong to the scale (root of each octave blinks; scale OFF: only roots); a sounding key goes dark. |
+
+## Beat clock, sequencer, master fx
+- Effects: FX 2 / LIVE FX run on the master, TRACK FX runs one `MasterFx` per track (`active()` skips it at rest values, `feedOnly()` keeps the repeat memory warm).
+- The beat clock is the transport position (it restarts with the loop) and runs free while stopped, so the metronome also ticks before a take; the take starts the clock at its first note. Sequencer notes, metronome, trance gate and beat repeat all read it (`engine/dsp/Sequencer.h`: 192 ticks per beat, `tickHits` lists the ticks of an audio block with sample offsets).
+- `engine/dsp/MasterFx.h`: the FX 2 and LIVE FX chain (chorus, phaser, width, DJ filter, crusher, gate, repeat, compressor). All of it sits after the sends and before the soft clip; everything is bypassed at its rest value.
+- Tests of the added features: `make $PWD/engine/build/test_features` (run from `engine/`), then `engine/build/test_features`.
 
 ## Sample sources
 - **Bundled library** (`samples/`, packed into the APK assets, copied to `files/samples` once): Bass, Drums (loaded as KIT), Keys, Pads.

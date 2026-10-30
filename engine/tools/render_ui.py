@@ -6,7 +6,9 @@ d = json.load(open(sys.argv[1])); out = sys.argv[2]; Z = float(sys.argv[3]) if l
 os.makedirs(out, exist_ok=True)
 SS = 2                                            # supersampling for anti-aliasing
 K = Z * SS
-reg = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'; bold = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+def _first(*c): return next((p for p in c if os.path.exists(p)), c[0])
+reg = _first('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/System/Library/Fonts/Supplemental/Arial.ttf')
+bold = _first('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', '/System/Library/Fonts/Supplemental/Arial Bold.ttf')
 _fc = {}
 def font(sz, b):
     k = (round(sz * K), b)

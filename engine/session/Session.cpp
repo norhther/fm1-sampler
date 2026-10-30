@@ -2,7 +2,9 @@
 #include "Arp.h"
 #include "Common.h"
 #include "Filter.h"
+#include "MasterFx.h"
 #include "Reverb.h"
+#include "Sequencer.h"
 #include "Sampler.h"
 #include "Stretch.h"
 #include "TapeDelay.h"
@@ -42,7 +44,14 @@ struct Session::Impl {
         bool clipHas = false, clipRec = false;
         bool recPrevOk = false; double recPrevCp = 0; float recPrevL = 0, recPrevR = 0;   // tape-speed recording: previous write position and input
         std::atomic<float> peak{0.f};
-        explicit Track(int sr) : tape(sr) {}
+        // note sequencer pattern (audio thread owns it)
+        SeqNote sn[kSeqMax]; int snCount = 0, seqState = 0, seqBars = 1; bool sounding[128] = {}; int openIdx[128] = {};
+        // live quantize: notes held back to the grid, and the shift each held key got (its release gets the same)
+        struct Delayed { int left, note, vel; };
+        static constexpr int kDelayMax = 32;
+        Delayed delayed[kDelayMax]; int nDelayed = 0; int lastDelay[128] = {}, lastShift[128] = {};
+        std::unique_ptr<MasterFx> fx;   // per track effects (DJ filter, chorus, gate, crush ...)
+        explicit Track(int sr) : tape(sr), fx(new MasterFx(sr, 1.f)) {}
     };
 
     int sr;
@@ -51,8 +60,16 @@ struct Session::Impl {
     float masterVol = 0.9f, ret[2] = {0.35f, 0.7f};
     int loopSrc = 1;   // what the loop records: 0 microphone, 1 the track's sound
 
+    MasterFx mfx;
     bool playing = false;
     float bpm = 120.f; int loopBars = 4;
+    // beat clock, metronome, sequencer
+    double freeBeat = 0;   // beat position while the transport is stopped
+    bool metroOn = false; float metroVol = 0.6f, clickEnv = 0, clickFreq = 1000, clickPh = 0;
+    int takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
+    // count-in: clicks for countIn bars, then the take (kind 1) or the sequencer recording (kind 2) starts
+    int countIn = 0, countKind = 0; bool counting = false; double countLeft = 0;
+    std::vector<TickHit> hits;
     double pos = 0; int32_t loopSamples = 0;
     std::atomic<float> tapeSpeed{1.f}; double tapePos = 0;   // ONE tape pointer for every loop clip, so they never drift apart
 
@@ -84,17 +101,24 @@ struct Session::Impl {
     std::atomic<int> a_bars{4}, a_sampleState{0}, a_sampleTrack{0}, a_sampleVersion{0}, a_sampleFails{0};
     std::atomic<int32_t> a_loop{0};
     std::atomic<float> a_clipPos{0.f}, a_lfo[kTracks];
+    std::atomic<double> a_beat{0.0};
+    std::atomic<bool> a_metro{false};
+    std::atomic<int> a_countBeats{0};
+    std::atomic<uint64_t> a_seq[kTracks][kSeqMax]; std::atomic<int> a_seqN[kTracks], a_seqBars[kTracks], a_seqState[kTracks];
     std::atomic<int> a_voiceN[kTracks]; std::atomic<float> a_voicePos[kTracks][kVoiceMax];
 
     std::vector<float> bus, tmp, sendBus[2], wet;
 
-    explicit Impl(int rate) : sr(rate), reverb(rate), delay(rate) {
+    explicit Impl(int rate) : sr(rate), reverb(rate), delay(rate), mfx(rate) {
         for (int i = 0; i < kTracks; i++) tracks.emplace_back(new Track(rate));
         bus.resize(kBlock * 2); tmp.resize(kBlock * 2); wet.resize(kBlock * 2); sendBus[0].resize(kBlock * 2); sendBus[1].resize(kBlock * 2);
         for (auto& a : a_lpk) a = 0.f;
         for (auto& r : a_tpk) for (auto& a : r) a = 0.f;
         for (auto& a : a_lfo) a = 0.f;
         for (auto& a : a_voiceN) a = 0;
+        for (auto& r : a_seq) for (auto& a : r) a = 0;
+        for (int i = 0; i < kTracks; i++) { a_seqN[i] = 0; a_seqBars[i] = 1; a_seqState[i] = 0; }
+        hits.reserve(64);
         worker = std::thread([this] {
             for (;;) {
                 std::function<void()> j;
@@ -112,13 +136,118 @@ struct Session::Impl {
     void releaseAll(Track& t) {
         std::vector<Arp::Ev> evs; t.arp.clear(evs);
         t.pending.clear();
+        for (bool& b : t.sounding) b = false;
+        t.nDelayed = 0;
+        for (int& d : t.lastDelay) d = 0;
+        for (int& d : t.lastShift) d = 0;
         if (t.sampler) t.sampler->allOff();
+    }
+    // ---- sequencer ----
+    double samplesPerBeat() const { return 60.0 * sr / bpm; }
+    int patTicks(const Track& t) const { return patternTicks(t.seqBars); }
+    void publishSeq(int ti) {
+        Track& t = *tracks[(size_t)ti];
+        for (int i = 0; i < t.snCount; i++) { const SeqNote& n = t.sn[i]; a_seq[ti][i].store((uint64_t)n.tick | (uint64_t)n.len << 16 | (uint64_t)n.note << 32 | (uint64_t)n.vel << 40); }
+        a_seqN[ti].store(t.snCount); a_seqBars[ti].store(t.seqBars); a_seqState[ti].store(t.seqState);
+    }
+    void noteTo(Track& t, int note, int vel, int offset, std::vector<Arp::Ev>& evs) {   // a sequencer note: through the arpeggiator when it is on
+        if (t.arpOn) { if (vel) t.arp.noteOn(note); else t.arp.noteOff(note); }
+        else evs.push_back({offset, note, vel});
+    }
+    void seqRelease(Track& t) {
+        std::vector<Arp::Ev> evs;
+        for (int n = 0; n < 128; n++) if (t.sounding[n]) { t.sounding[n] = false; noteTo(t, n, 0, 0, evs); }
+        for (auto& e : evs) t.pending.push_back({e.note, 0});
+        for (int& o : t.openIdx) o = 0;
+    }
+    // audio thread, per block: fire the notes whose tick is hit
+    void seqRun(Track& t, std::vector<Arp::Ev>& evs) {
+        const int pt = patTicks(t);
+        for (const TickHit& h : hits) {
+            const int jt = (int)(h.tick % pt);
+            for (int i = 0; i < t.snCount; i++) {   // note offs first, so a repeated note retriggers
+                const SeqNote& e = t.sn[i];
+                if (t.sounding[e.note] && (snapTick(e.tick, seqGrid, pt) + e.len) % pt == jt) { t.sounding[e.note] = false; noteTo(t, e.note, 0, h.offset, evs); }
+            }
+            for (int i = 0; i < t.snCount; i++) {
+                const SeqNote& e = t.sn[i];
+                if (snapTick(e.tick, seqGrid, pt) != jt) continue;
+                if (t.sounding[e.note]) noteTo(t, e.note, 0, h.offset, evs);
+                t.sounding[e.note] = true; noteTo(t, e.note, e.vel, h.offset, evs);
+            }
+        }
+    }
+    void seqCapture(int ti, int note, int vel, int shift) {   // shift: samples to the quantized moment (live quantize), else 0
+        Track& t = *tracks[(size_t)ti];
+        const int pt = patTicks(t);
+        const int cur = (int)std::fmod(std::max(0.0, (pos + shift) / samplesPerBeat() * kPpq) + 0.5, (double)pt);
+        if (vel > 0) {
+            if (t.snCount >= kSeqMax) return;
+            t.sn[t.snCount] = {(uint16_t)cur, (uint16_t)(kPpq / 4), (uint8_t)note, (uint8_t)vel};
+            t.openIdx[note] = ++t.snCount;
+        } else if (t.openIdx[note]) {
+            SeqNote& n = t.sn[t.openIdx[note] - 1];
+            n.len = (uint16_t)std::max(1, (cur - n.tick + pt) % pt);
+            t.openIdx[note] = 0;
+        } else return;
+        publishSeq(ti);
+    }
+    void seqState(int ti, int state) {
+        Track& t = *tracks[(size_t)ti];
+        state = std::min(2, std::max(0, state));
+        if (state == 2) {
+            if (seqRecTrack >= 0 && seqRecTrack != ti) { Track& o = *tracks[(size_t)seqRecTrack]; if (o.seqState == 2) { o.seqState = 1; for (int& x : o.openIdx) x = 0; publishSeq(seqRecTrack); } }
+            seqRecTrack = ti;
+            if (!playing && !counting) { if (countIn > 0 && loopSamples == 0) startCount(2); else { playing = true; if (loopSamples == 0) pos = 0; } }   // from a stopped transport the pattern starts at bar 1
+        }
+        if (state == 0 || state == 1) for (int& x : t.openIdx) x = 0;
+        if (state == 0) { seqRelease(t); if (counting && countKind == 2) { counting = false; countKind = 0; } }
+        t.seqState = state; publishSeq(ti);
+    }
+    void seqBarsSet(int ti, int bars) {
+        Track& t = *tracks[(size_t)ti];
+        bars = bars >= 8 ? 8 : bars >= 4 ? 4 : bars >= 2 ? 2 : 1;
+        if (bars == t.seqBars) return;
+        const int oldPt = patTicks(t);
+        t.seqBars = bars;
+        const int newPt = patTicks(t);
+        if (newPt > oldPt) {   // longer: the content repeats
+            const int n0 = t.snCount;
+            for (int k = 1; k < newPt / oldPt; k++) for (int i = 0; i < n0 && t.snCount < kSeqMax; i++) { SeqNote e = t.sn[i]; e.tick = (uint16_t)(e.tick + k * oldPt); t.sn[t.snCount++] = e; }
+        } else {               // shorter: the rest is dropped
+            int w = 0; for (int i = 0; i < t.snCount; i++) if (t.sn[i].tick < newPt) t.sn[w++] = t.sn[i];
+            t.snCount = w;
+        }
+        for (int& x : t.openIdx) x = 0;
+        seqRelease(t); publishSeq(ti);
+    }
+    // samples from now to the nearest grid line of the live quantize (negative: it just passed)
+    int quantShift() const {
+        const double spb = samplesPerBeat(), tl = spb / kPpq, g = gridTicks(inQuant), tick = (playing ? pos : freeBeat * spb) / tl;
+        return (int)std::lround((std::round(tick / g) * g - tick) * tl);
     }
     void liveNote(int ti, int note, int vel) {
         Track& t = *tracks[ti];
-        if (freeArmed && ti == freeTrack && loopSrc == 1 && vel > 0) { freeArmed = false; a_freeArmed = false; freeRec = true; playing = true; pos = 0; }   // the take starts with the first note
+        bool startsTake = false;
+        if (freeArmed && !counting && ti == freeTrack && loopSrc == 1 && vel > 0) { freeArmed = false; a_freeArmed = false; freeRec = true; playing = true; pos = 0; clickEnv = 0; startsTake = true; }   // the take starts with the first note
+        int delay = 0, shift = 0;
+        if (inQuant > 0 && !startsTake) {
+            if (vel > 0) { shift = quantShift(); delay = std::max(0, shift); t.lastShift[note] = shift; t.lastDelay[note] = delay; }
+            else { shift = t.lastShift[note]; delay = t.lastDelay[note]; t.lastShift[note] = t.lastDelay[note] = 0; }
+        }
+        if (t.seqState == 2 && playing) seqCapture(ti, note, vel, shift);
+        if (delay > 0 && t.nDelayed < Track::kDelayMax) { t.delayed[t.nDelayed++] = {delay, note, vel}; return; }   // the key sounds on the grid line
         if (t.arpOn) { if (vel) t.arp.noteOn(note); else t.arp.noteOff(note); }
         else t.pending.push_back({note, vel});
+    }
+    void startCount(int kind) {
+        counting = true; countKind = kind; countLeft = countIn * 4.0 * samplesPerBeat(); freeBeat = 0; playing = false; clickEnv = 0;
+    }
+    void endCount() {
+        counting = false;
+        if (countKind == 1 && freeArmed) { freeArmed = false; a_freeArmed = false; freeRec = true; playing = true; pos = 0; clickEnv = 0; }
+        else if (countKind == 2) { playing = true; if (loopSamples == 0) pos = 0; }
+        countKind = 0;
     }
 
     // ---- free take ----
@@ -128,21 +257,29 @@ struct Session::Impl {
         freeArmed = true; a_freeArmed = true; freeRec = false; freeTrack = track;
         freeBuf.clear(); freeBuf.reserve((size_t)sr * 2 * 30);
         pos = 0; playing = false;
+        if (countIn > 0) startCount(1);
     }
     void freeStop() {
-        if (freeArmed) { freeArmed = false; a_freeArmed = false; return; }   // cancelled before any sound
+        if (freeArmed) { freeArmed = false; a_freeArmed = false; counting = false; countKind = 0; return; }   // cancelled before any sound
         if (!freeRec) return;
         freeRec = false;
         const double len = pos;
         if (len < 0.25 * sr) { pos = 0; freeBuf.clear(); return; }   // too short: treat as cancelled
-        // bars and tempo that fit the take (shown to the user; the loop length is exactly the take)
-        const double barSec = 240.0 / bpm;
-        int n = std::min(32, std::max(1, (int)std::lround(len / sr / barSec)));
-        float nb = (float)(n * 240.0 * sr / len);
-        while (nb > 300.f && n > 1) { n--; nb = (float)(n * 240.0 * sr / len); }
-        while (nb < 30.f && n < 32) { n++; nb = (float)(n * 240.0 * sr / len); }
-        bpm = std::min(300.f, std::max(30.f, nb)); a_bpm = bpm; loopBars = n; a_bars = n;
-        loopSamples = (int32_t)std::lround(len); a_loop = loopSamples;
+        if (takeQuant > 0) {   // the tempo stays: the take is cut or padded to whole beats / bars
+            const double spb = samplesPerBeat(), unit = takeQuant == 1 ? spb : 4 * spb;
+            const double units = std::max(1.0, std::round(len / unit));
+            loopSamples = (int32_t)std::lround(std::min(units * unit, 180.0 * sr)); a_loop = loopSamples;
+            loopBars = std::min(32, std::max(1, (int)std::lround(loopSamples / (4 * spb)))); a_bars = loopBars;
+        } else {
+            // bars and tempo that fit the take (shown to the user; the loop length is exactly the take)
+            const double barSec = 240.0 / bpm;
+            int n = std::min(32, std::max(1, (int)std::lround(len / sr / barSec)));
+            float nb = (float)(n * 240.0 * sr / len);
+            while (nb > 300.f && n > 1) { n--; nb = (float)(n * 240.0 * sr / len); }
+            while (nb < 30.f && n < 32) { n++; nb = (float)(n * 240.0 * sr / len); }
+            bpm = std::min(300.f, std::max(30.f, nb)); a_bpm = bpm; loopBars = n; a_bars = n;
+            loopSamples = (int32_t)std::lround(len); a_loop = loopSamples;
+        }
         Track& ft = *tracks[freeTrack];
         if (!freeBuf.empty()) { freeBuf.resize((size_t)loopSamples * 2, 0.f); ft.clip = std::move(freeBuf); ft.clipHas = true; }
         freeBuf = {};
@@ -260,11 +397,15 @@ struct Session::Impl {
             float ip = 0;
             for (int i = 0; i < n * 2; i++) ip = std::max(ip, std::fabs(in[i]));
             a_inPeak.store(std::max(ip, a_inPeak.load() * 0.9f));
-            if (freeArmed && loopSrc == 0 && ip > micThr.load()) { freeArmed = false; a_freeArmed = false; freeRec = true; playing = true; pos = 0; }   // first sound: the take starts
+            if (freeArmed && !counting && loopSrc == 0 && ip > micThr.load()) { freeArmed = false; a_freeArmed = false; freeRec = true; playing = true; pos = 0; clickEnv = 0; }   // first sound: the take starts
             if (freeRec && loopSrc == 0) freeBuf.insert(freeBuf.end(), in, in + n * 2);
             if (sampling || armedWait) captureMono(in, n);
         }
         const int32_t p0 = (int32_t)pos;
+        // beat clock: the transport while it runs, a free running clock while it is stopped; the sequencer and metronome fire on its ticks
+        const double spb = samplesPerBeat();
+        tickHits(playing ? pos : freeBeat * spb, n, spb / kPpq, playing ? (double)loopSamples : 0.0, hits);
+        const double beat0 = playing ? pos / spb : freeBeat;
         const bool tl = playing && !freeRec && loopSamples > 0;
         updateLoopPeaks();
         const double spd = tapeSpeed.load();
@@ -275,7 +416,7 @@ struct Session::Impl {
         std::vector<Arp::Ev> evs;
         for (int ti = 0; ti < kTracks; ti++) {
             Track& t = *tracks[(size_t)ti];
-            if (!t.sampler && !t.clipHas && !t.clipRec && t.pending.empty()) { t.peak.store(t.peak.load() * 0.9f); a_voiceN[ti].store(0); continue; }
+            if (!t.sampler && !t.clipHas && !t.clipRec && t.pending.empty() && t.nDelayed == 0) { t.peak.store(t.peak.load() * 0.9f); a_voiceN[ti].store(0); continue; }
             std::fill(bus.begin(), bus.begin() + n * 2, 0.f);
             // LFO: one value per block (about 170 Hz)
             float lfoGain = 1.f, lfoPan = 0.f, bend = 0.f; bool filterOn = false;
@@ -295,6 +436,13 @@ struct Session::Impl {
             evs.clear();
             for (auto& nt : t.pending) evs.push_back({0, nt.note, nt.vel});
             t.pending.clear();
+            for (int k = 0, w = 0; k < t.nDelayed; k++) {   // held back keys: due in this block -> sample accurate on the grid line
+                Track::Delayed d = t.delayed[k];
+                if (d.left < n) noteTo(t, d.note, d.vel, std::max(0, d.left), evs);
+                else { d.left -= n; t.delayed[w++] = d; }
+                if (k == t.nDelayed - 1) t.nDelayed = w;
+            }
+            if (playing && t.seqState > 0 && !hits.empty()) seqRun(t, evs);
             if (t.arpOn) t.arp.run(n, bpm, sr, evs);
             std::stable_sort(evs.begin(), evs.end(), [](const Arp::Ev& a, const Arp::Ev& b) { return a.offset < b.offset; });
             if (t.sampler) {
@@ -355,6 +503,7 @@ struct Session::Impl {
                 }
             }
             t.tape.process(bus.data(), n);
+            if (t.fx->active()) t.fx->process(bus.data(), n, beat0, 1.0 / spb); else t.fx->feedOnly(bus.data(), n);
             const float g = t.vol * lfoGain;
             const float ang = (clampf(t.pan + lfoPan, -1.f, 1.f) * 0.5f + 0.5f) * 1.5707963f;
             const float gl = g * std::cos(ang) * 1.4142f, gr = g * std::sin(ang) * 1.4142f;
@@ -373,6 +522,19 @@ struct Session::Impl {
         for (int i = 0; i < n * 2; i++) out[i] += wet[(size_t)i] * ret[0];
         delay.process(sendBus[1].data(), wet.data(), n);
         for (int i = 0; i < n * 2; i++) out[i] += wet[(size_t)i] * ret[1];
+        mfx.process(out, n, beat0, 1.0 / spb);
+        if (metroOn || counting || clickEnv > 0.001f) {
+            size_t hi = 0;
+            for (int i = 0; i < n; i++) {
+                for (; hi < hits.size() && hits[hi].offset <= i; hi++)
+                    if ((metroOn || counting) && hits[hi].tick % kPpq == 0) { clickEnv = 1.f; clickPh = 0.f; clickFreq = (hits[hi].tick / kPpq) % 4 == 0 ? 1600.f : 1000.f; }
+                if (clickEnv > 0.001f) {
+                    const float v = std::sin(clickPh) * clickEnv * metroVol * 0.5f;
+                    out[2 * i] += v; out[2 * i + 1] += v;
+                    clickPh += 2.f * kPi * clickFreq / sr; clickEnv *= 0.9965f;
+                }
+            }
+        }
         float mp = 0.f;
         for (int i = 0; i < n * 2; i++) { const float v = std::tanh(out[i] * masterVol); out[i] = v; mp = std::max(mp, std::fabs(v)); }
         a_master.store(std::max(mp, a_master.load() * 0.92f));
@@ -381,6 +543,9 @@ struct Session::Impl {
             if (freeRec) a_freeSec = (float)(pos / sr);
             else if (loopSamples > 0 && pos >= loopSamples) pos -= loopSamples;
         }
+        freeBeat = playing ? pos / spb : freeBeat + n / spb;
+        a_beat.store(freeBeat);
+        if (counting) { countLeft -= n; a_countBeats.store((int)std::ceil(std::max(0.0, countLeft) / spb)); if (countLeft <= 0) { endCount(); a_countBeats.store(0); } }
         if (sampling) a_sampleSec = (float)sampleBuf.size() / sr;
     }
 };
@@ -411,6 +576,7 @@ void Session::process(float* out, const float* in, int frames) {
 // ---- transport and notes ----
 void Session::play(bool on) {
     d->post([this, on] {
+        if (!on) { d->counting = false; d->countKind = 0; }
         if (!on && (d->freeRec || d->freeArmed)) d->freeStop();
         d->playing = on;
         if (!on) for (auto& t : d->tracks) d->releaseAll(*t);
@@ -456,6 +622,27 @@ void Session::setMasterVolume(float v) { d->post([=] { d->masterVol = clampf(v, 
 void Session::setReverb(float size) { d->post([=] { d->reverb.setSize(size); }); }
 void Session::setDelay(float sec, float fb) { d->post([=] { d->delay.setTime(sec); d->delay.setFeedback(fb); }); }
 void Session::setRetLevel(int w, float v) { d->post([=] { d->ret[w & 1] = clampf(v, 0.f, 1.5f); }); }
+
+// ---- tempo, metronome, sequencer, master fx ----
+void Session::setTempo(float b) { d->post([=] { if (d->loopSamples == 0 && !d->freeRec) { d->bpm = clampf(b, 30.f, 300.f); d->a_bpm = d->bpm; } }); }
+void Session::setMetronome(bool on, float vol) { d->post([=] { d->metroOn = on; d->metroVol = clampf(vol, 0.f, 1.f); d->a_metro = on; }); }
+void Session::setTakeQuant(int m) { d->post([=] { d->takeQuant = std::min(2, std::max(0, m)); }); }
+void Session::seqSetState(int t, int s) { if (t >= 0 && t < kTracks) d->post([=] { d->seqState(t, s); }); }
+void Session::seqSetBars(int t, int b) { if (t >= 0 && t < kTracks) d->post([=] { d->seqBarsSet(t, b); }); }
+void Session::seqClear(int t) {
+    if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; d->seqRelease(tr); tr.snCount = 0; d->publishSeq(t); });
+}
+void Session::setQuantize(int g) { d->post([=] { d->seqGrid = std::min(kGrids - 1, std::max(0, g)); }); }
+int Session::seqNotes(int t, SeqView* out, int maxNotes) const {
+    if (t < 0 || t >= kTracks) return 0;
+    const int n = std::min(maxNotes, std::min(kSeqMax, d->a_seqN[t].load()));
+    for (int i = 0; i < n; i++) { const uint64_t v = d->a_seq[t][i].load(); out[i] = {(int)(v & 0xffff), (int)(v >> 16 & 0xffff), (int)(v >> 32 & 0xff), (int)(v >> 40 & 0xff)}; }
+    return n;
+}
+void Session::setInputQuant(int g) { d->post([=] { d->inQuant = std::min(kGrids - 1, std::max(0, g)); }); }
+void Session::setCountIn(int bars) { d->post([=] { d->countIn = std::min(2, std::max(0, bars)); }); }
+void Session::setTrackFx(int t, const FxParams& p) { if (t >= 0 && t < kTracks) d->post([=] { d->tracks[(size_t)t]->fx->set(p); }); }
+void Session::setMasterFx(const FxParams& p) { d->post([=] { d->mfx.set(p); }); }
 
 // ---- looper ----
 void Session::freeRecord(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { if (on) d->freeStart(t); else d->freeStop(); }); }
@@ -588,6 +775,8 @@ Session::Status Session::status() const {
         s.clipPos[i] = d->a_clipPos; s.lfoValue[i] = d->a_lfo[i];
         s.voiceN[i] = std::min(kVoiceMax, d->a_voiceN[i].load()); for (int j = 0; j < s.voiceN[i]; j++) s.voicePos[i][j] = d->a_voicePos[i][j];
     }
+    s.beatPos = d->a_beat; s.metro = d->a_metro; s.countBeats = d->a_countBeats;
+    for (int i = 0; i < kTracks; i++) { s.seqState[i] = d->a_seqState[i]; s.seqBars[i] = d->a_seqBars[i]; s.seqCount[i] = d->a_seqN[i]; }
     s.freeRecording = d->a_free; s.freeArmed = d->a_freeArmed; s.freeSeconds = d->a_freeSec;
     s.sampleState = d->a_sampleState; s.sampleTrack = d->a_sampleTrack; s.sampleSeconds = d->a_sampleSec; s.inputPeak = d->a_inPeak;
     s.sampleVersion = d->a_sampleVersion; s.sampleFails = d->a_sampleFails; s.samplePending = d->a_pending;

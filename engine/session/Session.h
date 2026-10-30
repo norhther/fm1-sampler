@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../dsp/MasterFx.h"
+#include "../dsp/Sequencer.h"
 
 class Session {
 public:
@@ -36,7 +38,12 @@ public:
         float clipPos[kTracks];  // 0..1 read position of the loops (follows the loop speed)
         float lfoValue[kTracks]; // -1..1, for the UI
         int voiceN[kTracks]; float voicePos[kTracks][kVoiceMax];   // sounding voices (every grain in granular mode): read positions 0..1 of the whole sample
+        double beatPos;          // the beat clock: transport position in beats (free running while stopped)
+        bool metro;
+        int countBeats;          // > 0 while the count-in runs: beats left
+        int seqState[kTracks], seqBars[kTracks], seqCount[kTracks];   // sequencer: 0 off 1 play 2 record, pattern length in bars, notes in the pattern
     };
+    struct SeqView { int tick, len, note, vel; };
     struct Lfo { float rate = 1.f, depth = 0.f, base = 0.5f; int target = 0 /*0 pitch 1 filter 2 volume 3 pan*/, shape = 0 /*0 sine 1 tri 2 square 3 s&h*/; };
 
     explicit Session(int sampleRate = 48000);
@@ -68,6 +75,26 @@ public:
     void setReverb(float size);           // 0..1
     void setDelay(float seconds, float feedback);
     void setRetLevel(int which, float v); // reverb / delay return gain (the effects run 100 % wet)
+
+    // ---- tempo, metronome ----
+    void setTempo(float bpm);             // 30..300; ignored while a loop exists (the loop defines the tempo)
+    void setMetronome(bool on, float volume);
+    void setTakeQuant(int mode);          // 0 off (tempo follows the first take), 1 the take snaps to whole beats, 2 to whole bars (tempo kept)
+
+    // ---- note sequencer (per track pattern on the beat clock, locked to the loop) ----
+    void seqSetState(int track, int state);   // 0 off, 1 play, 2 record (starts the transport; one track records at a time)
+    void seqSetBars(int track, int bars);     // 1, 2, 4 or 8; a longer pattern repeats its content, a shorter one drops the rest
+    void seqClear(int track);
+    void setQuantize(int grid);               // playback grid of all patterns (see Sequencer.h gridName); the recorded timing is kept
+    int seqNotes(int track, SeqView* out, int maxNotes) const;
+
+    // ---- timing helpers ----
+    void setInputQuant(int grid);             // live quantize: played keys sound on the nearest grid line of the beat clock (0 = off); recording snaps to it too
+    void setCountIn(int bars);                // 0..2 bars of clicks before a free take or a sequencer recording starts from a stopped transport
+
+    // ---- effects: FX 2 inserts and LIVE FX on the master, the same set on every track ----
+    void setMasterFx(const FxParams& p);
+    void setTrackFx(int track, const FxParams& p);
 
     // ---- looper ----
     void freeRecord(int track, bool on);  // on: arm and wait for the first sound or note; the take defines the loop; off: end the take (or cancel while waiting)

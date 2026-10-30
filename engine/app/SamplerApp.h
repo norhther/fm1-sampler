@@ -22,7 +22,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -84,6 +84,8 @@ public:
         
         float vol = 0.8f, pan = 0.5f, sendR = 0.5f, sendD = 0.2f;
         int entry = -1;
+        float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
+        int seqState = 0, seqBars = 2;   // sequencer: OFF / PLAY / REC, pattern length index (1, 2, 4, 8 bars)
     };
     const TrackState& state(int t) const { return ts_[t]; }
     void setVolume(int t, float v); void setPan01(int t, float v); void setSend(int t, int which, float v);
@@ -93,6 +95,8 @@ public:
     void setScale(int scale, int root, int octave, int mode);
     static const char* scaleName(int i);
     static const char* noteName(int r);
+    static int scaleSteps(int scale, int* out12);              // semitone steps of a scale (0 for OFF), returns their count
+    static int snapNote(int note, int scale, int root);        // nearest note of the scale (ties down)
     void playNote(int note, bool down);
     void keyEvent(int rawNote, bool down);        // FM-1 key: chromatic note from the firmware
     bool linkSeen() const { return linkSeen_; }
@@ -118,6 +122,11 @@ private:
     void applyAll(int t);
     void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
     void applyFx();
+    void applyMasterFx();
+    void applyTempo();
+    void applyPattern(int t);
+    void applyTrackFx(int t);
+    void setTempo(float bpm);
     void queueCommit(int t);
     Knob cont(const char* name, float* v, std::function<std::string(float)> fmt, std::function<void()> apply, float stepSize = 0.02f, bool commit = false);
     Knob choice(const char* name, int* v, std::vector<std::string> opts, std::function<void()> apply);
@@ -130,6 +139,10 @@ private:
     // global effects
     float reverbSize_ = 0.7f, reverbDw_ = 0.35f, delayTime_ = 0.4f, delayFb_ = 0.45f;
     int loopSrc_ = 1;
+    // master fx (FX 2, LIVE FX), tempo page, sequencer grid
+    float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
+    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 0, liveGrid_ = 0, countIn_ = 0;
+    float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;
     float exciter_ = 0.f, lofi_ = 0.f, wobble_ = 0.f, loopSpeed_ = 2.f / 3.f, micThr_ = 0.452f;   // loop speed is global
     uint32_t repaintAt_ = 0; int repaintCount_ = 0;
     // library

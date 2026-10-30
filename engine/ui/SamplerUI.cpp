@@ -8,8 +8,8 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const SamplerApp::Page kTabs[] = {SamplerApp::P_HOME, SamplerApp::P_FX, SamplerApp::P_ENV, SamplerApp::P_LFO, SamplerApp::P_ARP, SamplerApp::P_SEQ, SamplerApp::P_MIX, SamplerApp::P_KEY, SamplerApp::P_SAVE, SamplerApp::P_LEN};
-const char* kTabName[] = {"SAMPLE", "FX", "ENV", "LFO", "ARP", "TAPE", "MIX", "KEY", "LOOP", "LEN"};
+const SamplerApp::Page kTabs[] = {SamplerApp::P_HOME, SamplerApp::P_FX, SamplerApp::P_ENV, SamplerApp::P_LFO, SamplerApp::P_ARP, SamplerApp::P_SEQ, SamplerApp::P_MIX, SamplerApp::P_KEY, SamplerApp::P_SAVE, SamplerApp::P_LEN, SamplerApp::P_FX2, SamplerApp::P_LIVE, SamplerApp::P_SQ, SamplerApp::P_TEMPO, SamplerApp::P_TFX, SamplerApp::P_TIMING};
+const char* kTabName[] = {"SAMPLE", "FX", "ENV", "LFO", "ARP", "TAPE", "MIX", "KEY", "LOOP", "LEN", "FX2", "LIVE", "SEQR", "TEMPO", "TRK FX", "TIME"};
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -226,12 +226,12 @@ void SamplerUI::sampleArea(Rect r) {
 
 void SamplerUI::pagePanel(Rect r) {
     const float tw = (r.w - 4 * 4) / 5;
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 16; i++) {
         Rect c{r.x + (i % 5) * (tw + 4), r.y + (i / 5) * 32, tw, 28};
         button(c, kTabName[i], app_.page() == kTabs[i], [this, i] { app_.gotoPage(kTabs[i]); }, 9.5f);
     }
     auto k = app_.knobs();
-    const float top = r.y + 72, rh = (r.h - 72) / 4;
+    const float top = r.y + 136, rh = (r.h - 136) / 4;
     for (int i = 0; i < 4; i++) {
         const auto& p = k[(size_t)i];
         const float y = top + i * rh;
