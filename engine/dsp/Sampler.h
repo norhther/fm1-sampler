@@ -43,7 +43,8 @@ public:
     // audio thread: the sample was edited (reversed, trimmed ...): the new buffer with its overview and slices, built on the worker
     void replaceOriginal(std::shared_ptr<const SampleBuf> b, std::vector<float> peaks, std::vector<int> slices) { allOff(); orig_ = std::move(b); proc_.reset(); peaks_ = std::move(peaks); if (slices.size() >= 2) slices_ = std::move(slices); }
     static std::vector<float> overview(const SampleBuf& b);
-    void setSynthMacros(const SynthMacros& m) { mac_ = m; }   // TONE, BODY, MOTION, GRIT of a built-in synth
+    void setSynthMacros(const SynthMacros& m) { mac_ = m; }
+    void setSynthEdit(const SynthEdit& e) { edit_ = e; }   // TONE, BODY, MOTION, GRIT of a built-in synth
     const std::string& label() const { return label_; }
     const std::vector<float>& peaks() const { return peaks_; }   // 512 bins, 0..1
     std::shared_ptr<const SampleBuf> original() const { return orig_; }
@@ -86,6 +87,6 @@ private:
     bool loadSynth(int idx);
     static float detectPitch(const std::vector<float>& st, int frames, int sr);
     void renderSynth(Voice& v, SynthVoice& sv, float* out, int n);
-    float level_ = 1.f, fine_ = 0.f; Pad pads_[16]; int root_ = 60; float rootGuess_ = 0.f;
+    float level_ = 1.f, fine_ = 0.f; Pad pads_[16]; SynthEdit edit_; int lastNote_ = -1; int root_ = 60; float rootGuess_ = 0.f;
     SynthMacros mac_; int synth_ = -1; float synthNorm_ = 1.f; SynthVoice sv_[kVoices];
 };

@@ -23,7 +23,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -127,6 +127,7 @@ public:
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
         int editOp = 0; float fineN = 0.5f, levelN = 1.f / 3.f;   // SAMPLE EDIT page: the edit to apply, fine tune (+-50 cents), sample level (0..3)
+        int edW1 = 0, edW2 = 0, edType = 0, edUni = 0, edVoice = 0; float edDet2 = 0.5f, edCut = 0.5f, edRes = 0.f;   // SYNTH pages: the patch edited (0 = as the patch)
         float tfEqLow = 0.5f, tfEqMid = 0.5f, tfEqHigh = 0.5f, tfComp = 0.f, duckAmt = 0.f;   // MIX mode: track EQ and compressor, how far the sidechain pushes this track down
         float padVol[16], padPitch[16], padDecay[16]; int padGroup[16] = {}; int selPad = 0;   // per pad of a kit (PADS page)
         TrackState() { for (int i = 0; i < 16; i++) { padVol[i] = 2.f / 3.f; padPitch[i] = 0.5f; padDecay[i] = 0.5f; } }
@@ -135,7 +136,9 @@ public:
     const TrackState& state(int t) const { return ts_[t]; }
     void setVolume(int t, float v); void setPan01(int t, float v); void setSend(int t, int which, float v);
     Session::Status status() const { return st_; }
-    bool isSynth(int t) const { const int e = ts_[t].entry; return e >= 0 && e < (int)lib_.size() && lib_[(size_t)e].path.rfind("synth:", 0) == 0; }
+    bool isSynth(int t) const { const int e = ts_[t].entry; return e >= 0 && e < (int)lib_.size() && (lib_[(size_t)e].path.rfind("synth:", 0) == 0 || lib_[(size_t)e].path.rfind("patch:", 0) == 0); }
+    std::string savePatch();                              // the synth of this track with its envelope, macros and edits as a patch in the library (group My Patches)
+    std::string resolvePath(int entry) const;             // what the session loads: a patch entry stands for its synth
     bool hasSample(int t) const { return !s_.trackLabel(t).empty(); }
     ScaleState scale() const { return scale_; }
     void setScale(int scale, int root, int octave, int mode);
@@ -186,7 +189,7 @@ private:
     void encoder(int i, int delta);
     // ---- parameters ----
     void applyAll(int t);
-    void applyShape(int t, bool reslice = false); void applyPad(int t, int pad); void applyPads(int t); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
+    void applyShape(int t, bool reslice = false); void applySynthEdit(int t); void applyPad(int t, int pad); void applyPads(int t); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
     void applyFx();
     void applyMasterFx();
     void applyTempo(); void applyTomb();

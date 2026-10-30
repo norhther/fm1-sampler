@@ -981,6 +981,11 @@ void Session::setSynthMacros(int t, float tone, float body, float motion, float 
     SynthMacros m; m.tone = clampf(tone, -1.f, 1.f); m.body = clampf(body, -1.f, 1.f); m.motion = clampf(motion, -1.f, 1.f); m.grit = clampf(grit, -1.f, 1.f);
     d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setSynthMacros(m); });
 }
+void Session::setSynthEdit(int t, int w1, int w2, float det2Cents, float cutOctaves, float resAdd, int filterType, int unison, bool mono, float glide) {
+    if (t < 0 || t >= kTracks) return;
+    SynthEdit e; e.w1 = w1; e.w2 = w2; e.det2 = clampf(det2Cents, -100.f, 100.f); e.cutOct = clampf(cutOctaves, -4.f, 4.f); e.res = clampf(resAdd, -1.f, 8.f); e.ftype = std::min(2, std::max(0, filterType)); e.uni = unison; e.mono = mono; e.glide = clampf(glide, 0.f, 1.f);
+    d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setSynthEdit(e); });
+}
 void Session::setRoot(int t, int midi) { if (t >= 0 && t < kTracks) d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setRoot(midi); }); }
 // re-cuts the sample into `count` slices (4..32); `sens` 0.25..2 decides how soft a hit may be (built on the worker, then swapped in)
 void Session::setSlices(int t, int count, float sens) {

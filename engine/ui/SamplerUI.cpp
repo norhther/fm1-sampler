@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -164,7 +164,7 @@ void SamplerUI::sampleArea(Rect r) {
     if (app_.page() == SamplerApp::P_SQ) { sequencerView({r.x, r.y + 28, r.w, r.h - 28}); return; }   // the sequencer page shows the pattern instead of the waveform, with all the room there is
     // algorithm (a synth has none)
     const float cw = (r.w - 5 * 4) / 6;
-    if (app_.isSynth(t)) text(r.x, r.y + 44, T_CAPTION, DIM, "BUILT-IN SYNTH  PLAY KEYS, SHAPE IT ON THE ENV, LFO AND FX PAGES", 0, false);
+    if (app_.isSynth(t)) { text(r.x, r.y + 44, T_CAPTION, DIM, "BUILT-IN SYNTH: ENV, SHAPE, OSC, FILTER, LFO", 0, false); button({r.x + r.w - 116, r.y + 30, 116, 28}, "SAVE PATCH", false, [this] { app_.savePatch(); }, 10.5f); }
     else for (int a = 0; a < 6; a++) {
         Rect c{r.x + a * (cw + 4), r.y + 30, cw, 28};
         button(c, a == 5 ? "PAUL" : SamplerApp::algoName(a), ts.algo == a, [this, a] { app_.setAlgo(a); }, 9.5f);

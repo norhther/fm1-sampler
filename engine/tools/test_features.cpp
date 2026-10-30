@@ -730,6 +730,61 @@ static void testMixer() {
     s.setMasterVolume(0.9f);
 }
 
+static void testSynthEdit() {
+    const int sr = SAMPLERATE;
+    auto play = [&](const SynthEdit& e, int idx, std::vector<int> notes, double sec, double gap = 0.0) {
+        Sampler sm(sr); sm.load("synth:" + std::to_string(idx)); sm.setSynthEdit(e); std::vector<float> o((size_t)(sec * sr) * 2, 0.f); size_t next = 0; size_t k = 0;
+        for (size_t b = 0; b + 256 <= o.size() / 2; b += 256) { if (k < notes.size() && b >= next) { sm.noteOn(notes[k++], 100); next = b + (size_t)(gap * sr); } sm.render(o.data() + b * 2, 256); }
+        return o;
+    };
+    const int sb = synthIndex("Saw Bass"), ss = synthIndex("Super Saw");
+    SynthEdit none, sine, hp, lowcut, res;
+    sine.w1 = 0; sine.w2 = 0; hp.ftype = 1; lowcut.cutOct = -2.f; res.res = 5.f;
+    auto base = play(none, sb, {48}, 0.6);
+    { auto o = play(sine, sb, {48}, 0.6); CHECK(finite(o) && diff(o, base) > 0.01 && zcr(o, 4000, 40000) < zcr(base, 4000, 40000), "WAVE sine instead of saw: smoother (%.4f vs %.4f crossings)", zcr(o, 4000, 40000), zcr(base, 4000, 40000)); }
+    { auto o = play(hp, sb, {48}, 0.6); CHECK(finite(o) && zcr(o, 4000, 40000) > zcr(base, 4000, 40000) * 1.5, "FILTER high-pass: thinner and brighter (%.4f vs %.4f)", zcr(o, 4000, 40000), zcr(base, 4000, 40000)); }
+    { auto o = play(lowcut, sb, {60}, 0.6), b2 = play(none, sb, {60}, 0.6); CHECK(finite(o) && zcr(o, 4000, 40000) < zcr(b2, 4000, 40000) * 0.8, "CUTOFF -2 octaves darkens (%.4f vs %.4f crossings)", zcr(o, 4000, 40000), zcr(b2, 4000, 40000)); }
+    { auto o = play(res, sb, {48}, 0.6); CHECK(finite(o) && diff(o, base) > 0.005, "RESONANCE changes the sound and stays finite"); }
+    { SynthEdit u1; u1.uni = 1; auto a = play(none, ss, {55}, 0.6), b = play(u1, ss, {55}, 0.6); CHECK(finite(b) && diff(a, b) > 0.01, "UNISON off thins the super saw"); }
+    {   // mono: the second key takes the first one's place; poly: both sound
+        SynthEdit mono; mono.mono = true; const int pad = synthIndex("Warm Pad");
+        auto p = play(none, pad, {48, 55}, 1.2, 0.3), m = play(mono, pad, {48, 55}, 1.2, 0.3);
+        CHECK(rms(m, (size_t)sr * 2 - 4800, (size_t)sr * 2) < rms(p, (size_t)sr * 2 - 4800, (size_t)sr * 2) * 0.85, "MONO: two keys sound as one voice (%.3f vs %.3f)", rms(m, sr * 2 - 4800, sr * 2), rms(p, sr * 2 - 4800, sr * 2));
+        SynthEdit gl; gl.mono = true; gl.glide = 0.3f; const int lead = synthIndex("Mono Lead");
+        auto g = play(gl, lead, {48, 60}, 1.0, 0.4), n = play(mono, lead, {48, 60}, 1.0, 0.4);
+        const size_t a0 = (size_t)(0.4 * sr) * 2 + 2400, a1 = a0 + 4800;   // the first 50 ms of the second note
+        CHECK(finite(g) && zcr(g, a0, a1) < zcr(n, a0, a1) * 0.85, "GLIDE: the second note slides up from the first (%.4f vs %.4f crossings)", zcr(g, a0, a1), zcr(n, a0, a1));
+    }
+    system("rm -rf /tmp/fm1sampler_th; mkdir -p /tmp/fm1sampler_th");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_th"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.5); app.selectTrack(2); app.gotoPage(SamplerApp::P_SYN1);
+    CHECK(std::string(app.knobs()[0].name) != "WAVE", "a sample track has no synth knobs");
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.gotoPage(SamplerApp::P_SYN1); CHECK(std::string(app.knobs()[0].name) == "WAVE" && std::string(app.knobs()[3].name) == "UNISON" && SamplerApp::modeOf(SamplerApp::P_SYN1) == 0, "a synth track has the OSC page");
+    app.gotoPage(SamplerApp::P_SYN2); CHECK(std::string(app.knobs()[0].name) == "CUTOFF" && std::string(app.knobs()[3].name) == "VOICES", "...and the FILTER page");
+    // patches: the edited synth saved into the library and loaded again
+    app.gotoPage(SamplerApp::P_SYN1); { auto k = app.knobs(); k[0].set(0.25f); }   // WAVE: sine
+    app.gotoPage(SamplerApp::P_SYN2); { auto k = app.knobs(); k[0].set(0.8f); k[3].set(1.f); }   // cutoff up, mono slow glide
+    app.gotoPage(SamplerApp::P_SHAPE); { auto k = app.knobs(); k[0].set(0.9f); }
+    const std::string name = app.savePatch(); CHECK(name == "Saw Bass 2", "SAVE PATCH names it after the synth (%s)", name.c_str());
+    int pe = -1; for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == name && app.library()[(size_t)i].group == "My Patches") pe = i;
+    CHECK(pe >= 0, "the patch is in the library under My Patches");
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Brass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.gotoPage(SamplerApp::P_SYN2); { auto k = app.knobs(); k[3].set(0.f); } app.gotoPage(SamplerApp::P_SYN1); { auto k = app.knobs(); k[0].set(0.f); }
+    app.loadEntry(pe); for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    CHECK(app.sampleLabel(2) == "Saw Bass" && app.isSynth(2) && app.state(2).edW1 == 1 && app.state(2).edVoice == 3 && app.state(2).synTone > 0.89f && app.state(2).edCut > 0.79f, "loading the patch brings the synth and its settings back (%s, wave %d, voices %d, tone %.2f)", app.sampleLabel(2).c_str(), app.state(2).edW1, app.state(2).edVoice, app.state(2).synTone);
+    CHECK(app.saveProject("Patch Test") , "a project with a patch on a track saves"); for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Brass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < 10; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.loadProject("Patch Test"); for (int i = 0; i < 60; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    CHECK(app.sampleLabel(2) == "Saw Bass", "...and loads with the synth on the track (%s)", app.sampleLabel(2).c_str());
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -823,6 +878,7 @@ int main() {
     }
     testSynths();
     testOp1();
+    testSynthEdit();
     testMixer();
     testSampleEdit();
     testPads();
@@ -878,6 +934,7 @@ int main() {
         btn(SamplerApp::HOME); btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ARP, "HOME x4: arpeggiator");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SHAPE, "HOME x5: shape (macros, root key, slices)");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SMPED, "HOME x6: sample edit");
+        btn(SamplerApp::HOME); btn(SamplerApp::HOME);
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME again: back to the sample");
         btn(SamplerApp::ENV); CHECK(app.page() == SamplerApp::P_ENV, "ENV: shortcut to the envelope");
         btn(SamplerApp::LFO); CHECK(app.page() == SamplerApp::P_LFO, "LFO: shortcut");

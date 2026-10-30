@@ -67,6 +67,7 @@ public:
     // ---- sampler (per track) ----
     void loadSamplePath(const std::string& path, bool kit, int track);          // worker thread builds it, then it replaces the track's sampler
     void setSynthMacros(int track, float tone, float body, float motion, float grit);   // -1..1 each; only a built-in synth listens
+    void setSynthEdit(int track, int wave1, int wave2, float detune2Cents, float cutoffOctaves, float resonanceAdd, int filterType, int unison, bool mono, float glideSeconds);   // a built-in synth on top of its patch (-1 = keep the patch's)
     void setPad(int track, int pad, float volume, float pitchSemitones, float pan, float decay, int chokeGroup);   // KIT mode and the synth drum kits, pad 0..15
     enum EditOp { EDIT_REVERSE, EDIT_NORMALIZE, EDIT_TRIM, EDIT_FADE_IN, EDIT_FADE_OUT, EDIT_UNDO };
     void editSample(int track, int op);                                       // REVERSE, NORMALIZE, TRIM to the play window, FADE IN / OUT (30 ms); UNDO takes the last edit back

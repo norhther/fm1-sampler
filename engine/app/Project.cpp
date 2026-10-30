@@ -85,6 +85,7 @@ std::string SamplerApp::stateText() {
         for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
         io.f(k + "fineN", x.fineN); io.f(k + "levelN", x.levelN);
         io.f(k + "tfEqLow", x.tfEqLow); io.f(k + "tfEqMid", x.tfEqMid); io.f(k + "tfEqHigh", x.tfEqHigh); io.f(k + "tfComp", x.tfComp); io.f(k + "duckAmt", x.duckAmt);
+        io.i(k + "edW1", x.edW1, 0, 4); io.i(k + "edW2", x.edW2, 0, 4); io.i(k + "edType", x.edType, 0, 2); io.i(k + "edUni", x.edUni, 0, 3); io.i(k + "edVoice", x.edVoice, 0, 3); io.f(k + "edDet2", x.edDet2); io.f(k + "edCut", x.edCut); io.f(k + "edRes", x.edRes);
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (x.entry >= 0 && x.entry < (int)lib_.size()) io.out << k << "sample=" << lib_[(size_t)x.entry].group << '|' << lib_[(size_t)x.entry].label << '\n';
@@ -131,7 +132,7 @@ void SamplerApp::applyStateText(const std::string& text) {
             const size_t bar = it->second.find('|'); const std::string group = it->second.substr(0, bar), label = bar == std::string::npos ? "" : it->second.substr(bar + 1);
             for (size_t i = 0; i < lib_.size(); i++) if (lib_[i].group == group && lib_[i].label == label) { x.entry = (int)i; break; }
         }
-        if (x.entry >= 0) s_.loadSamplePath(lib_[(size_t)x.entry].path, lib_[(size_t)x.entry].kit, t); else s_.unloadSample(t);
+        if (x.entry >= 0 && !resolvePath(x.entry).empty()) s_.loadSamplePath(resolvePath(x.entry), lib_[(size_t)x.entry].kit, t); else s_.unloadSample(t);
         applyAll(t); applyTrackFx(t); applyPattern(t);
         std::vector<Session::SeqView> notes;
         const auto nt = kv.find(k + "notes");

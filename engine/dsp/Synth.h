@@ -25,6 +25,15 @@ struct SynthPatch {
 
 // the four macro knobs of a synth (-1 .. 1, 0 = the patch as it is): TONE brightens, BODY adds weight and length, MOTION adds movement, GRIT adds drive
 struct SynthMacros { float tone = 0, body = 0, motion = 0, grit = 0; };
+// what the user changed on top of a patch (SYNTH pages); the defaults leave the patch as it is
+struct SynthEdit {
+    int w1 = -1, w2 = -1;       // oscillator waves (-1 = the patch's): 0 sine 1 saw 2 square 3 triangle
+    float det2 = 0.f;           // oscillator 2 detune, cents added
+    float cutOct = 0.f, res = 0.f;   // filter cutoff in octaves, resonance added
+    int ftype = 0;              // 0 low-pass, 1 high-pass, 2 band-pass
+    int uni = -1;               // unison voices (-1 = the patch's)
+    bool mono = false; float glide = 0.f;   // one voice at a time; time in s to slide from the last note
+};
 
 //   name        w1 l1   w2 semi det  l2   sub  noi  nDec  pw   uni det   fmR  fmI  fmD   cut   res  fenv fdec key   pEnv pDec vib  pluck dec   a     d     s     r
 static const SynthPatch kSynths[] = {
@@ -101,8 +110,9 @@ struct WaveTable {
 
 class SynthVoice {
 public:
-    void start(const SynthPatch& p, int note, float vel, float sr, uint32_t seed, const SynthMacros& m, float padPitch = 0.f, float padDecay = 1.f) {
+    void start(const SynthPatch& p, int note, float vel, float sr, uint32_t seed, const SynthMacros& m, float padPitch = 0.f, float padDecay = 1.f, float glideSemis = 0.f, float glideTime = 0.f) {
         *this = SynthVoice();
+        gl_ = glideSemis; glT_ = std::max(0.005f, glideTime);
         p_ = &p; sr_ = sr; note_ = (float)note; vel_ = vel; rng_ = seed * 2654435761u + 12345u;
         for (int k = 0; k < 5; k++) ph_[k] = rnd();   // free-running phases: a stack does not sound like one thick oscillator
         if (p.engine == 3) { pad_ = ((note - 60) % 16 + 16) % 16; padPitch_ = padPitch; padDecay_ = padDecay; return; }
@@ -123,7 +133,7 @@ public:
     }
     bool finished() const { return done_; }
     // adds one sample (mono -> l, r)
-    void next(float bend, const SynthMacros& m, float& l, float& r) {
+    void next(float bend, const SynthMacros& m, const SynthEdit& ed, float& l, float& r) {
         const SynthPatch& p = *p_;
         const float dt1 = 1.f / sr_;
         t_ += dt1;
@@ -133,7 +143,8 @@ public:
         else {
             const float vib = p.vib + std::max(0.f, m.motion) * 12.f;
             const float vibDeg = vib > 0.f ? vib * std::min(1.f, t_ / 0.4f) * std::sin(2.f * kPi * 5.2f * t_) : 0.f;
-            const float pe = p.pitchEnv > 0.f ? p.pitchEnv * std::exp(-t_ / p.pitchDec) : 0.f;
+            const float pe = (p.pitchEnv > 0.f ? p.pitchEnv * std::exp(-t_ / p.pitchDec) : 0.f) + (gl_ != 0.f ? gl_ * std::exp(-t_ / glT_) : 0.f);
+            const int w1 = ed.w1 >= 0 ? ed.w1 : p.w1, w2 = ed.w2 >= 0 ? ed.w2 : p.w2, uniN = ed.uni > 0 ? ed.uni : p.uni;
             const float f = freq(bend + pe + vibDeg / 100.f);
             if (p.pluck) {
                 float rp = (float)plW_ - plN_; if (rp < 0) rp += kDl;
@@ -153,30 +164,30 @@ public:
                     const float (*tb)[WaveTable::kLen] = f > 500.f ? wt.lite : wt.full;
                     const float a = tb[f0][i0] + (tb[f0][i1] - tb[f0][i0]) * fi, b = tb[f0 + 1][i0] + (tb[f0 + 1][i1] - tb[f0 + 1][i0]) * fi;
                     oL = oR = (a + (b - a) * ff) * p.l1;
-                } else if (p.fmIdx > 0.f && p.w1 == 0) {
+                } else if (p.fmIdx > 0.f && w1 == 0) {
                     const float idx = p.fmIdx * (1.f + 0.8f * m.tone) * (p.fmDec > 0.f ? std::exp(-t_ / p.fmDec) : 1.f) * (0.5f + 0.5f * vel_);
                     phm_ += dt * p.fmRatio; phm_ -= std::floor(phm_);
                     ph_[0] += dt; ph_[0] -= std::floor(ph_[0]);
                     oL = oR = std::sin(2.f * kPi * (ph_[0] + std::max(0.f, idx) * std::sin(2.f * kPi * phm_))) * p.l1;
-                } else if (p.uni > 1) {
-                    const int n = std::min(5, p.uni); const float spread = p.uniDet * (1.f + 1.2f * m.motion);
+                } else if (uniN > 1) {
+                    const int n = std::min(5, uniN); const float spread = p.uniDet * (1.f + 1.2f * m.motion);
                     for (int k = 0; k < n; k++) {
                         const float x = n > 1 ? (float)k / (n - 1) * 2.f - 1.f : 0.f;   // -1 .. 1
                         const float d = dt * std::pow(2.f, x * std::max(0.f, spread) / 1200.f);
                         ph_[k] += d; ph_[k] -= std::floor(ph_[k]);
-                        const float w = wave(p.w1, ph_[k], d, p.pw) * p.l1 / std::sqrt((float)n);
+                        const float w = wave(w1, ph_[k], d, p.pw) * p.l1 / std::sqrt((float)n);
                         const float pan = 0.5f + 0.5f * x;   // spread over the stereo field
                         oL += w * (1.f - pan * 0.8f); oR += w * (0.2f + pan * 0.8f);
                     }
                 } else {
                     ph_[0] += dt; ph_[0] -= std::floor(ph_[0]);
-                    oL = oR = wave(p.w1, ph_[0], dt, p.pw) * p.l1;
+                    oL = oR = wave(w1, ph_[0], dt, p.pw) * p.l1;
                 }
                 const float body = std::max(-0.9f, m.body);
                 if (p.l2 > 0.f) {
-                    const float d2 = dt * std::pow(2.f, (p.semi2 + p.det2 / 100.f) / 12.f);
+                    const float d2 = dt * std::pow(2.f, (p.semi2 + (p.det2 + ed.det2) / 100.f) / 12.f);
                     ph2_ += d2; ph2_ -= std::floor(ph2_);
-                    const float w = wave(p.w2, ph2_, d2, p.pw) * p.l2 * (1.f + 0.7f * body); oL += w; oR += w;
+                    const float w = wave(w2, ph2_, d2, p.pw) * p.l2 * (1.f + 0.7f * body); oL += w; oR += w;
                 }
                 const float sub = p.sub * (1.f + body) + (p.sub <= 0.f && body > 0.f ? 0.25f * body : 0.f);
                 if (sub > 0.f) { phs_ += dt * 0.5f; phs_ -= std::floor(phs_); const float w = std::sin(2.f * kPi * phs_) * sub; oL += w; oR += w; }
@@ -186,10 +197,10 @@ public:
             if (!p.pluck) {
                 if ((coefCount_++ & 7) == 0) {
                     const float env = p.fdec > 0.f ? std::exp(-t_ / p.fdec) : 0.f;
-                    const float hz = p.cut * std::pow(2.f, p.fenv * (1.f + 0.6f * m.motion) * env + p.key * (note_ - 60.f) / 12.f + (vel_ - 0.7f) * 0.8f + 2.f * m.tone);
-                    lp_.set(hz, sr_, p.res);
+                    const float hz = p.cut * std::pow(2.f, p.fenv * (1.f + 0.6f * m.motion) * env + p.key * (note_ - 60.f) / 12.f + (vel_ - 0.7f) * 0.8f + 2.f * m.tone + ed.cutOct);
+                    lp_.set(hz, sr_, std::max(0.5f, p.res + ed.res));
                 }
-                oL = lp_.process(0, oL); oR = lp_.process(1, oR);
+                oL = lp_.processT(0, oL, ed.ftype); oR = lp_.processT(1, oR, ed.ftype);
             }
         }
         if (m.grit > 0.01f) { const float g = 1.f + 4.f * m.grit, mk = 1.f / std::tanh(g) * 0.9f; oL = std::tanh(oL * g) * mk; oR = std::tanh(oR * g) * mk; }   // GRIT: drive
@@ -282,5 +293,6 @@ private:
     Lowpass lp_; int coefCount_ = 0; uint32_t rng_ = 1; bool done_ = false;
     float dl_[kDl] = {}; int plW_ = 0; float plN_ = 100.f, plDec_ = 0.99f, plZ_ = 0.f;
     float mph_[6] = {}, mAmp_[6] = {}, mf_ = 261.6f;                            // modal
+    float gl_ = 0.f, glT_ = 0.1f;   // glide: semitones to slide, over how long
     int pad_ = 0; float padPitch_ = 0.f, padDecay_ = 1.f; float hpz_ = 0.f, nlp_ = 0.f, mphd_[6] = {};                  // drums
 };

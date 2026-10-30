@@ -34,14 +34,14 @@ bool Sampler::loadSynth(int idx) {
     if (idx < 0 || idx >= kSynthCount) return false;
     const SynthPatch& p = kSynths[idx];
     // loudness: play the patch once and bring its peak to a sample-like level; the same render gives the overview
-    SynthVoice sv; Adsr env; env.set(p.a, p.d, p.s, p.r, (float)sr_); env.gateOn(); const SynthMacros none;
+    SynthVoice sv; const SynthEdit noEdit; Adsr env; env.set(p.a, p.d, p.s, p.r, (float)sr_); env.gateOn(); const SynthMacros none;
     const int total = sr_ * 12 / 10, hold = sr_ * 8 / 10;
     std::vector<float> mono((size_t)total);
     float pk = 1e-4f;
     sv.start(p, 60, 1.f, (float)sr_, 1, none);
     for (int i = 0; i < total; i++) {
         if (i == hold) env.gateOff();
-        float l, r; sv.next(0.f, none, l, r); const float e = env.next();
+        float l, r; sv.next(0.f, none, noEdit, l, r); const float e = env.next();
         mono[(size_t)i] = 0.5f * (l + r) * e; pk = std::max(pk, std::fabs(mono[(size_t)i]));
     }
     synthNorm_ = clampf(0.9f / pk, 0.05f, 8.f);
@@ -130,7 +130,11 @@ void Sampler::noteOn(int note, int vel) {
     v.slice = padIdx;
     if (pad) { v.group = pad->group; v.padGain = pad->vol; v.padPitch = pad->pitch; const float a = (pad->pan + 1.f) * kPi / 4.f; v.panL = std::cos(a) * 1.414f; v.panR = std::sin(a) * 1.414f; }
     if (synth_ >= 0) {
-        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_, mac_, pad ? pad->pitch : 0.f, pad ? pad->decay : 1.f);
+        const bool legato = edit_.mono && kSynths[synth_].engine != 3;
+        if (legato) { for (auto& o : voices_) if (&o != &v && o.on && !o.fading) fadeOut(o); }   // mono: one voice at a time
+        const float gs = legato && edit_.glide > 0.f && lastNote_ >= 0 ? (float)(lastNote_ - note) : 0.f;
+        lastNote_ = note;
+        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_, mac_, pad ? pad->pitch : 0.f, pad ? pad->decay : 1.f, gs, edit_.glide);
         v.env.set(atk_, dec_, sus_, rel_, (float)sr_);
         if (kSynths[synth_].engine == 3) v.env.set(0.001f, 0.01f, 1.f, 0.02f, (float)sr_);   // a drum hit plays itself out
         v.env.gateOn();
@@ -174,7 +178,7 @@ void Sampler::renderSynth(Voice& v, SynthVoice& sv, float* out, int n) {
     for (int i = 0; i < n; i++) {
         const float e = v.env.next();
         if (v.env.done() && !v.gate) { v.on = false; return; }
-        float l, r; sv.next(bend_, mac_, l, r);
+        float l, r; sv.next(bend_, mac_, edit_, l, r);
         if (sv.finished()) { v.on = false; return; }
         out[2 * i] += l * e * gain * v.panL; out[2 * i + 1] += r * e * gain * v.panR;
     }
