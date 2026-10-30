@@ -18,6 +18,9 @@ public:
     void touch(int action /*0 down 1 move 2 up*/, float x, float y, uint32_t nowMs);
     float rollZoom() const { return rollZoom_; }       // for the tests: time zoom of the piano roll (1 = the whole pattern) and the pitch rows shown
     float rollRows() const { return rollRowsF_; }
+    float rollBase() const { return rollBase_; }
+    float rollScroll() const { return rollScroll_; }
+    void rollGrid(float& x, float& y, float& w, float& h) const { x = rollX0_; y = rollY0_; w = rollW_; h = rollH_; }   // the note grid of the last frame
     void pinch(int phase /*0 start 1 move 2 end*/, float x1, float y1, float x2, float y2);   // two fingers on the piano roll: horizontally apart = zoom in time, vertically = pitch
 
 private:
@@ -54,9 +57,13 @@ private:
     bool linkMidi_ = false, linkAudio_ = false, sheetOpen_ = false;
     float sheetScroll_ = 0, sheetLastY_ = 0, sheetMoved_ = 0;
     Rect sheetList_{0, 0, 0, 0};
-    float rollBase_ = 48, rollScroll_ = 0, rollDownX_ = 0, rollDownY_ = 0, rollStartBase_ = 48, rollStartScroll_ = 0; bool rollMoved_ = false;   // piano roll: lowest note shown, first tick shown, touch state
-    float rollZoom_ = 1.f, rollRowsF_ = 24.f;   // piano roll zoom: how many times the pattern is stretched in time, how many pitch rows are shown
+    float rollBase_ = 54, rollScroll_ = 0, rollDownX_ = 0, rollDownY_ = 0, rollStartBase_ = 54, rollStartScroll_ = 0; bool rollMoved_ = false;   // piano roll: lowest note shown, first tick shown, touch state
+    float rollZoom_ = 1.f, rollRowsF_ = 12.f;   // (12 rows: big enough to hit with a finger)
+    // a finger on the grid: a new note being stretched, or an existing one being resized (tap = remove)
+    struct NoteDrag { bool on = false, existing = false, moved = false; int tick = 0, note = 0, len = 0, origLen = 0; } drag_;
+    int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
+    float rulerDownX_ = 0, rulerStartScroll_ = 0;   // piano roll zoom: how many times the pattern is stretched in time, how many pitch rows are shown
     // the roll of the last frame (for the pinch) and the state of a pinch in progress
     bool rollOn_ = false, pinchOn_ = false; float rollX0_ = 0, rollY0_ = 0, rollW_ = 1, rollH_ = 1; int rollPt_ = 1, rollMinVisible_ = 1;
-    float pinchDx0_ = 1, pinchDy0_ = 1, pinchZoom0_ = 1, pinchRows0_ = 24, pinchBase0_ = 48, pinchTick0_ = 0, pinchNote0_ = 60, pinchYFrac0_ = 0.5f;
+    float pinchDx0_ = 1, pinchDy0_ = 1, pinchZoom0_ = 1, pinchRows0_ = 12, pinchBase0_ = 54, pinchTick0_ = 0, pinchNote0_ = 60, pinchYFrac0_ = 0.5f;
 };

@@ -89,6 +89,8 @@ public:
     void seqSetState(int track, int state);   // 0 mute, 1 play, 2 record (starts the transport; one track records at a time), 3 step entry (keys write at the cursor)
     void seqUndo(int track);                  // takes back the last edit of the pattern (a recording pass, a step, a tap on the grid, clear, a change of the length); 16 steps
     void seqRedo(int track);
+    void seqSet(int track, const SeqView* notes, int n);                      // replace the whole pattern (one undo step)
+    void seqResize(int track, int tick, int note, int len);                   // touch edit: a note gets a new length in ticks
     void seqToggle(int track, int tick, int len, int note, int vel);   // touch edit: a note under that tick is removed, else one is added
     void seqRest(int track);                  // step entry: skip one step
     void seqCursorMove(int track, int steps); // step entry: move the cursor

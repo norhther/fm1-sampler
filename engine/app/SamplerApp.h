@@ -6,6 +6,7 @@
 //            buttons   HOME sample (start, end, speed, pitch) | FX | ENV | LFO | ARP | SEQ tape (loop speed, exciter, lo-fi, wobble) | EDIT mixer
 //                      GLO key and scale | SAVE loop save (tap) / clear (hold) | PLAY | REC loop record / overdub
 #pragma once
+#include "../dsp/Synth.h"
 #include "../session/Session.h"
 #include <array>
 #include <cmath>
@@ -76,7 +77,9 @@ public:
     void seqClear() { s_.seqClear(track_); say("PATTERN CLEARED"); }
     void seqBounce();                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
     void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
-    void seqToggleAt(int tick, int note);         // touch: add / remove a note (length = one step)
+    void seqToggleAt(int tick, int note, int len = 0);   // touch: add / remove a note (length in ticks, 0 = one step)
+    void seqDice();                                       // a random pattern in the current scale
+    void seqResizeAt(int tick, int note, int len);        // touch: stretch the note that starts at `tick`
     int stepTicks() const { const int g = gridTicks(seqGrid_); return g ? g : kPpq / 4; }
     int seqGridIndex() const { return seqGrid_; }
     void cycleSeqGrid() { seqGrid_ = seqGrid_ >= kGrids - 1 || seqGrid_ < 1 ? 1 : seqGrid_ + 1; applyTempo(); }   // 1/4, 1/8, 1/8T ... 1/32T (the grid of the roll and of the quantize)
@@ -109,6 +112,7 @@ public:
     const TrackState& state(int t) const { return ts_[t]; }
     void setVolume(int t, float v); void setPan01(int t, float v); void setSend(int t, int which, float v);
     Session::Status status() const { return st_; }
+    bool isSynth(int t) const { const int e = ts_[t].entry; return e >= 0 && e < (int)lib_.size() && lib_[(size_t)e].path.rfind("synth:", 0) == 0; }
     bool hasSample(int t) const { return !s_.trackLabel(t).empty(); }
     ScaleState scale() const { return scale_; }
     void setScale(int scale, int root, int octave, int mode);
