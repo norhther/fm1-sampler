@@ -1,6 +1,7 @@
 // Standard MIDI files: patterns out (one track per sequencer track, kPpq ticks per beat) and notes in.
 #pragma once
 #include "Sequencer.h"
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <string>
@@ -79,9 +80,10 @@ inline bool readMidi(const std::string& path, MidiSong& song) {
             const int need = (type == 0xc0 || type == 0xd0) ? 1 : 2;
             if (q + need > end) break;
             const int a = (uint8_t)d[q], v = need > 1 ? (uint8_t)d[q + 1] : 0; q += need;
-            const int kt = (int)(tick * kPpq / div);
+            if (a > 127 || v > 127) continue;   // data bytes have no high bit: a file that says otherwise is damaged, the event is skipped (and the note index stays inside open[][])
+            const int kt = (int)std::min<int64_t>(tick * kPpq / div, 1 << 28);
             if (type == 0x90 && v > 0) { if (open[ch][a] < 0) { tmp.push_back({kt, 0, a, v}); open[ch][a] = (int)tmp.size() - 1; } }
-            else if (type == 0x80 || (type == 0x90 && v == 0)) { const int i = open[ch][a]; if (i >= 0) { tmp[(size_t)i].len = std::max(1, kt - tmp[(size_t)i].tick); open[ch][a] = -1; } }
+            else if (type == 0x80 || (type == 0x90 && v == 0)) { const int i = open[ch][a]; if (i >= 0 && (size_t)i < tmp.size()) { tmp[(size_t)i].len = std::max(1, kt - tmp[(size_t)i].tick); open[ch][a] = -1; } }
         }
         for (auto& n : tmp) if (n.len > 0) notes.push_back(n);
         if (!notes.empty()) song.tracks.push_back(std::move(notes));

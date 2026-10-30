@@ -363,6 +363,18 @@ static void testProject() {
         if (same) { auto& t0 = b.tracks[0]; same = t0[0].tick == 0 && t0[0].len == 96 && t0[0].note == 60 && t0[0].vel == 100 && t0[2].len == 192 && t0[2].vel == 127 && b.tracks[1][0].tick == 384 && b.tracks[1][0].note == 36; }
         CHECK(same, "midi round trip: %zu tracks, %.1f bpm", b.tracks.size(), b.bpm);
         CHECK(!readMidi("/tmp/fm1_nothing.mid", b), "a missing midi file is refused");
+        {   // damaged files: data bytes with the high bit set, a track that ends in the middle of an event, a huge length
+            std::string bad = "MThd"; bad += std::string("\0\0\0\6\0\0\0\1\0\xc0", 10);
+            std::string trk; const char ev[] = {0, (char)0x90, (char)200, (char)100, 10, (char)0x80, (char)250, 0, 5, (char)0x90, 60, (char)130, 5, (char)0x90, 64, 100, 5, (char)0x80, 64, 0, 0, (char)0xff, 0x2f, 0};
+            trk.assign(ev, sizeof ev);
+            std::string t2 = "MTrk"; t2 += std::string("\0\0\0", 3); t2 += (char)trk.size(); t2 += trk;
+            { std::ofstream f("/tmp/fm1_bad.mid", std::ios::binary); f << bad << t2; }
+            MidiSong x; const bool ok = readMidi("/tmp/fm1_bad.mid", x);
+            CHECK(ok && x.tracks.size() == 1 && x.tracks[0].size() == 1 && x.tracks[0][0].note == 64, "a damaged midi file: the bad events are skipped, the good note stays (%zu notes)", ok && !x.tracks.empty() ? x.tracks[0].size() : 0);
+            std::string cut = bad + "MTrk" + std::string("\0\0\xff\xff", 4) + std::string("\0\x90", 2);
+            { std::ofstream f("/tmp/fm1_cut.mid", std::ios::binary); f << cut; }
+            MidiSong y; readMidi("/tmp/fm1_cut.mid", y); CHECK(true, "a truncated midi file with a huge track length does not crash");
+        }
     }
     system("rm -rf /tmp/fm1sampler_ta; mkdir -p /tmp/fm1sampler_ta");
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
