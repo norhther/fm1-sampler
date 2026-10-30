@@ -31,7 +31,8 @@ struct Session::Impl {
     struct Note { int note, vel; };
     struct Track {
         std::unique_ptr<Sampler> sampler;
-        mutable std::mutex infoMtx; std::string label; std::vector<float> peaks; float rootGuess = 0.f; std::vector<float> slicePts;   // for the UI threads
+        std::shared_ptr<const SampleBuf> prevOrig;   // the sample before the last edit (EDIT: UNDO)
+        mutable std::mutex infoMtx; std::string label; std::vector<float> peaks; float rootGuess = 0.f; int frames = 0; std::vector<float> slicePts;   // for the UI threads
         // sound shaping
         Arp arp; bool arpOn = false;
         Lowpass filt; bool filtOn = false;
@@ -73,6 +74,7 @@ struct Session::Impl {
     // beat clock, metronome, sequencer
     double freeBeat = 0;   // beat position while the transport is stopped
     bool metroOn = false; float metroVol = 0.6f, clickEnv = 0, clickFreq = 1000, clickPh = 0;
+    bool resampling = false; std::vector<float> resBuf; int64_t resLeft = 0;   // the master output being recorded into a sample
     uint32_t rngState = 99; uint32_t tombolaSeed = 1; float swing = 0.5f; std::atomic<int> busy{0};   // file jobs in flight (project save / load)
     int takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
     // count-in: clicks for countIn bars, then the take (kind 1) or the sequencer recording (kind 2) starts
@@ -483,7 +485,7 @@ struct Session::Impl {
             Track& t = *tracks[track];
             releaseAll(t);
             std::swap(t.sampler, *holder);
-            { std::lock_guard<std::mutex> l(t.infoMtx); t.label = t.sampler->label(); t.peaks = t.sampler->peaks(); t.rootGuess = t.sampler->rootGuess(); t.slicePts = slicePoints(*t.sampler); }
+            { std::lock_guard<std::mutex> l(t.infoMtx); t.label = t.sampler->label(); t.peaks = t.sampler->peaks(); t.rootGuess = t.sampler->rootGuess(); t.slicePts = slicePoints(*t.sampler); t.frames = t.sampler->original() ? t.sampler->original()->frames : 0; }
             (void)kit;
             bury(std::move(*holder));
             a_sampleTrack = track; a_sampleVersion++; a_sampleState = 0;
@@ -724,6 +726,11 @@ struct Session::Impl {
         float mp = 0.f;
         for (int i = 0; i < n * 2; i++) { const float v = std::tanh(out[i] * masterVol); out[i] = v; mp = std::max(mp, std::fabs(v)); }
         a_master.store(std::max(mp, a_master.load() * 0.92f));
+        if (resampling) {   // RESAMPLE: what you hear becomes a sample
+            const int64_t take = std::min<int64_t>(n, resLeft);
+            resBuf.insert(resBuf.end(), out, out + take * 2); resLeft -= take;
+            if (resLeft <= 0) { resampling = false; a_sampleState = 2; auto b = std::make_shared<std::vector<float>>(std::move(resBuf)); resBuf = {}; job([this, b] { finishSample(std::move(*b)); }); }
+        }
         if (playing) {
             const double pos0 = pos;
             pos += n;
@@ -976,6 +983,7 @@ void Session::setSlices(int t, int count, float sens) {
         });
     });
 }
+int Session::sampleFramesOf(int t) const { if (t < 0 || t >= kTracks) return 0; std::lock_guard<std::mutex> l(d->tracks[(size_t)t]->infoMtx); return d->tracks[(size_t)t]->frames; }
 float Session::rootGuessOf(int t) const { if (t < 0 || t >= kTracks) return 0.f; std::lock_guard<std::mutex> l(d->tracks[(size_t)t]->infoMtx); return d->tracks[(size_t)t]->rootGuess; }
 std::vector<float> Session::slicesOf(int t) const { if (t < 0 || t >= kTracks) return {}; std::lock_guard<std::mutex> l(d->tracks[(size_t)t]->infoMtx); return d->tracks[(size_t)t]->slicePts; }
 void Session::setPad(int t, int pad, float vol, float pitchSemis, float pan, float decay, int group) {
@@ -983,6 +991,74 @@ void Session::setPad(int t, int pad, float vol, float pitchSemis, float pan, flo
     Sampler::Pad p; p.vol = clampf(vol, 0.f, 2.f); p.pitch = clampf(pitchSemis, -24.f, 24.f); p.pan = clampf(pan, -1.f, 1.f); p.decay = clampf(decay, 0.05f, 8.f); p.group = std::min(8, std::max(0, group));
     d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setPad(pad, p); });
 }
+// RESAMPLE: records `bars` bars of the master output from the start of the pattern into a new sample (the sample pending is picked up like a microphone take)
+void Session::resample(int bars) {
+    d->post([this, bars] {
+        if (d->resampling || d->sampling) return;
+        d->resBuf.clear(); d->resBuf.reserve((size_t)d->sr * 40);
+        d->resLeft = (int64_t)std::lround(std::min(16, std::max(1, bars)) * 4.0 * d->samplesPerBeat());
+        d->pos = 0; d->tapePos = 0; d->playing = true; d->resampling = true; d->a_sampleState = 1;
+    });
+}
+// offline sample edits (REVERSE, NORMALIZE, TRIM to the window, FADE IN / OUT) on the worker; the old sample is kept for EDIT UNDO
+void Session::editSample(int t, int op) {
+    if (t < 0 || t >= kTracks) return;
+    d->post([this, t, op] {
+        Impl::Track& tr = *d->tracks[(size_t)t]; if (!tr.sampler) return;
+        auto orig = tr.sampler->original(); if (!orig) return;
+        const float a = tr.rangeA, b = tr.rangeB; const int sr = d->sr;
+        d->job([this, t, op, orig, a, b, sr] {
+            auto out = std::make_shared<SampleBuf>(); out->sr = orig->sr;
+            int f0 = 0, f1 = orig->frames; std::vector<float> data = orig->d;
+            if (op == EDIT_TRIM) { f0 = std::min(orig->frames - 64, (int)(a * orig->frames)); f1 = std::max(f0 + 64, std::min(orig->frames, (int)(b * orig->frames))); data.assign(orig->d.begin() + 2 * (size_t)f0, orig->d.begin() + 2 * (size_t)f1); }
+            const int n = (int)(data.size() / 2);
+            if (op == EDIT_REVERSE) for (int i = 0; i < n / 2; i++) { std::swap(data[2 * (size_t)i], data[2 * (size_t)(n - 1 - i)]); std::swap(data[2 * (size_t)i + 1], data[2 * (size_t)(n - 1 - i) + 1]); }
+            if (op == EDIT_NORMALIZE) { float pk = 1e-6f; for (float v : data) pk = std::max(pk, std::fabs(v)); const float g = 0.95f / pk; for (float& v : data) v *= g; }
+            if (op == EDIT_FADE_IN || op == EDIT_FADE_OUT) { const int len = std::min(n / 2, orig->sr * 30 / 1000); for (int i = 0; i < len; i++) { const float k = (float)i / len; const int j = op == EDIT_FADE_IN ? i : n - 1 - i; data[2 * (size_t)j] *= k; data[2 * (size_t)j + 1] *= k; } }
+            out->d = std::move(data); out->frames = n;
+            auto peaks = Sampler::overview(*out); auto slices = findSlices(out->d, out->frames, out->sr, 16);
+            (void)sr;
+            d->post([this, t, op, orig, out, peaks = std::move(peaks), slices = std::move(slices)]() mutable {
+                Impl::Track& tr = *d->tracks[(size_t)t]; if (!tr.sampler || tr.sampler->original() != orig) return;
+                tr.prevOrig = orig;
+                if (op == EDIT_TRIM) { tr.rangeA = 0.f; tr.rangeB = 1.f; tr.sampler->setRange(0.f, 1.f); }
+                { std::lock_guard<std::mutex> l(tr.infoMtx); tr.peaks = peaks; tr.frames = out->frames; }
+                tr.sampler->replaceOriginal(out, std::move(peaks), std::move(slices));
+                { std::lock_guard<std::mutex> l(tr.infoMtx); tr.slicePts = Impl::slicePoints(*tr.sampler); }
+                d->startProcess(t); d->a_sampleVersion++; d->a_sampleTrack = t;
+            });
+        });
+    });
+}
+void Session::undoEdit(int t) {
+    if (t < 0 || t >= kTracks) return;
+    d->post([this, t] {
+        Impl::Track& tr = *d->tracks[(size_t)t]; if (!tr.sampler || !tr.prevOrig) return;
+        auto prev = tr.prevOrig; tr.prevOrig = tr.sampler->original();
+        d->job([this, t, prev] {
+            auto peaks = Sampler::overview(*prev); auto slices = findSlices(prev->d, prev->frames, prev->sr, 16);
+            d->post([this, t, prev, peaks = std::move(peaks), slices = std::move(slices)]() mutable {
+                Impl::Track& tr = *d->tracks[(size_t)t]; if (!tr.sampler) return;
+                { std::lock_guard<std::mutex> l(tr.infoMtx); tr.peaks = peaks; tr.frames = prev->frames; }
+                tr.sampler->replaceOriginal(prev, std::move(peaks), std::move(slices));
+                { std::lock_guard<std::mutex> l(tr.infoMtx); tr.slicePts = Impl::slicePoints(*tr.sampler); }
+                d->startProcess(t); d->a_sampleVersion++; d->a_sampleTrack = t;
+            });
+        });
+    });
+}
+// slice starts placed by hand, 0..1 of the sample
+void Session::setSliceStarts(int t, const std::vector<float>& pts) {
+    if (t < 0 || t >= kTracks || pts.size() < 2) return;
+    d->post([=] {
+        Impl::Track& tr = *d->tracks[(size_t)t]; if (!tr.sampler) return; auto o = tr.sampler->original(); if (!o) return;
+        std::vector<int> st; for (float f : pts) st.push_back(std::min(o->frames - 64, std::max(0, (int)(clampf(f, 0.f, 1.f) * o->frames))));
+        std::sort(st.begin(), st.end()); st.erase(std::unique(st.begin(), st.end()), st.end()); if (st.size() < 2) return;
+        tr.sampler->allOff(); tr.sampler->setSlices(st);
+        std::lock_guard<std::mutex> l(tr.infoMtx); tr.slicePts = Impl::slicePoints(*tr.sampler);
+    });
+}
+void Session::setSampleLevel(int t, float level, float fineCents) { if (t >= 0 && t < kTracks) d->post([=] { if (d->tracks[(size_t)t]->sampler) { d->tracks[(size_t)t]->sampler->setLevel(level); d->tracks[(size_t)t]->sampler->setFine(fineCents); } }); }
 void Session::unloadSample(int t) {
     if (t < 0 || t >= kTracks) return;
     d->post([this, t] {

@@ -652,6 +652,43 @@ static void testPads() {
     app.seqClear(); run(0.2);
 }
 
+static void testSampleEdit() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_tf; mkdir -p /tmp/fm1sampler_tf");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tf"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
+    wait(3.0);
+    auto head = [&](int t, bool first) { auto p = s.samplePeaksOf(t, 64); float a = 0; for (int i = first ? 0 : 44; i < (first ? 20 : 64); i++) a += p[(size_t)i]; return a; };
+    const int frames0 = s.sampleFramesOf(0); const float h0 = head(0, true), t0 = head(0, false);
+    CHECK(frames0 > 1000 && h0 > t0, "Tape Key decays: loud start, quiet end (%.2f vs %.2f)", h0, t0);
+    app.gotoPage(SamplerApp::P_SMPED); CHECK(app.page() == SamplerApp::P_SMPED && std::string(app.knobs()[0].name) == "EDIT", "the SAMPLE EDIT page");
+    s.editSample(0, Session::EDIT_REVERSE); wait(1.0);
+    CHECK(head(0, true) < head(0, false) && s.sampleFramesOf(0) == frames0, "REVERSE: quiet start, loud end (%.2f vs %.2f)", head(0, true), head(0, false));
+    s.undoEdit(0); wait(1.0); CHECK(head(0, true) > head(0, false), "EDIT UNDO brings the sample back");
+    s.editSample(0, Session::EDIT_NORMALIZE); wait(1.0); { auto p = s.samplePeaksOf(0, 512); float m = 0; for (float v : p) m = std::max(m, v); CHECK(m > 0.9f, "NORMALIZE: the peak is at %.2f", m); }
+    // trim to the window: start 25 %, end 50 %
+    app.gotoPage(SamplerApp::P_HOME); { auto k = app.knobs(); k[0].set(0.25f); k[1].set(0.5f); } wait(0.8);
+    s.editSample(0, Session::EDIT_TRIM); wait(1.0); const int fr = s.sampleFramesOf(0);
+    CHECK(std::fabs((double)fr / frames0 - 0.25) < 0.02, "TRIM TO WINDOW keeps a quarter (%d of %d frames)", fr, frames0);
+    s.editSample(0, Session::EDIT_FADE_IN); wait(1.0); s.editSample(0, Session::EDIT_FADE_OUT); wait(1.0); { auto p = s.samplePeaksOf(0, 512); CHECK(p[0] < 0.1f && p[511] < 0.1f, "fades: silent at both ends (%.3f, %.3f)", p[0], p[511]); }
+    // the knobs of the page
+    app.gotoPage(SamplerApp::P_SMPED); { auto k = app.knobs(); k[2].set(1.f); k[3].set(0.5f); }
+    CHECK(std::string(app.knobs()[2].value) == "+50 CENTS" && std::string(app.knobs()[3].value).find("DB") != std::string::npos, "fine tune and level knobs (%s, %s)", app.knobs()[2].value.c_str(), app.knobs()[3].value.c_str());
+    { auto k = app.knobs(); k[2].set(0.5f); k[3].set(1.f / 3.f); }
+    // hand made slices
+    app.selectTrack(3); wait(0.5); const size_t n0 = s.slicesOf(3).size();
+    s.setSliceStarts(3, {0.f, 0.25f, 0.5f, 0.75f}); wait(0.4); auto sl = s.slicesOf(3);
+    CHECK(n0 >= 2 && sl.size() == 4 && std::fabs(sl[1] - 0.25f) < 0.001f && std::fabs(sl[3] - 0.75f) < 0.001f, "slice marks placed by hand: %zu pads (was %zu)", sl.size(), n0);
+    // resample: what plays becomes a sample
+    app.selectTrack(0); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Tape Key") app.loadEntry(i); wait(1.0);
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 192, 60 + i * 2, 96); { auto k = app.knobs(); k[0].set(1.f / 3); } wait(0.5);
+    const std::string before = app.sampleLabel(0); app.resampleNow(); wait(5.0);
+    CHECK(app.sampleLabel(0) != before && app.sampleLabel(0).rfind("sample", 0) == 0 && s.sampleFramesOf(0) > sr, "RESAMPLE: the track plays the new sample (%s, %d frames)", app.sampleLabel(0).c_str(), s.sampleFramesOf(0));
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -745,6 +782,7 @@ int main() {
     }
     testSynths();
     testOp1();
+    testSampleEdit();
     testPads();
     testNoteEdit();
     testLook();
@@ -797,6 +835,7 @@ int main() {
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ENV, "HOME again: envelope");
         btn(SamplerApp::HOME); btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ARP, "HOME x4: arpeggiator");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SHAPE, "HOME x5: shape (macros, root key, slices)");
+        btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SMPED, "HOME x6: sample edit");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME again: back to the sample");
         btn(SamplerApp::ENV); CHECK(app.page() == SamplerApp::P_ENV, "ENV: shortcut to the envelope");
         btn(SamplerApp::LFO); CHECK(app.page() == SamplerApp::P_LFO, "LFO: shortcut");

@@ -52,6 +52,16 @@ bool Sampler::loadSynth(int idx) {
     return true;
 }
 
+std::vector<float> Sampler::overview(const SampleBuf& buf) {
+    std::vector<float> peaks(512, 0.f);
+    for (int b = 0; b < 512; b++) {
+        const long a = (long)buf.frames * b / 512, e = std::max(a + 1, (long)buf.frames * (b + 1) / 512), step = std::max(1L, (e - a) / 64);
+        float m = 0.f; for (long i = a; i < e; i += step) m = std::max(m, std::fabs(buf.d[(size_t)i * 2]));
+        peaks[(size_t)b] = m;
+    }
+    return peaks;
+}
+
 bool Sampler::load(const std::string& path) {
     if (path.rfind("synth:", 0) == 0) return loadSynth(std::atoi(path.c_str() + 6));
     auto buf = std::make_shared<SampleBuf>();
@@ -180,14 +190,14 @@ void Sampler::render(float* out, int n) {
 void Sampler::renderVoice(Voice& v, float* out, int n) {
     const float* d = v.buf->d.data(); const int frames = v.buf->frames;
     const double srcRate = (double)v.buf->sr / sr_;
-    const double pitch = mode_ == KIT ? std::pow(2.0, v.padPitch / 12.0) : std::pow(2.0, (v.note - root_ + bend_) / 12.0);
+    const double pitch = mode_ == KIT ? std::pow(2.0, v.padPitch / 12.0) : std::pow(2.0, (v.note - root_ + bend_ + fine_ / 100.0) / 12.0);
     const double rate = srcRate * pitch;
     auto readAt = [&](double p, float& l, float& r) {
         const int i0 = std::min(frames - 2, std::max(0, (int)p)); const float f = (float)(p - i0);
         l = d[(size_t)i0 * 2] + (d[(size_t)i0 * 2 + 2] - d[(size_t)i0 * 2]) * f;
         r = d[(size_t)i0 * 2 + 1] + (d[(size_t)i0 * 2 + 3] - d[(size_t)i0 * 2 + 1]) * f;
     };
-    const float gain = 0.8f * v.vel * v.padGain;
+    const float gain = 0.8f * v.vel * v.padGain * level_;
     for (int i = 0; i < n; i++) {
         float l = 0.f, r = 0.f;
         if (mode_ == PAUL && !v.paulReady) {   // a new voice is silent until its first hop is there (a few blocks at most)

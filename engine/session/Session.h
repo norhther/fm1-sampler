@@ -67,8 +67,15 @@ public:
     void loadSamplePath(const std::string& path, bool kit, int track);          // worker thread builds it, then it replaces the track's sampler
     void setSynthMacros(int track, float tone, float body, float motion, float grit);   // -1..1 each; only a built-in synth listens
     void setPad(int track, int pad, float volume, float pitchSemitones, float pan, float decay, int chokeGroup);   // KIT mode and the synth drum kits, pad 0..15
+    enum EditOp { EDIT_REVERSE, EDIT_NORMALIZE, EDIT_TRIM, EDIT_FADE_IN, EDIT_FADE_OUT, EDIT_UNDO };
+    void editSample(int track, int op);                                       // REVERSE, NORMALIZE, TRIM to the play window, FADE IN / OUT (30 ms); UNDO takes the last edit back
+    void undoEdit(int track);
+    void setSliceStarts(int track, const std::vector<float>& starts);        // KIT: pad starts placed by hand (0..1 of the sample)
+    void setSampleLevel(int track, float level, float fineCents);            // level 0..3, fine tune in cents
+    void resample(int bars);                                                  // the master output of `bars` bars becomes a new sample (loaded like a microphone take)
     void setRoot(int track, int midiNote);                                     // the key that plays the sample at its own pitch (60 = the library's tuning)
     void setSlices(int track, int count, float sensitivity);                   // KIT: cut the sample into `count` pads again
+    int sampleFramesOf(int track) const;                                       // length of the track's sample in frames (0 = none)
     float rootGuessOf(int track) const;                                        // pitch of the sample as a MIDI note, 0 = not a pitched sound
     std::vector<float> slicesOf(int track) const;                              // slice starts, 0..1 of the sample
     void unloadSample(int track);                                              // the track is empty again

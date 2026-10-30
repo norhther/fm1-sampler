@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -215,6 +215,20 @@ void SamplerUI::sampleArea(Rect r) {
     }
     }
     after_wave:
+    if (ts.algo == 3 && !app_.isSynth(t) && app_.micState() == 0 && app_.page() != SamplerApp::P_SQ) {   // KIT: tap the waveform to cut a new pad there, tap a mark to remove it, drag a mark to move it
+        auto pts = std::make_shared<std::vector<float>>(app_.session().slicesOf(t));
+        const float wx = w.x + 2, ww = w.w - 4;
+        hit({w.x, w.y + 22, w.w, w.h - 22},
+            [this, pts, wx, ww](float x, float) { chopIdx_ = -1; chopMoved_ = false; int best = -1; float bd = 14.f; for (size_t i = 0; i < pts->size(); i++) { const float d = std::fabs(wx + (*pts)[i] * ww - x); if (d < bd) { bd = d; best = (int)i; } }
+                if (best < 0) { pts->push_back(clamp01((x - wx) / ww)); std::sort(pts->begin(), pts->end()); for (size_t i = 0; i < pts->size(); i++) if (std::fabs(wx + (*pts)[i] * ww - x) < 1.5f) best = (int)i; chopNew_ = true; } else chopNew_ = false;
+                chopIdx_ = best; },
+            [this, pts, wx, ww](float x, float) { if (chopIdx_ < 0 || chopIdx_ >= (int)pts->size()) return; chopMoved_ = true; (*pts)[(size_t)chopIdx_] = clamp01((x - wx) / ww); },
+            [this, pts, t]() {
+                if (chopIdx_ < 0) return;
+                if (!chopMoved_ && !chopNew_ && pts->size() > 2) pts->erase(pts->begin() + chopIdx_);   // a tap on a mark removes it (the last two stay)
+                else if (!chopMoved_ && !chopNew_) return;
+                app_.setSliceStarts(*pts); chopIdx_ = -1; });
+    }
     // start / end handles (not while the microphone take is shown)
     for (int h = 0; h < (app_.micState() == 1 || app_.micState() == 2 ? 0 : 2); h++) {   // (SQ page returned earlier)
         const float v = h ? ts.end : ts.start, hx = w.x + 2 + v * (w.w - 4);
@@ -259,8 +273,9 @@ void SamplerUI::sampleArea(Rect r) {
     Rect br{r.x, lr.y + lr.h + 8, r.w, 38};
     const int ms = app_.micState();
     static const char* micLab[] = {"RECORD FROM MIC", "WAITING FOR SOUND...", "STOP AND KEEP", "SAVING..."};
-    button({br.x, br.y, br.w * 0.6f - 3, br.h}, micLab[ms], ms == 2, [this] { app_.micSample(); }, 12, ms != 0);
-    button({br.x + br.w * 0.6f + 3, br.y, br.w * 0.4f - 3, br.h}, "LOAD FILE FROM DISK", false, [this] { app_.requestFile(); }, 11);
+    button({br.x, br.y, br.w * 0.4f - 3, br.h}, ms == 0 ? "RECORD FROM MIC" : micLab[ms], ms == 2, [this] { app_.micSample(); }, 11, ms != 0);
+    button({br.x + br.w * 0.4f + 3, br.y, br.w * 0.3f - 6, br.h}, "LOAD FILE", false, [this] { app_.requestFile(); }, 11);
+    button({br.x + br.w * 0.7f, br.y, br.w * 0.3f, br.h}, "RESAMPLE", false, [this] { app_.resampleNow(); }, 11);
     const std::string ts_ = app_.toast();
     if (!ts_.empty()) text(r.x, br.y + br.h + 14, 11, ACCENT, ts_, 0, true);
 }
