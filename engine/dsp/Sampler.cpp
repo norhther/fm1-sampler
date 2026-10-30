@@ -1,6 +1,7 @@
 #include "Sampler.h"
 #include "Slicer.h"
 #include "Wav.h"
+#include <cstdlib>
 #include <cstring>
 
 Sampler::Sampler(int engineRate) : sr_(engineRate) {
@@ -8,7 +9,30 @@ Sampler::Sampler(int engineRate) : sr_(engineRate) {
 }
 Sampler::~Sampler() = default;
 
+bool Sampler::loadSynth(int idx) {
+    if (idx < 0 || idx >= kSynthCount) return false;
+    const SynthPatch& p = kSynths[idx];
+    // loudness: play the patch once and bring its peak to a sample-like level; the same render gives the overview
+    SynthVoice sv; Adsr env; env.set(p.a, p.d, p.s, p.r, (float)sr_); env.gateOn();
+    const int total = sr_ * 12 / 10, hold = sr_ * 8 / 10;
+    std::vector<float> mono((size_t)total);
+    float pk = 1e-4f;
+    sv.start(p, 60, 1.f, (float)sr_, 1);
+    for (int i = 0; i < total; i++) {
+        if (i == hold) env.gateOff();
+        float l, r; sv.next(0.f, l, r); const float e = env.next();
+        mono[(size_t)i] = 0.5f * (l + r) * e; pk = std::max(pk, std::fabs(mono[(size_t)i]));
+    }
+    synthNorm_ = clampf(0.9f / pk, 0.05f, 8.f);
+    peaks_.assign(512, 0.f);
+    for (int b = 0; b < 512; b++) { const int a = (int)((long)total * b / 512), e = std::max(a + 1, (int)((long)total * (b + 1) / 512)); float m = 0.f; for (int i = a; i < e; i++) m = std::max(m, std::fabs(mono[(size_t)i])); peaks_[(size_t)b] = clampf(m * synthNorm_, 0.f, 1.f); }
+    allOff(); orig_.reset(); proc_.reset(); synth_ = idx; label_ = p.name;
+    setEnv(p.a, p.d, p.s, p.r);
+    return true;
+}
+
 bool Sampler::load(const std::string& path) {
+    if (path.rfind("synth:", 0) == 0) return loadSynth(std::atoi(path.c_str() + 6));
     auto buf = std::make_shared<SampleBuf>();
     if (!readWav(path, buf->d, buf->sr)) return false;
     buf->frames = (int)(buf->d.size() / 2);
@@ -51,7 +75,7 @@ void Sampler::resolveWindow(Voice& v, const SampleBuf*& buf, double& ws, double&
 }
 
 void Sampler::noteOn(int note, int vel) {
-    if (!orig_) return;
+    if (!orig_ && synth_ < 0) return;
     int vi = -1; uint32_t oldest = 0xffffffffu;
     // too many sounding voices (each Paulstretch voice costs FFTs: at most four): the oldest one fades out in a few ms instead of being cut
     int active = 0; for (auto& v : voices_) active += v.on && !v.fading;
@@ -70,6 +94,11 @@ void Sampler::noteOn(int note, int vel) {
     v = Voice();
     v.on = true; v.gate = true; v.note = note; v.vel = clampf(vel / 127.f, 0.f, 1.f); v.born = ++bornCounter_;
     v.slice = ((note - 60) % 16 + 16) % 16;
+    if (synth_ >= 0) {
+        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_);
+        v.env.set(atk_, dec_, sus_, rel_, (float)sr_); v.env.gateOn();
+        return;
+    }
     resolveWindow(v, v.buf, v.ws, v.we);
     v.pos = v.ws;
     v.env.set(atk_, dec_, sus_, rel_, (float)sr_);
@@ -83,7 +112,7 @@ void Sampler::fadeOut(Voice& v) {
     v.env.gateOff();
 }
 void Sampler::noteOff(int note) {
-    if (mode_ == ONESHOT) return;   // always plays out
+    if (mode_ == ONESHOT && synth_ < 0) return;   // always plays out
     for (auto& v : voices_) if (v.on && v.gate && v.note == note) { v.gate = false; v.env.gateOff(); }
 }
 void Sampler::allOff() { for (auto& v : voices_) v = Voice(); }
@@ -101,7 +130,18 @@ void Sampler::pumpPaul() {
     }
 }
 
+void Sampler::renderSynth(Voice& v, SynthVoice& sv, float* out, int n) {
+    const float gain = 0.8f * v.vel * synthNorm_ * 0.9f;
+    for (int i = 0; i < n; i++) {
+        const float e = v.env.next();
+        if (v.env.done() && !v.gate) { v.on = false; return; }
+        float l, r; sv.next(bend_, l, r);
+        out[2 * i] += l * e * gain; out[2 * i + 1] += r * e * gain;
+    }
+}
+
 void Sampler::render(float* out, int n) {
+    if (synth_ >= 0) { for (int i = 0; i < kVoices; i++) if (voices_[i].on) renderSynth(voices_[i], sv_[i], out, n); return; }
     if (!orig_) return;
     if (mode_ == PAUL) pumpPaul();
     for (auto& v : voices_) if (v.on) renderVoice(v, out, n);
@@ -181,6 +221,7 @@ float Sampler::orginalPosOf(const Voice& v) const {
 
 int Sampler::voicePositions(float* out, int maxN) const {
     int n = 0;
+    if (synth_ >= 0) return 0;
     for (auto& v : voices_) {
         if (!v.on || n >= maxN) continue;
         if (mode_ == GRAIN) {

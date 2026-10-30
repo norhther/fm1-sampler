@@ -7,7 +7,7 @@
 class Arp {
 public:
     struct Ev { int offset, note, vel; };   // vel 0 = note off
-    enum Pattern { UP, DOWN, UPDOWN, CONVERGE, RANDOM };
+    enum Pattern { UP, DOWN, UPDOWN, CONVERGE, RANDOM, PLAYED, TOMBOLA };   // PLAYED: in the order the keys went down; TOMBOLA: random notes with random rests (like the OP-1 tombola)
 
     // rate 0..11: 1, 2, 2T, 4, 4T, 8, 8T, 16, 16T, 32, 32T, 64 (note values; T = triplet)
     void setup(int rate, int pattern, int octaves, float gate) {
@@ -28,8 +28,7 @@ public:
                 if (playing_ >= 0) { out.push_back({i, playing_, 0}); playing_ = -1; }
                 if (!held_.empty()) {
                     playing_ = nextNote();
-                    out.push_back({i, playing_, 100});
-                    gateLeft_ = (int)(stepLen * gate_);
+                    if (playing_ >= 0) { out.push_back({i, playing_, pattern_ == TOMBOLA ? 55 + (int)(rnd() % 60) : 100}); gateLeft_ = (int)(stepLen * gate_); }
                 }
             }
             clock_ += 1.0;
@@ -39,7 +38,9 @@ public:
 private:
     int nextNote() {
         std::vector<int> seq;
-        for (int o = 0; o < octaves_; o++) for (int n : held_) seq.push_back(n + 12 * o);   // ascending (set order) per octave
+        if (pattern_ == PLAYED) { for (int o = 0; o < octaves_; o++) for (int n : order_) seq.push_back(n + 12 * o); }
+        else for (int o = 0; o < octaves_; o++) for (int n : held_) seq.push_back(n + 12 * o);   // ascending (set order) per octave
+        if (seq.empty()) return -1;
         const int N = (int)seq.size();
         int idx = 0;
         switch (pattern_) {
@@ -47,11 +48,14 @@ private:
             case DOWN: idx = N - 1 - (step_ % N); break;
             case UPDOWN: { const int period = std::max(1, 2 * N - 2), k = step_ % period; idx = k < N ? k : period - k; break; }
             case CONVERGE: { const int k = step_ % N; idx = (k % 2 == 0) ? k / 2 : N - 1 - k / 2; break; }
-            default: rng_ = rng_ * 1664525u + 1013904223u; idx = (int)((rng_ >> 8) % (uint32_t)N); break;
+            case PLAYED: idx = step_ % N; break;
+            case TOMBOLA: if (rnd() % 100 < 30) { step_++; return -1; } idx = (int)(rnd() % (uint32_t)N); break;
+            default: idx = (int)(rnd() % (uint32_t)N); break;
         }
         step_++;
         return std::min(127, seq[(size_t)idx]);
     }
+    uint32_t rnd() { rng_ = rng_ * 1664525u + 1013904223u; return rng_ >> 8; }
     float beats_ = 0.25f, gate_ = 0.7f; int pattern_ = 0, octaves_ = 1, step_ = 0, playing_ = -1, gateLeft_ = 0;
     double clock_ = 0; uint32_t rng_ = 99;
     std::set<int> held_; std::vector<int> order_;

@@ -242,6 +242,21 @@ struct Session::Impl {
         t.sn[t.snCount++] = {(uint16_t)tick, (uint16_t)std::max(1, len), (uint8_t)note, (uint8_t)std::min(127, std::max(1, vel))};
         publishSeq(ti);
     }
+    void seqSetNotes(int ti, const std::vector<SeqNote>& list) {
+        Track& tr = *tracks[(size_t)ti]; const int pt = patTicks(tr);
+        checkpoint(tr); tr.snCount = 0;
+        for (auto sn : list) if (sn.tick < pt && tr.snCount < kSeqMax) tr.sn[tr.snCount++] = sn;
+        seqRelease(tr); publishSeq(ti);
+    }
+    // touch edit: the note at (tick, note) gets a new length (at least 1 tick, at most to the end of the pattern)
+    void seqResizeNote(int ti, int tick, int note, int len) {
+        Track& t = *tracks[(size_t)ti]; const int pt = patTicks(t);
+        for (int i = 0; i < t.snCount; i++) if (t.sn[i].note == note && t.sn[i].tick == tick) {
+            const int nl = std::max(1, std::min(len, pt - tick));
+            if (nl == t.sn[i].len) return;
+            checkpoint(t); t.sn[i].len = (uint16_t)nl; seqRelease(t); publishSeq(ti); return;
+        }
+    }
     // ---- bounce: pattern -> tape ----
     void bounceStart(int ti) {
         Track& t = *tracks[(size_t)ti];
@@ -412,6 +427,7 @@ struct Session::Impl {
         if (!t.sampler) return;
         const uint32_t gen = ++t.gen;
         auto orig = t.sampler->original();
+        if (!orig) return;   // a synth has nothing to stretch
         const float a = t.rangeA, b = t.rangeB, speed = t.speed, semis = t.semis;
         if (std::fabs(speed - 1.f) < 0.005f && std::fabs(semis) < 0.005f) { t.sampler->setProcessed(nullptr, 0.f, 1.f); return; }
         job([this, ti, gen, orig, a, b, speed, semis] {
@@ -689,7 +705,7 @@ void Session::noteOff(int t, int note) { if (t >= 0 && t < kTracks) d->post([=] 
 
 // ---- sampler ----
 void Session::loadSamplePath(const std::string& path, bool kit, int track) {
-    if (track < 0 || track >= kTracks || !std::filesystem::exists(path)) return;
+    if (track < 0 || track >= kTracks || (path.rfind("synth:", 0) != 0 && !std::filesystem::exists(path))) return;
     d->a_sampleState = 2;
     d->job([this, path, track, kit] { d->installNew(path, track, kit); });
 }
@@ -737,6 +753,12 @@ void Session::seqClear(int t) {
 void Session::seqUndo(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqUndoStep(t); }); }
 void Session::seqRedo(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqRedoStep(t); }); }
 void Session::seqToggle(int t, int tick, int len, int note, int vel) { if (t >= 0 && t < kTracks && note >= 0 && note < 128) d->post([=] { d->seqToggleNote(t, tick, len, note, vel); }); }
+void Session::seqSet(int t, const SeqView* nv, int n) {
+    if (t < 0 || t >= kTracks) return;
+    std::vector<SeqNote> list; for (int i = 0; i < n && i < kSeqMax; i++) list.push_back({(uint16_t)std::max(0, nv[i].tick), (uint16_t)std::max(1, nv[i].len), (uint8_t)std::min(127, std::max(0, nv[i].note)), (uint8_t)std::min(127, std::max(1, nv[i].vel))});
+    d->post([=] { d->seqSetNotes(t, list); });
+}
+void Session::seqResize(int t, int tick, int note, int len) { if (t >= 0 && t < kTracks) d->post([=] { d->seqResizeNote(t, tick, note, len); }); }
 void Session::seqRest(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, 1); }); }
 void Session::seqCursorMove(int t, int steps) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, steps); }); }
 void Session::seqCursorSet(int t, int tick) { if (t >= 0 && t < kTracks) d->post([=] { d->seqCursorTo(t, tick); }); }

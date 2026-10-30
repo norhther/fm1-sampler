@@ -5,10 +5,12 @@
 //   KIT      the sample is cut at its hits into 16 slices; a note plays one slice unpitched (pad = note - 60)
 //   GRAIN    a cloud of short overlapping grains picked at random inside the window
 //   PAUL     the window smeared into an endless pad (spectral time stretch)
+// A sampler can also hold a built-in synth instead of a sample (path "synth:N", see Synth.h); the playback algorithms do not apply then.
 #pragma once
 #include "Adsr.h"
 #include "Common.h"
 #include "Paul.h"
+#include "Synth.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,7 +28,8 @@ public:
     Sampler(int engineRate);
     ~Sampler();
     // worker thread: reads a WAV, normalises it, finds the slices and the overview peaks
-    bool load(const std::string& path);
+    bool load(const std::string& path);   // a WAV, or "synth:N" for built-in synth patch N
+    bool isSynth() const { return synth_ >= 0; }
     const std::string& label() const { return label_; }
     const std::vector<float>& peaks() const { return peaks_; }   // 512 bins, 0..1
     std::shared_ptr<const SampleBuf> original() const { return orig_; }
@@ -66,4 +69,7 @@ private:
     int mode_ = MELODIC; std::vector<int> slices_; std::string label_; std::vector<float> peaks_;
     Voice voices_[kVoices]; std::vector<std::unique_ptr<PaulStream>> paul_; bool paulBusy_[kVoices] = {};
     uint32_t bornCounter_ = 0, rng_ = 7;
+    bool loadSynth(int idx);
+    void renderSynth(Voice& v, SynthVoice& sv, float* out, int n);
+    int synth_ = -1; float synthNorm_ = 1.f; SynthVoice sv_[kVoices];
 };

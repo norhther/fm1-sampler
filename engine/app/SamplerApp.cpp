@@ -1,6 +1,7 @@
 #include "SamplerApp.h"
 #include <Common.h>
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -20,7 +21,7 @@ const char* kTakeQ[] = {"OFF", "BEAT", "BAR"};
 const char* kCountIn[] = {"OFF", "1 BAR", "2 BARS"};
 const char* kNote[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 const char* kArpRate[] = {"OFF", "1", "2", "2T", "4", "4T", "8", "8T", "16", "16T", "32", "32T", "64"};
-const char* kArpPatt[] = {"UP", "DOWN", "UPDN", "CONV", "RAND"};
+const char* kArpPatt[] = {"UP", "DOWN", "UPDN", "CONV", "RAND", "PLAYED", "TOMBOLA"};
 const char* kLfoTarget[] = {"PITCH", "FILTER", "VOLUME", "PAN"};
 const char* kLfoShape[] = {"SINE", "TRI", "SQUARE", "S&H"};
 std::vector<uint8_t> n14(int v) { return {(uint8_t)(v >> 7 & 127), (uint8_t)(v & 127)}; }
@@ -110,6 +111,7 @@ void SamplerApp::refreshLibrary() {
             std::string stem = file.substr(0, file.rfind('.'));
             lib_.push_back({stem, f, dir + "/" + f + "/" + file, f == "Drums"});
         }
+    for (int i = 0; i < kSynthCount; i++) lib_.push_back({kSynths[i].name, "Synths", "synth:" + std::to_string(i), false});
     for (auto& p : s_.sampleLibrary()) {
         std::string nm = p.substr(p.find_last_of('/') + 1); nm = nm.substr(0, nm.rfind('.'));
         if (nm.rfind("sample_", 0) == 0) nm = nm.substr(7);
@@ -129,6 +131,10 @@ void SamplerApp::loadEntry(int i) {
     TrackState& t = ts_[track_];
     t.entry = i; t.start = 0.f; t.end = 1.f;
     if (e.kit) t.algo = 3; else if (t.algo == 3) t.algo = 0;
+    if (e.path.rfind("synth:", 0) == 0) {   // a synth patch brings its own envelope
+        const SynthPatch& p = kSynths[std::atoi(e.path.c_str() + 6) % kSynthCount];
+        t.a = clampf(std::sqrt(p.a / 3.f), 0.f, 1.f); t.d = clampf(p.d, 0.f, 1.f); t.s = p.s; t.r = clampf(std::sqrt(p.r / 5.f), 0.f, 1.f);
+    }
     previewAfterLoad_ = true;
     s_.loadSamplePath(e.path, e.kit, track_);
 }
@@ -263,7 +269,7 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[3] = choice("SHAPE", &x.lfoShape, {kLfoShape[0], kLfoShape[1], kLfoShape[2], kLfoShape[3]}, [=] { applyLfo(t); });
         break;
     case P_ARP: {
-        std::vector<std::string> rates(kArpRate, kArpRate + 13), patt(kArpPatt, kArpPatt + 5);
+        std::vector<std::string> rates(kArpRate, kArpRate + 13), patt(kArpPatt, kArpPatt + 7);
         k[0] = choice("RATE", &x.arpRate, rates, [=] { applyArp(t); });
         k[1] = choice("PATTERN", &x.arpPatt, patt, [=] { applyArp(t); });
         k[2] = choice("OCTAVES", &x.arpOct, {"1", "2", "3", "4"}, [=] { applyArp(t); });
@@ -433,7 +439,25 @@ void SamplerApp::seqBounce() {
     s_.seqBounce(track_);
     say(loopAny_ ? "TO TAPE AT THE LOOP START" : "PATTERN TO TAPE");
 }
-void SamplerApp::seqToggleAt(int tick, int note) { s_.seqToggle(track_, tick, stepTicks(), note, 100); }
+void SamplerApp::seqToggleAt(int tick, int note, int len) { s_.seqToggle(track_, tick, len > 0 ? len : stepTicks(), note, 100); }
+// the dice: a new random pattern in the current scale (one undo step); denser on the beats, sometimes a long note
+void SamplerApp::seqDice() {
+    int sc[12]; int n = scaleSteps(scale_.scale, sc);
+    if (n == 0) { static const int pent[] = {0, 3, 5, 7, 10}; std::copy(pent, pent + 5, sc); n = 5; }
+    uint32_t r = nowMs_ * 2654435761u + 12345u; auto rnd = [&r] { r = r * 1664525u + 1013904223u; return r >> 8; };
+    const int bars = seqBarsOf(track_), st = stepTicks(), steps = patternTicks(bars) / st;
+    std::vector<Session::SeqView> out; int deg = (int)(rnd() % (uint32_t)n);
+    for (int i = 0; i < steps && (int)out.size() < kSeqMax; i++) {
+        const bool beat = (i * st) % kPpq == 0;
+        if (rnd() % 100 >= (beat ? 60u : 28u)) continue;
+        deg = std::min(n * 2 - 1, std::max(0, deg + (int)(rnd() % 5) - 2));   // a random walk over two octaves of the scale
+        const int note = std::min(127, 48 + scale_.root + 12 * (deg / n) + sc[deg % n]);
+        out.push_back({i * st, st * (rnd() % 100 < 22 ? 2 : 1) * 3 / 4, note, 70 + (int)(rnd() % 50)});
+    }
+    s_.seqSet(track_, out.data(), (int)out.size());
+    if (ts_[track_].seqState == 0) { ts_[track_].seqState = 1; applyPattern(track_); }
+}
+void SamplerApp::seqResizeAt(int tick, int note, int len) { s_.seqResize(track_, tick, note, len); }
 void SamplerApp::lenAction(bool dbl) {   // loop x2 (the content repeats) or /2; guarded so a dragged slider does not double it again and again
     if (st_.loopSamples <= 0 || nowMs_ - lenAt_ < 300) return;
     lenAt_ = nowMs_ ? nowMs_ : 1;
@@ -728,7 +752,7 @@ void SamplerApp::draw(uint32_t now) {
     else if (!toast().empty()) line = toast();
     else {
         const std::string lab = s_.trackLabel(track_);
-        line = (lab.empty() ? "EMPTY" : lab) + "  " + kAlgo[ts_[track_].algo];
+        line = (lab.empty() ? "EMPTY" : lab) + "  " + (isSynth(track_) ? "SYNTH" : kAlgo[ts_[track_].algo]);
         if (auditionAt_) { const Entry& e = lib_[(size_t)libCursor_]; line = ">" + e.label + "  " + e.group; }
     }
     drawText(22, 6, 46, 1, !toast().empty() || mic_ ? ACCENT : auditionAt_ ? ACCENT : DIM, BLACK, line, 38);

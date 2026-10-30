@@ -9,6 +9,7 @@
 #include <Slicer.h>
 #include <filesystem>
 #include <Sequencer.h>
+#include <Arp.h>
 #include <cmath>
 #include <thread>
 #include <chrono>
@@ -173,6 +174,85 @@ static void testLibrary() {
     }
 }
 // the piano roll: pinch with two fingers zooms (horizontal = time, vertical = pitch), the buttons zoom too, a pinch never writes a note
+static void testSynths() {
+    const int sr = SAMPLERATE;
+    int silent = 0, loud = 0, bad = 0, stuck = 0;
+    for (int i = 0; i < kSynthCount; i++) {
+        Sampler sm(sr);
+        if (!sm.load("synth:" + std::to_string(i)) || !sm.isSynth() || sm.label() != kSynths[i].name) { printf("FAIL load synth %d\n", i); fails++; continue; }
+        std::vector<float> o((size_t)sr * 2 * 2, 0.f);   // 2 s
+        sm.noteOn(48 + (i % 3) * 12, 100);
+        for (int b = 0; b < sr / 256; b++) sm.render(o.data() + (size_t)b * 512, 256);
+        sm.noteOff(48 + (i % 3) * 12);
+        for (int b = sr / 256; b < 2 * sr / 256; b++) sm.render(o.data() + (size_t)b * 512, 256);
+        float pk = 0.f; for (float f : o) pk = std::max(pk, std::fabs(f));
+        const double r0 = rms(o, 0, (size_t)sr / 2), tail = rms(o, o.size() - 2000);
+        if (!finite(o)) bad++;
+        if (r0 < 0.01) { silent++; printf("quiet synth %s rms %.4f\n", kSynths[i].name, r0); }
+        if (pk > 1.2f) { loud++; printf("loud synth %s peak %.2f\n", kSynths[i].name, pk); }
+        if (tail > 0.01 && kSynths[i].r < 1.5f) { stuck++; printf("synth %s still sounds after release rms %.4f\n", kSynths[i].name, tail); }
+        if (sm.peaks().size() != 512) bad++;
+    }
+    CHECK(kSynthCount >= 20, "%d built-in synths", kSynthCount);
+    CHECK(bad == 0 && silent == 0 && loud == 0, "every synth sounds, stays finite and under the ceiling (bad %d, quiet %d, loud %d)", bad, silent, loud);
+    CHECK(stuck == 0, "every synth ends after the note off (%d hang)", stuck);
+    // pitch: the plucked string and the FM patch follow the note (zero crossing count of a low note)
+    for (int idx : {3, 16}) {
+        Sampler sm(sr); sm.load("synth:" + std::to_string(idx));
+        std::vector<float> o((size_t)sr * 2, 0.f); sm.noteOn(45, 110);   // A2 = 110 Hz
+        for (int b = 0; b < sr / 256; b++) sm.render(o.data() + (size_t)b * 512, 256);
+        const int w = sr / 4, o0 = sr / 5; int best = 0; double bc = -1e9;   // autocorrelation over a quarter second, lags of 60 .. 180 Hz
+        for (int lag = sr / 180; lag < sr / 60; lag++) { double c = 0; for (int k = 0; k < w; k++) c += o[2 * (size_t)(o0 + k)] * o[2 * (size_t)(o0 + k + lag)]; if (c > bc) { bc = c; best = lag; } }
+        const double hz = (double)sr / best;
+        CHECK(hz > 104 && hz < 116, "%s plays A2 near 110 Hz (%.0f)", kSynths[idx].name, hz);
+    }
+    // in the app: a Synths group in the library, a track plays one, the envelope follows the patch
+    system("rm -rf /tmp/fm1sampler_t6; mkdir -p /tmp/fm1sampler_t6");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_t6"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    int first = -1, count = 0; for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].group == "Synths") { if (first < 0) first = i; count++; }
+    CHECK(count == kSynthCount, "library has the Synths group (%d)", count);
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 0;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.0);
+    app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "FM Bell") app.loadEntry(i);
+    run(1.0);   // FM Bell
+    CHECK(app.sampleLabel(4) == "FM Bell" && app.isSynth(4), "a track loads a synth (%s)", app.sampleLabel(4).c_str());
+    CHECK(app.state(4).s < 0.01f && app.state(4).d > 0.5f, "the track takes the patch envelope (sustain %.2f, decay %.2f)", app.state(4).s, app.state(4).d);
+    size_t m = all.size(); app.playNote(72, true); run(0.5); app.playNote(72, false); run(0.3);
+    CHECK(rms(all, m, all.size()) > 0.003, "the synth track plays (rms %.4f)", rms(all, m, all.size()));
+}
+
+static void testOp1() {
+    const int sr = SAMPLERATE;
+    {   // arpeggiator: PLAYED keeps the order the keys went down in, TOMBOLA is random with rests
+        Arp a; a.setup(7, Arp::PLAYED, 1, 0.5f); a.noteOn(64); a.noteOn(60); a.noteOn(67);
+        std::vector<Arp::Ev> ev; for (int i = 0; i < 60; i++) a.run(sr / 20, 120, sr, ev);
+        std::vector<int> ons; for (auto& e : ev) if (e.vel > 0) ons.push_back(e.note);
+        CHECK(ons.size() >= 8 && ons[0] == 64 && ons[1] == 60 && ons[2] == 67 && ons[3] == 64, "arp PLAYED: %d %d %d %d (expect 64 60 67 64)", ons.size() > 0 ? ons[0] : -1, ons.size() > 1 ? ons[1] : -1, ons.size() > 2 ? ons[2] : -1, ons.size() > 3 ? ons[3] : -1);
+        Arp b; b.setup(7, Arp::TOMBOLA, 1, 0.5f); b.noteOn(60); b.noteOn(64); b.noteOn(67);
+        ev.clear(); for (int i = 0; i < 400; i++) b.run(sr / 20, 120, sr, ev);   // 20 s at 1/16 = 160 steps
+        int ons2 = 0; bool ok = true; for (auto& e : ev) if (e.vel > 0) { ons2++; ok &= e.note == 60 || e.note == 64 || e.note == 67; }
+        CHECK(ok && ons2 > 70 && ons2 < 150, "arp TOMBOLA: random held notes with rests (%d of 160 steps)", ons2);
+    }
+    // the dice: a random pattern in the scale, one undo step
+    system("rm -rf /tmp/fm1sampler_t7; mkdir -p /tmp/fm1sampler_t7");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_t7"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(0.5); app.setScale(2, 0, 0, 0);   // C major
+    app.seqDice(); run(0.2);
+    Session::SeqView v[kSeqMax]; const int n = s.seqNotes(0, v, kSeqMax);
+    bool inScale = true, inside = true; for (int i = 0; i < n; i++) { const int pc = v[i].note % 12; inScale &= pc == 0 || pc == 2 || pc == 4 || pc == 5 || pc == 7 || pc == 9 || pc == 11; inside &= v[i].tick < patternTicks(app.seqBarsOf(0)) && v[i].len > 0; }
+    CHECK(n >= 6 && n < 60 && inScale && inside, "dice: %d notes, all in C major, all inside the pattern", n);
+    CHECK(app.state(0).seqState == 1, "dice switches the pattern on");
+    app.seqDice(); run(0.2); Session::SeqView w[kSeqMax]; const int n2 = s.seqNotes(0, w, kSeqMax);
+    CHECK(n2 > 0 && (n2 != n || w[0].tick != v[0].tick || w[0].note != v[0].note || w[1].tick != v[1].tick), "...and every roll is different (%d, %d notes)", n, n2);
+    app.seqUndo(); run(0.2); const int n3 = s.seqNotes(0, w, kSeqMax);
+    CHECK(n3 == n, "one undo brings the previous pattern back (%d notes)", n3);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -180,17 +260,17 @@ static void testRollZoom() {
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(0.5); app.gotoPage(SamplerApp::P_SQ); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 96, 60 + i); run(0.2);
     ui.frame(now);
-    CHECK(ui.rollZoom() == 1.f && ui.rollRows() == 24.f, "the roll starts unzoomed (%.1fx, %.0f rows)", ui.rollZoom(), ui.rollRows());
+    CHECK(ui.rollZoom() == 1.f && ui.rollRows() == 10.f, "the roll starts unzoomed with big rows (%.1fx, %.0f rows)", ui.rollZoom(), ui.rollRows());
     // two fingers 100 px apart horizontally, then 300 px: three times as much time zoom
     ui.pinch(0, 350, 250, 450, 250); ui.pinch(1, 250, 250, 550, 250); ui.frame(now);
-    CHECK(std::fabs(ui.rollZoom() - 3.f) < 0.05f && ui.rollRows() == 24.f, "pinching apart sideways zooms the time 3x (%.2fx, %.0f rows)", ui.rollZoom(), ui.rollRows());
+    CHECK(std::fabs(ui.rollZoom() - 3.f) < 0.05f && ui.rollRows() == 10.f, "pinching apart sideways zooms the time 3x (%.2fx, %.0f rows)", ui.rollZoom(), ui.rollRows());
     ui.pinch(1, 330, 250, 470, 250); ui.frame(now);
     CHECK(std::fabs(ui.rollZoom() - 1.4f) < 0.05f, "pinching together zooms out again (%.2fx)", ui.rollZoom());
     ui.pinch(1, 400, 250, 400, 250); ui.pinch(2, 0, 0, 0, 0); ui.frame(now);
     CHECK(ui.rollZoom() == 1.f, "it stops at the whole pattern (%.2fx)", ui.rollZoom());
     // vertical: fingers 100 px apart, then 200 px: half as many pitch rows
     ui.pinch(0, 400, 200, 400, 300); ui.pinch(1, 400, 150, 400, 350); ui.frame(now);
-    CHECK(std::fabs(ui.rollRows() - 12.f) < 0.5f && ui.rollZoom() == 1.f, "pinching apart up and down shows half the pitch rows (%.1f rows)", ui.rollRows());
+    CHECK(std::fabs(ui.rollRows() - 5.f) < 0.5f && ui.rollZoom() == 1.f, "pinching apart up and down shows half the pitch rows (%.1f rows)", ui.rollRows());
     ui.pinch(2, 0, 0, 0, 0);
     // one finger lands on the roll, a second one joins: a pinch, not a tap
     const int before = app.status().seqCount[0];
@@ -203,6 +283,32 @@ static void testRollZoom() {
     float tx = 0, ty = 0; ui.frame(now); for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "TIME +") { tx = o.f[0]; ty = o.f[1] - 4; }
     ui.touch(0, tx, ty, now); ui.touch(2, tx, ty, now); ui.frame(now);
     CHECK(tx > 0 && ui.rollZoom() > 1.5f, "the TIME + button zooms (%.2fx)", ui.rollZoom());
+    // long notes: drag sideways from an empty cell, tap a note to remove it, drag on a note to resize it
+    {
+        app.seqClear(); run(0.2); SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(now);
+        float gx, gy, gw, gh; ui.rollGrid(gx, gy, gw, gh);
+        const float zoom = ui.rollZoom(), rows = std::round(ui.rollRows()), rh = gh / rows; const int pt = patternTicks(app.seqBarsOf(app.track())), vis = (int)(pt / zoom);
+        auto X = [&](double tick) { return gx + (float)((tick - ui.rollScroll()) / vis * gw); };
+        auto Y = [&](int note) { return gy + (rows - 1 - (note - std::floor(ui.rollBase()))) * rh + rh / 2; };
+        auto notes = [&](Session::SeqView* v) { return s.seqNotes(0, v, kSeqMax); };
+        Session::SeqView v[kSeqMax];
+        const int note = (int)std::floor(ui.rollBase()) + 5;
+        ui.touch(0, X(100), Y(note), now); ui.touch(1, X(200), Y(note), now); ui.touch(1, X(250), Y(note), now); ui.frame(now); ui.touch(2, X(250), Y(note), now); run(0.2);
+        int c = notes(v);
+        CHECK(c == 1 && v[0].tick == 96 && v[0].note == note && v[0].len == 192, "dragging from an empty cell makes a long note: tick %d, len %d (expect 96, 192)", c ? v[0].tick : -1, c ? v[0].len : -1);
+        ui.frame(now); ui.touch(0, X(100), Y(note), now); ui.touch(2, X(100), Y(note), now); run(0.2);
+        CHECK(notes(v) == 0, "a tap on a note removes it");
+        ui.frame(now); ui.touch(0, X(100), Y(note), now); ui.touch(2, X(100), Y(note), now); run(0.2);
+        c = notes(v); CHECK(c == 1 && v[0].len == 48, "a tap on an empty cell makes a one-step note (%d, len %d)", c, c ? v[0].len : -1);
+        ui.frame(now); ui.touch(0, X(110), Y(note), now); ui.touch(1, X(300), Y(note), now); ui.touch(1, X(400), Y(note), now); ui.frame(now); ui.touch(2, X(400), Y(note), now); run(0.2);
+        c = notes(v); CHECK(c == 1 && v[0].tick == 96 && v[0].len == 336, "dragging on a note stretches it: len %d (expect 336), %d note(s)", c ? v[0].len : -1, c);
+        ui.frame(now); ui.touch(0, X(110), Y(note), now); ui.touch(1, X(200), Y(note), now); ui.touch(1, X(250), Y(note), now); ui.frame(now); ui.touch(2, X(250), Y(note), now); run(0.2);
+        c = notes(v); CHECK(c == 1 && v[0].len == 192, "...and shortens it again: len %d (expect 192)", c ? v[0].len : -1);
+        app.seqUndo(); run(0.2); c = notes(v); CHECK(c == 1 && v[0].len == 336, "a resize is one undo step (len %d)", c ? v[0].len : -1);
+        // a long note plays for its length: the engine holds it, a short one does not
+        app.seqClear(); app.seqToggleAt(0, 60, 384); run(0.1);
+        app.setSeqState(1); run(0.1);
+    }
 }
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);   // a crash must not swallow the lines before it
@@ -211,6 +317,8 @@ int main() {
         for (int i = 0; i < 4; i++) { Session sess(SAMPLERATE); sess.setDataDir("/tmp/fm1sampler_t5"); sess.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a(sess, [](const uint8_t*, size_t) {}); }
         CHECK(true, "a session can be destroyed right after it started (4 times)");
     }
+    testSynths();
+    testOp1();
     testRollZoom();
     testLibrary();
     testPaul();
