@@ -90,6 +90,7 @@ public:
     int seqGridIndex() const { return seqGrid_; }
     void cycleSeqGrid() { seqGrid_ = seqGrid_ >= kGrids - 1 || seqGrid_ < 1 ? 1 : seqGrid_ + 1; applyTempo(); }   // 1/4, 1/8, 1/8T ... 1/32T (the grid of the roll and of the quantize)
     int seqBarsOf(int t) const { return ts_[t].seqBars + 1; }
+    void seqAddBarCopy() { if (ts_[track_].seqBars < 15) { ts_[track_].seqBars++; s_.seqAddBar(track_, true); } }   // one more bar holding a copy of the last one
     void seqSetBarCount(int bars) { ts_[track_].seqBars = std::min(15, std::max(0, bars - 1)); applyPattern(track_); }   // add or remove bars (1..16)
     void lenAction(bool dbl);
     void loopSave();

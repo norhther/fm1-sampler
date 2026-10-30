@@ -47,6 +47,7 @@ struct Session::Impl {
         bool recPrevOk = false; double recPrevCp = 0; float recPrevL = 0, recPrevR = 0;   // tape-speed recording: previous write position and input
         std::atomic<float> peak{0.f};
         // note sequencer pattern (audio thread owns it)
+        bool pskip[kSeqMax] = {};   // the chance of a note was lost: it stays quiet this pass
         SeqNote sn[kSeqMax]; int snCount = 0, seqState = 0, seqBars = 1; bool sounding[128] = {}; int openIdx[128] = {};
         int seqCursor = 0, stepHeld = 0; bool stepDown[128] = {};   // step entry
         struct SeqSnap { SeqNote sn[kSeqMax]; int count = 0, bars = 1; };   // undo / redo: whole patterns
@@ -72,7 +73,7 @@ struct Session::Impl {
     // beat clock, metronome, sequencer
     double freeBeat = 0;   // beat position while the transport is stopped
     bool metroOn = false; float metroVol = 0.6f, clickEnv = 0, clickFreq = 1000, clickPh = 0;
-    uint32_t tombolaSeed = 1; float swing = 0.5f; std::atomic<int> busy{0};   // file jobs in flight (project save / load)
+    uint32_t rngState = 99; uint32_t tombolaSeed = 1; float swing = 0.5f; std::atomic<int> busy{0};   // file jobs in flight (project save / load)
     int takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
     // count-in: clicks for countIn bars, then the take (kind 1) or the sequencer recording (kind 2) starts
     int countIn = 0, countKind = 0; bool counting = false; double countLeft = 0;
@@ -159,7 +160,7 @@ struct Session::Impl {
     int patTicks(const Track& t) const { return patternTicks(t.seqBars); }
     void publishSeq(int ti) {
         Track& t = *tracks[(size_t)ti];
-        for (int i = 0; i < t.snCount; i++) { const SeqNote& n = t.sn[i]; a_seq[ti][i].store((uint64_t)n.tick | (uint64_t)n.len << 16 | (uint64_t)n.note << 32 | (uint64_t)n.vel << 40); }
+        for (int i = 0; i < t.snCount; i++) { const SeqNote& n = t.sn[i]; a_seq[ti][i].store((uint64_t)n.tick | (uint64_t)n.len << 16 | (uint64_t)n.note << 32 | (uint64_t)n.vel << 40 | (uint64_t)std::min<int>(100, n.prob) << 48 | (uint64_t)(std::max<int>(1, std::min<int>(8, n.ratchet)) - 1) << 55 | (uint64_t)(n.nudge + 16) << 58); }
         a_seqN[ti].store(t.snCount); a_seqBars[ti].store(t.seqBars); a_seqState[ti].store(t.seqState); a_seqUndoN[ti].store(t.histN); a_seqRedoN[ti].store(t.redoN);
     }
     void noteTo(Track& t, int note, int vel, int offset, std::vector<Arp::Ev>& evs) {   // a sequencer note: through the arpeggiator when it is on
@@ -175,8 +176,16 @@ struct Session::Impl {
     // where a note starts when it plays: on the quantize grid, every second grid line pushed back by the swing (only while quantize is on)
     int onTick(const SeqNote& e, int pt) const {
         const int q = snapTick(e.tick, seqGrid, pt), g = gridTicks(seqGrid);
-        if (g == 0 || swing <= 0.5f || (q / g) % 2 == 0) return q;
-        return (q + (int)std::lround((swing - 0.5f) * 2.f * g)) % pt;
+        int t = q;
+        if (g != 0 && swing > 0.5f && (q / g) % 2 != 0) t += (int)std::lround((swing - 0.5f) * 2.f * g);
+        return ((t + e.nudge) % pt + pt) % pt;
+    }
+    // ratchet: a note with r repeats plays r equal parts of its length; the repeats before the last are gated to 3/4 of their part
+    static int ratchetPart(const SeqNote& e) { return std::max(1, e.len / std::max<int>(1, e.ratchet)); }
+    int repeatOn(const SeqNote& e, int pt, int k) const { return (onTick(e, pt) + k * ratchetPart(e)) % pt; }
+    int repeatOff(const SeqNote& e, int pt, int k) const {
+        const int r = std::max<int>(1, e.ratchet), part = ratchetPart(e);
+        return (repeatOn(e, pt, k) + (k == r - 1 ? std::max(1, e.len - (r - 1) * part) : std::max(1, part * 3 / 4))) % pt;
     }
     // audio thread, per block: fire the notes whose tick is hit
     void seqRun(Track& t, std::vector<Arp::Ev>& evs) {
@@ -185,13 +194,18 @@ struct Session::Impl {
             const int jt = (int)(h.tick % pt);
             for (int i = 0; i < t.snCount; i++) {   // note offs first, so a repeated note retriggers
                 const SeqNote& e = t.sn[i];
-                if (t.sounding[e.note] && (onTick(e, pt) + e.len) % pt == jt) { t.sounding[e.note] = false; noteTo(t, e.note, 0, h.offset, evs); }
+                if (!t.sounding[e.note]) continue;
+                for (int k = 0; k < std::max<int>(1, e.ratchet); k++) if (repeatOff(e, pt, k) == jt) { t.sounding[e.note] = false; noteTo(t, e.note, 0, h.offset, evs); break; }
             }
             for (int i = 0; i < t.snCount; i++) {
                 const SeqNote& e = t.sn[i];
-                if (onTick(e, pt) != jt) continue;
-                if (t.sounding[e.note]) noteTo(t, e.note, 0, h.offset, evs);
-                t.sounding[e.note] = true; noteTo(t, e.note, e.vel, h.offset, evs);
+                for (int k = 0; k < std::max<int>(1, e.ratchet); k++) {
+                    if (repeatOn(e, pt, k) != jt) continue;
+                    if (k == 0) { rngState = rngState * 1664525u + 1013904223u; t.pskip[i] = e.prob < 100 && (int)((rngState >> 8) % 100u) >= e.prob; }   // the chance is rolled once per note, its repeats follow
+                    if (t.pskip[i]) continue;
+                    if (t.sounding[e.note]) noteTo(t, e.note, 0, h.offset, evs);
+                    t.sounding[e.note] = true; noteTo(t, e.note, e.vel, h.offset, evs);
+                }
             }
         }
     }
@@ -257,6 +271,35 @@ struct Session::Impl {
         checkpoint(tr); tr.snCount = 0;
         for (auto sn : list) if (sn.tick < pt && tr.snCount < kSeqMax) tr.sn[tr.snCount++] = sn;
         seqRelease(tr); publishSeq(ti);
+    }
+    // a selection of notes: delete, transpose, shift, duplicate, velocity / probability / ratchet / nudge (one undo step)
+    void seqApplyOp(int ti, const std::vector<Session::SeqRef>& refs, int op, int arg) {
+        Track& t = *tracks[(size_t)ti]; const int pt = patTicks(t);
+        auto sel = [&](const SeqNote& n) { for (auto& r : refs) if (r.tick == n.tick && r.note == n.note) return true; return false; };
+        checkpoint(t);
+        if (op == Session::OP_DELETE) { int w = 0; for (int i = 0; i < t.snCount; i++) if (!sel(t.sn[i])) t.sn[w++] = t.sn[i]; t.snCount = w; }
+        else if (op == Session::OP_DUP) {
+            const int n0 = t.snCount;
+            for (int i = 0; i < n0 && t.snCount < kSeqMax; i++) if (sel(t.sn[i])) { SeqNote c = t.sn[i]; c.tick = (uint16_t)(((int)c.tick + arg) % pt + pt) % pt; t.sn[t.snCount++] = c; }
+        } else for (int i = 0; i < t.snCount; i++) {
+            if (!sel(t.sn[i])) continue; SeqNote& n = t.sn[i];
+            switch (op) {
+                case Session::OP_TRANSPOSE: n.note = (uint8_t)std::min(127, std::max(0, (int)n.note + arg)); break;
+                case Session::OP_SHIFT: n.tick = (uint16_t)((((int)n.tick + arg) % pt + pt) % pt); break;
+                case Session::OP_VEL: n.vel = (uint8_t)std::min(127, std::max(1, arg)); break;
+                case Session::OP_PROB: n.prob = (uint8_t)std::min(100, std::max(0, arg)); break;
+                case Session::OP_RATCHET: n.ratchet = (uint8_t)std::min(8, std::max(1, arg)); break;
+                case Session::OP_NUDGE: n.nudge = (int8_t)std::min(15, std::max(-16, arg)); break;
+            }
+        }
+        for (int& o : t.openIdx) o = 0;
+        seqRelease(t); publishSeq(ti);
+    }
+    void seqAddBarOp(int ti, bool copyLast) {
+        Track& t = *tracks[(size_t)ti]; if (t.seqBars >= kMaxBars) return;
+        const int lastLo = (t.seqBars - 1) * 4 * kPpq;
+        seqBarsSet(ti, t.seqBars + 1);
+        if (copyLast) { const int n0 = t.snCount; for (int i = 0; i < n0 && t.snCount < kSeqMax; i++) if (t.sn[i].tick >= lastLo && t.sn[i].tick < lastLo + 4 * kPpq) { SeqNote c = t.sn[i]; c.tick = (uint16_t)(c.tick + 4 * kPpq); t.sn[t.snCount++] = c; } publishSeq(ti); }
     }
     // touch edit: the note at (tick, note) gets a new length (at least 1 tick, at most to the end of the pattern)
     void seqResizeNote(int ti, int tick, int note, int len) {
@@ -782,7 +825,7 @@ void Session::seqRedo(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqRe
 void Session::seqToggle(int t, int tick, int len, int note, int vel) { if (t >= 0 && t < kTracks && note >= 0 && note < 128) d->post([=] { d->seqToggleNote(t, tick, len, note, vel); }); }
 void Session::seqSet(int t, const SeqView* nv, int n) {
     if (t < 0 || t >= kTracks) return;
-    std::vector<SeqNote> list; for (int i = 0; i < n && i < kSeqMax; i++) list.push_back({(uint16_t)std::max(0, nv[i].tick), (uint16_t)std::max(1, nv[i].len), (uint8_t)std::min(127, std::max(0, nv[i].note)), (uint8_t)std::min(127, std::max(1, nv[i].vel))});
+    std::vector<SeqNote> list; for (int i = 0; i < n && i < kSeqMax; i++) list.push_back({(uint16_t)std::max(0, nv[i].tick), (uint16_t)std::max(1, nv[i].len), (uint8_t)std::min(127, std::max(0, nv[i].note)), (uint8_t)std::min(127, std::max(1, nv[i].vel)), (uint8_t)std::min(100, std::max(0, nv[i].prob)), (uint8_t)std::min(8, std::max(1, nv[i].ratchet)), (int8_t)std::min(15, std::max(-16, nv[i].nudge))});
     d->post([=] { d->seqSetNotes(t, list); });
 }
 void Session::seqResize(int t, int tick, int note, int len) { if (t >= 0 && t < kTracks) d->post([=] { d->seqResizeNote(t, tick, note, len); }); }
@@ -796,6 +839,12 @@ int Session::tombolaView(TombolaBall* out, int maxN, float* drumAngle) const {
     if (drumAngle) *drumAngle = Impl::floatOf(d->a_drum.load());
     return n;
 }
+void Session::seqApply(int t, const SeqRef* notes, int n, int op, int arg) {
+    if (t < 0 || t >= kTracks || n <= 0) return;
+    std::vector<SeqRef> refs(notes, notes + n);
+    d->post([=] { d->seqApplyOp(t, refs, op, arg); });
+}
+void Session::seqAddBar(int t, bool copyLast) { if (t >= 0 && t < kTracks) d->post([=] { d->seqAddBarOp(t, copyLast); }); }
 void Session::seqRest(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, 1); }); }
 void Session::seqCursorMove(int t, int steps) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, steps); }); }
 void Session::seqCursorSet(int t, int tick) { if (t >= 0 && t < kTracks) d->post([=] { d->seqCursorTo(t, tick); }); }
@@ -805,7 +854,7 @@ void Session::setQuantize(int g) { d->post([=] { d->seqGrid = std::min(kGrids - 
 int Session::seqNotes(int t, SeqView* out, int maxNotes) const {
     if (t < 0 || t >= kTracks) return 0;
     const int n = std::min(maxNotes, std::min(kSeqMax, d->a_seqN[t].load()));
-    for (int i = 0; i < n; i++) { const uint64_t v = d->a_seq[t][i].load(); out[i] = {(int)(v & 0xffff), (int)(v >> 16 & 0xffff), (int)(v >> 32 & 0xff), (int)(v >> 40 & 0xff)}; }
+    for (int i = 0; i < n; i++) { const uint64_t v = d->a_seq[t][i].load(); out[i] = {(int)(v & 0xffff), (int)(v >> 16 & 0xffff), (int)(v >> 32 & 0xff), (int)(v >> 40 & 0xff), (int)(v >> 48 & 0x7f), (int)(v >> 55 & 7) + 1, (int)(v >> 58 & 31) - 16}; }
     return n;
 }
 void Session::setInputQuant(int g) { d->post([=] { d->inQuant = std::min(kGrids - 1, std::max(0, g)); }); }

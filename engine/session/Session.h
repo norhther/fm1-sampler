@@ -47,7 +47,9 @@ public:
         int bounce;              // 0 idle, 1 waiting for the loop start, 2 recording the pattern to tape
         int bounceDone;          // counts up when a bounce finished
     };
-    struct SeqView { int tick, len, note, vel; };
+    struct SeqView { int tick, len, note, vel, prob = 100, ratchet = 1, nudge = 0; };
+    struct SeqRef { int tick, note; };   // a note of a pattern is told by its start and its pitch
+    enum SeqOp { OP_DELETE, OP_TRANSPOSE, OP_SHIFT, OP_DUP, OP_VEL, OP_PROB, OP_RATCHET, OP_NUDGE };
     struct Lfo { float rate = 1.f, depth = 0.f, base = 0.5f; int target = 0 /*0 pitch 1 filter 2 volume 3 pan*/, shape = 0 /*0 sine 1 tri 2 square 3 s&h*/; };
 
     explicit Session(int sampleRate = 48000);
@@ -96,6 +98,8 @@ public:
     void seqUndo(int track);                  // takes back the last edit of the pattern (a recording pass, a step, a tap on the grid, clear, a change of the length); 16 steps
     void seqRedo(int track);
     void seqSet(int track, const SeqView* notes, int n);                      // replace the whole pattern (one undo step)
+    void seqApply(int track, const SeqRef* notes, int n, int op, int arg);    // edits a selection in one undo step: delete, transpose (semitones), shift / duplicate by `arg` ticks, set velocity / probability / ratchet / nudge
+    void seqAddBar(int track, bool copyLast);                                 // one more bar at the end (up to 16), empty or a copy of the last one
     void seqResize(int track, int tick, int note, int len);                   // touch edit: a note gets a new length in ticks
     void seqToggle(int track, int tick, int len, int note, int vel);   // touch edit: a note under that tick is removed, else one is added
     void seqRest(int track);                  // step entry: skip one step

@@ -548,6 +548,64 @@ static void testLook() {
     }
 }
 
+static std::vector<long> onsetsOf(const std::vector<float>& all, int sr, float thr = 0.02f, double refractory = 0.1) {
+    std::vector<long> on; long quiet = 1 << 30; const long gap = (long)(refractory * sr);
+    for (size_t i = 0; i < all.size(); i += 2) { if (std::fabs(all[i]) > thr) { if (quiet > gap) on.push_back((long)(i / 2)); quiet = 0; } else quiet++; }
+    return on;
+}
+static void testNoteEdit() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_td; mkdir -p /tmp/fm1sampler_td");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_td"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
+    run(2.5);
+    app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.2);
+    app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(0.f); k[1].set(4.f / 7.f); k[2].set(0.f); k[3].set(0.f); } run(0.2);
+    app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Synth Kit 808") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); { auto k = app.knobs(); k[1].set(0.f); } app.seqSetBarCount(1); run(0.3);
+    Session::SeqView v[kSeqMax]; auto notes = [&]() { return s.seqNotes(4, v, kSeqMax); };
+    // the selection edits
+    for (int i = 0; i < 4; i++) app.seqToggleAt(i * 192, 66);   // closed hats on every beat
+    run(0.3); CHECK(notes() == 4 && v[0].prob == 100 && v[0].ratchet == 1 && v[0].nudge == 0, "notes start with full chance, no ratchet, no nudge");
+    Session::SeqRef two[2] = {{0, 66}, {192, 66}};
+    s.seqApply(4, two, 2, Session::OP_TRANSPOSE, 3); run(0.2); { int n = notes(); int t3 = 0; for (int i = 0; i < n; i++) t3 += v[i].note == 69; CHECK(t3 == 2, "transpose moves the selected notes (%d moved)", t3); }
+    Session::SeqRef up[2] = {{0, 69}, {192, 69}};
+    s.seqApply(4, up, 2, Session::OP_TRANSPOSE, -3); s.seqApply(4, up, 0, Session::OP_DELETE, 0); run(0.2);
+    Session::SeqRef back[2] = {{0, 66}, {192, 66}};
+    s.seqApply(4, back, 2, Session::OP_VEL, 40); s.seqApply(4, back, 2, Session::OP_PROB, 55); s.seqApply(4, back, 2, Session::OP_RATCHET, 3); s.seqApply(4, back, 2, Session::OP_NUDGE, -7); run(0.2);
+    { int n = notes(); bool ok = false; for (int i = 0; i < n; i++) if (v[i].tick == 0) ok = v[i].vel == 40 && v[i].prob == 55 && v[i].ratchet == 3 && v[i].nudge == -7; CHECK(ok, "velocity, chance, ratchet and nudge are set and read back"); }
+    s.seqApply(4, back, 2, Session::OP_DUP, 96); run(0.2); CHECK(notes() == 6, "duplicate adds copies (%d notes)", notes());
+    s.seqApply(4, back, 2, Session::OP_SHIFT, 48); run(0.2); { int n = notes(); bool ok = false; for (int i = 0; i < n; i++) ok |= v[i].tick == 48; CHECK(ok, "shift moves them in time"); }
+    Session::SeqRef all6[6]; { int n = notes(); for (int i = 0; i < n && i < 6; i++) all6[i] = {v[i].tick, v[i].note}; s.seqApply(4, all6, std::min(n, 6), Session::OP_DELETE, 0); } run(0.2);
+    CHECK(notes() == 0, "delete removes the selection"); s.seqUndo(4); run(0.2); CHECK(notes() == 6, "...and it is one undo step (%d)", notes());
+    s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); run(0.2);
+    app.seqClear(); run(0.2);
+    // add a bar as a copy of the last one
+    app.seqToggleAt(10, 62); run(0.2); s.seqAddBar(4, true); run(0.2);
+    CHECK(app.status().seqBars[4] == 2 && notes() == 2 && v[1].tick == 10 + 768, "+ with a copy: the last bar is repeated in the new one (%d bars, %d notes)", app.status().seqBars[4], notes());
+    s.seqAddBar(4, false); run(0.2); CHECK(app.status().seqBars[4] == 3 && notes() == 2, "+ without a copy: the new bar is empty");
+    // playback: chance, ratchet, nudge, on a short hat so every hit is one clear onset
+    app.seqClear(); app.seqSetBarCount(1); run(0.3);
+    { auto k = app.knobs(); k[0].set(1.f / 3); } run(0.3);
+    auto stopGo = [&]() { run(4.0); if (app.status().playing) { btn(SamplerApp::PLAY); run(0.3); } run(2.0); all.clear(); btn(SamplerApp::PLAY); };
+    app.setSend(4, 0, 0.f); app.setSend(4, 1, 0.f);   // dry: no echoes to be counted as hits
+    app.seqToggleAt(0, 66, 768); run(0.2); Session::SeqRef h0[1] = {{0, 66}}; s.seqApply(4, h0, 1, Session::OP_RATCHET, 4); run(0.2);
+    stopGo(); run(2.2); { auto on = onsetsOf(all, sr); on.erase(on.begin(), on.begin() + std::min<size_t>(on.size(), 0)); const int n = (int)on.size(); long g1 = n > 1 ? on[1] - on[0] : 0; CHECK(n >= 4 && std::labs(g1 - 24000) < 300, "ratchet 4: four hits for one note (%d onsets, gap %ld samples, expect 24000)", n, g1); }
+    s.seqApply(4, h0, 1, Session::OP_RATCHET, 1); s.seqApply(4, h0, 1, Session::OP_PROB, 0); run(3.5); all.clear(); run(4.5);
+    CHECK(onsetsOf(all, sr).empty(), "chance 0: the note never plays");
+    s.seqApply(4, h0, 1, Session::OP_PROB, 50); run(0.3); all.clear(); run(2.0 * 14);
+    { const int n = (int)onsetsOf(all, sr).size(); CHECK(n >= 3 && n <= 11, "chance 50 pct: it plays about half of the passes (%d of 14)", n); }
+    app.seqClear(); run(0.2); app.seqToggleAt(0, 66); app.seqToggleAt(384, 66); run(0.3); Session::SeqRef h1[1] = {{384, 66}}; s.seqApply(4, h1, 1, Session::OP_NUDGE, 12); run(0.3);
+    all.clear(); run(2.0 * 5 + 0.5);
+    { auto on = onsetsOf(all, sr); long a = on.size() > 3 ? on[2] - on[1] : 0, b = on.size() > 3 ? on[3] - on[2] : 0; long d = std::labs(a - b);
+      CHECK(on.size() >= 5 && d > 2500 && d < 3500, "nudge +12 ticks pushes one hit back (gaps %ld / %ld, differ by %ld, expect 3000)", a, b, d); }
+    app.seqClear(); run(0.2); if (app.status().playing) btn(SamplerApp::PLAY);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -608,6 +666,25 @@ static void testRollZoom() {
             CHECK(n3 == 1 && v3[0].tick >= 1536 && v3[0].tick < 2304 && v3[0].note == note3, "tapping in the third bar adds the note in the third bar (tick %d)", n3 ? v3[0].tick : -1);
             app.seqClear(); app.seqSetBarCount(4);
         }
+        {   // SELECT mode: pick notes, edit them together
+            app.seqClear(); run(0.2); for (int i = 0; i < 3; i++) app.seqToggleAt(i * 96, 60 + i); run(0.3);
+            SamplerUI us(app); us.setSize(860, 400, 0, 0); us.frame(now);
+            auto tapText = [&](const char* label) { us.frame(now); float tx = 0, ty = 0; for (auto& o : us.ops()) if (o.type == UiOp::TEXT && o.text == label) { tx = o.f[0]; ty = o.f[1] - 3; } us.touch(0, tx, ty, now); us.touch(2, tx, ty, now); run(0.2); return tx > 0; };
+            CHECK(tapText("SELECT"), "the SELECT button exists"); us.frame(now);
+            float gx, gy, gw, gh; us.rollGrid(gx, gy, gw, gh); const float rows = std::round(us.rollRows()), rh = gh / rows; const int pt = patternTicks(app.seqBarsOf(app.track())), vis = (int)(pt / us.rollZoom());
+            auto X = [&](double tick) { return gx + (float)((tick - us.rollScroll()) / vis * gw); }; auto Y = [&](int note) { return gy + (rows - 1 - (note - std::floor(us.rollBase()))) * rh + rh / 2; };
+            Session::SeqView v[kSeqMax];
+            us.touch(0, X(10), Y(60), now); us.touch(2, X(10), Y(60), now); us.frame(now);
+            CHECK(!us.isSelected(0, 60) == false && us.selectedCount() == 1, "a tap on a note picks it (%d picked)", us.selectedCount());
+            us.touch(0, X(106), Y(61), now); us.touch(2, X(106), Y(61), now); us.frame(now); CHECK(us.selectedCount() == 2, "a second tap adds it (%d)", us.selectedCount());
+            us.touch(0, X(106), Y(61), now); us.touch(2, X(106), Y(61), now); us.frame(now); CHECK(us.selectedCount() == 1, "a tap on a picked note drops it");
+            us.touch(0, X(1), Y(64), now); us.touch(1, X(300), Y(58), now); us.touch(1, X(300), Y(58) + 1, now); us.frame(now); us.touch(2, X(300), Y(58), now); us.frame(now);
+            CHECK(us.selectedCount() == 3, "dragging a box over empty cells picks everything inside (%d)", us.selectedCount());
+            CHECK(tapText("+12"), "..."); const int n = s.seqNotes(0, v, kSeqMax); bool up = n == 3; for (int i = 0; i < n; i++) up &= v[i].note >= 72 && v[i].note <= 74;
+            CHECK(up, "+12 moves the picked notes an octave up"); us.frame(now);
+            tapText("DEL"); CHECK(s.seqNotes(0, v, kSeqMax) == 0 && us.selectedCount() == 0, "DELETE removes them");
+            app.seqUndo(); run(0.2); CHECK(s.seqNotes(0, v, kSeqMax) == 3, "...and UNDO brings them back");
+        }
         // a long note plays for its length: the engine holds it, a short one does not
         app.seqClear(); app.seqToggleAt(0, 60, 384); run(0.1);
         app.setSeqState(1); run(0.1);
@@ -622,6 +699,7 @@ int main() {
     }
     testSynths();
     testOp1();
+    testNoteEdit();
     testLook();
     testSound();
     testProject();

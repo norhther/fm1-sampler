@@ -16,6 +16,8 @@ public:
     void frame(uint32_t nowMs);
     const std::vector<UiOp>& ops() const { return ops_; }
     void touch(int action /*0 down 1 move 2 up*/, float x, float y, uint32_t nowMs);
+    int selectedCount() const { return (int)sel_.size(); }       // SELECT mode of the roll (for the tests)
+    bool isSelected(int tick, int note) const { return isSel(tick, note); }
     bool projectSheetOpen() const { return projOpen_; }
     void openProjectSheet() { projOpen_ = true; projSel_ = -1; }
     float rollZoom() const { return rollZoom_; }       // for the tests: time zoom of the piano roll (1 = the whole pattern) and the pitch rows shown
@@ -67,6 +69,10 @@ private:
     struct NoteDrag { bool on = false, existing = false, moved = false; int tick = 0, note = 0, len = 0, origLen = 0; } drag_;
     int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
     bool projOpen_ = false; int projSel_ = -1; float projScroll_ = 0, projLastY_ = 0, projMoved_ = 0; uint32_t projDelAt_ = 0; std::vector<std::string> projList_; Rect projListRect_{0, 0, 0, 0};
+    // SELECT mode of the roll: notes picked by tap or by a box, edited together
+    bool selMode_ = false, rbOn_ = false; std::vector<Session::SeqRef> sel_; float rbX0_ = 0, rbY0_ = 0, rbX1_ = 0, rbY1_ = 0; int selDrag_ = -1; float selDragVal_ = 0;
+    bool isSel(int tick, int note) const { for (auto& r : sel_) if (r.tick == tick && r.note == note) return true; return false; }
+    void selectPanel(Rect r, const Session::SeqView* v, int n, int pt, int st);
     uint32_t rollTouchAt_ = 0;   // the view does not page along with the playhead for a while after a touch on the roll
     float rulerDownX_ = 0, rulerStartScroll_ = 0, drumLastAngle_ = 0;   // piano roll zoom: how many times the pattern is stretched in time, how many pitch rows are shown
     // the roll of the last frame (for the pinch) and the state of a pinch in progress

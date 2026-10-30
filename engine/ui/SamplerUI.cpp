@@ -280,22 +280,22 @@ void SamplerUI::sequencerView(Rect r) {
         rollBase_ = (lo + hi) / 2.f - rollRowsF_ / 2.f + 0.5f; }
         else { rollRowsF_ = 10.f; rollBase_ = 55.f; }
     }
-    // toolbar: undo, redo, zoom in time, zoom in pitch, fit, grid
-    const float tbh = 26, bw8 = (r.w - 7 * 4) / 8.6f;   // the last button (GRID) is a bit wider
-    int tx = 0;
-    auto tb = [&](const std::string& label, bool on, std::function<void()> f) { button({r.x + tx * (bw8 + 4), r.y, tx == 7 ? bw8 * 1.6f : bw8, tbh}, label, on, std::move(f), 9.5f); tx++; };
+    // toolbar: undo, redo, zoom in time and pitch, fit, grid, select
+    const float tbh = 26, bw9 = (r.w - 6 * 4) / 7.9f;   // the last two buttons (GRID, SELECT) are a bit wider (zooming the rows is the vertical pinch)
+    int tx = 0; float tbx = r.x;
+    auto tb = [&](const std::string& label, bool on, std::function<void()> f, float wmul = 1.f) { button({tbx, r.y, bw9 * wmul, tbh}, label, on, std::move(f), 9.5f); tbx += bw9 * wmul + 4; tx++; };
     tb("UNDO", st_.seqUndoN[t] > 0, [this] { app_.seqUndo(); });
     tb("REDO", st_.seqRedoN[t] > 0, [this] { app_.seqRedo(); });
     const float zoomMax = std::min(32.f, std::max(1.f, pt / (2.f * st)));
     tb("TIME -", false, [this] { rollZoom_ = std::max(1.f, rollZoom_ / 1.6f); });
     tb("TIME +", false, [this, zoomMax] { rollZoom_ = std::min(zoomMax, rollZoom_ * 1.6f); });
-    tb("ROWS -", false, [this] { const float mid = rollBase_ + rollRowsF_ / 2.f; rollRowsF_ = std::min(60.f, rollRowsF_ * 1.4f); rollBase_ = mid - rollRowsF_ / 2.f; });   // more rows = smaller
-    tb("ROWS +", false, [this] { const float mid = rollBase_ + rollRowsF_ / 2.f; rollRowsF_ = std::max(5.f, rollRowsF_ / 1.4f); rollBase_ = mid - rollRowsF_ / 2.f; });
     tb("FIT", false, [this] { rollFitTrack_ = -1; });
-    tb(std::string("GRID ") + gridName(app_.seqGridIndex() ? app_.seqGridIndex() : 4), false, [this] { app_.cycleSeqGrid(); });
+    tb(std::string("GRID ") + gridName(app_.seqGridIndex() ? app_.seqGridIndex() : 4), false, [this] { app_.cycleSeqGrid(); }, 1.5f);
+    tb("SELECT", selMode_, [this] { selMode_ = !selMode_; sel_.clear(); drag_ = {}; rbOn_ = false; }, 1.4f);
     // the roll
     const float keyW = 34, rulerH = 14;
-    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46};
+    const float panelH = selMode_ ? 86.f : 0.f;
+    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46 - panelH};
     rrect(roll, R_CARD, SURFACE); stroke(roll, R_CARD, OUTLINE, 1);
     rollZoom_ = std::min(zoomMax, std::max(1.f, rollZoom_)); rollRowsF_ = std::min(60.f, std::max(5.f, rollRowsF_));
     const int rows = (int)std::lround(rollRowsF_), visible = std::max(2 * st, (int)(pt / rollZoom_)); const float zoom = (float)pt / visible;
@@ -325,13 +325,17 @@ void SamplerUI::sequencerView(Rect r) {
         if (beat && px(tick) >= x0 && px(tick) < x0 + W - 12) text(px(tick) + 3, roll.y + 2 + rulerH / 2, 8.f, bar ? ACCENT : DIM, std::to_string(tick / (4 * kPpq) + 1) + (bar ? "" : "." + std::to_string(tick % (4 * kPpq) / kPpq + 1)), 0, bar);
     }
     if (state == 3) rrect({px(st_.seqCursor[t]), y0, std::max(2.f, (float)st / visible * W), H}, 0, theme::withAlpha(ACCENT, 90));
+    if (selMode_) { std::vector<Session::SeqRef> keep; for (auto& q : sel_) for (int i = 0; i < n; i++) if (v[i].tick == q.tick && v[i].note == q.note) { keep.push_back(q); break; } sel_ = keep; }
     for (int i = 0; i < n; i++) {
         const int row = base + rows - 1 - v[i].note;
         if (row < 0 || row >= rows || v[i].tick + v[i].len < rollScroll_ || v[i].tick > rollScroll_ + visible) continue;
         const bool grabbed = drag_.on && drag_.existing && drag_.tick == v[i].tick && drag_.note == v[i].note;
         const int len = grabbed ? drag_.len : v[i].len;
         const Rect nr{px(v[i].tick), y0 + row * rh + 1.f, std::max(4.f, (float)len / visible * W), std::max(3.f, rh - 2)};
-        rrect(nr, 2, grabbed ? ACCENT : TEXT);
+        const bool picked = selMode_ && isSel(v[i].tick, v[i].note);
+        rrect(nr, 2, grabbed || picked ? ACCENT : theme::withAlpha(TEXT, 110 + (int)(145.f * v[i].vel / 127.f)));   // louder notes are brighter
+        if (v[i].prob < 100) stroke(nr, 2, DIM, 1);
+        if (v[i].ratchet > 1 && nr.w > 12) for (int k = 1; k < v[i].ratchet; k++) { const float rx = nr.x + nr.w * k / v[i].ratchet; line(rx, nr.y + 2, rx, nr.y + nr.h - 2, BG, 1); }
         if (nr.w > 14) line(nr.x + nr.w - 4, nr.y + 3, nr.x + nr.w - 4, nr.y + nr.h - 3, grabbed ? ON_ACCENT : BG, 1.5f);   // a grip at the end: drag it to stretch the note
     }
     if (drag_.on && !drag_.existing) {   // the new note under the finger
@@ -360,6 +364,31 @@ void SamplerUI::sequencerView(Rect r) {
         [this, t] { if (auditionNote_ >= 0) app_.session().noteOff(t, auditionNote_); auditionNote_ = -1; });
     // grid
     auto tickAt = [sc0, x0, W, visible](float x) { return sc0 + (x - x0) / W * visible; };
+    if (selMode_) {   // tap a note to pick or drop it, drag a box over empty cells to pick all inside; a tap on nothing drops the selection
+        hit({x0, y0, W, H},
+            [this, v, n, tickAt, y0, rh, rows, base, st](float x, float y) mutable {
+                rollTouchAt_ = now_; rbX0_ = rbX1_ = x; rbY0_ = rbY1_ = y; rbOn_ = false; rollMoved_ = false; rollDownX_ = x; rollDownY_ = y;
+                const int tick = (int)tickAt(x), note = base + rows - 1 - std::min(rows - 1, std::max(0, (int)((y - y0) / rh)));
+                selDrag_ = -1;
+                for (int i = 0; i < n; i++) if (v[i].note == note && tick >= v[i].tick && tick < v[i].tick + std::max(1, v[i].len)) { selDrag_ = i; selDragVal_ = (float)v[i].tick; break; }
+                if (selDrag_ >= 0) { const Session::SeqRef q{v[selDrag_].tick, v[selDrag_].note}; bool had = false; for (size_t k = 0; k < sel_.size(); k++) if (sel_[k].tick == q.tick && sel_[k].note == q.note) { sel_.erase(sel_.begin() + (long)k); had = true; break; } if (!had) sel_.push_back(q); }
+            },
+            [this](float x, float y) { if (selDrag_ >= 0) return; if (std::fabs(x - rollDownX_) > 8 || std::fabs(y - rollDownY_) > 8) rbOn_ = true; rbX1_ = x; rbY1_ = y; },
+            [this, v, n, sc0, x0, W, visible, y0, rh, rows, base]() mutable {
+                auto px = [&](double tick) { return x0 + (float)((tick - sc0) / visible * W); };
+                if (selDrag_ >= 0) return;
+                if (!rbOn_) { sel_.clear(); return; }
+                const float xa = std::min(rbX0_, rbX1_), xb = std::max(rbX0_, rbX1_), ya = std::min(rbY0_, rbY1_), yb = std::max(rbY0_, rbY1_);
+                for (int i = 0; i < n; i++) {
+                    const int row = base + rows - 1 - v[i].note; if (row < 0 || row >= rows) continue;
+                    const float nx0 = px(v[i].tick), nx1 = px(v[i].tick + v[i].len), ny0 = y0 + row * rh, ny1 = ny0 + rh;
+                    if (nx1 >= xa && nx0 <= xb && ny1 >= ya && ny0 <= yb && !isSel(v[i].tick, v[i].note)) sel_.push_back({v[i].tick, v[i].note});
+                }
+                rbOn_ = false;
+            });
+        if (rbOn_) { const Rect rb{std::min(rbX0_, rbX1_), std::min(rbY0_, rbY1_), std::fabs(rbX1_ - rbX0_), std::fabs(rbY1_ - rbY0_)}; rrect(rb, 0, theme::withAlpha(ACCENT, 50)); stroke(rb, 0, ACCENT, 1); }
+        selectPanel({r.x, roll.y + roll.h + 4, r.w, 82}, v, n, pt, st);
+    } else
     hit({x0, y0, W, H},
         [this, v, n, tickAt, y0, rh, rows, base, st, pt](float x, float y) mutable {
             const int tick = std::min(pt - st, std::max(0, (int)tickAt(x) / st * st)), note = base + rows - 1 - std::min(rows - 1, std::max(0, (int)((y - y0) / rh)));
@@ -385,12 +414,13 @@ void SamplerUI::sequencerView(Rect r) {
         });
     // buttons: record into the pattern (same as holding SEQ on the FM-1), mute, clear
     // bars: add or remove one at the end (new bars are empty; the notes behind a removed end are dropped, UNDO brings them back)
-    const float by = r.y + r.h - 38, bwBar = 40, lblW = 78, barsW = 2 * bwBar + lblW + 2 * 4, bw = (r.w - barsW - 4 * 6) / 4;
+    const float by = r.y + r.h - 38, bwBar = 40, lblW = 78, cpW = 50, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 4 * 6) / 4;
     const int nb = app_.seqBarsOf(t);
     button({r.x, by, bwBar, 38}, "-", false, [this, nb] { app_.seqSetBarCount(nb - 1); }, 16);
     text(r.x + bwBar + 4 + lblW / 2, by + 13, 13, TEXT, std::to_string(nb) + (nb == 1 ? " BAR" : " BARS"), 1, true);
     text(r.x + bwBar + 4 + lblW / 2, by + 28, 8.5f, DIM, "PATTERN LENGTH", 1, false);
     button({r.x + bwBar + 4 + lblW + 4, by, bwBar, 38}, "+", false, [this, nb] { app_.seqSetBarCount(nb + 1); }, 16);
+    button({r.x + 2 * bwBar + 4 + lblW + 8, by, cpW, 38}, "+COPY", false, [this] { app_.seqAddBarCopy(); }, 9.f);   // a new bar with the notes of the last one
     int bx = 0;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + barsW + 6 + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
     b(state == 2 ? "STOP REC" : "RECORD", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
@@ -424,6 +454,52 @@ void SamplerUI::tombolaView(Rect r) {
     b("DROP A BALL", [this] { app_.tombolaDrop(); }, true);
     b("REVERSE", [this] { app_.tombolaReverse(); });
     b("EMPTY THE DRUM", [this] { app_.tombolaClear(); });
+}
+
+// the panel under the roll in SELECT mode: what to do with the picked notes, and four values to set on all of them
+void SamplerUI::selectPanel(Rect r, const Session::SeqView* v, int n, int pt, int st) {
+    const int t = app_.track(), cnt = (int)sel_.size();
+    rrect(r, R_CARD, SURFACE); stroke(r, R_CARD, OUTLINE, 1);
+    const Session::SeqView* first = nullptr;
+    for (int i = 0; i < n && !first; i++) if (isSel(v[i].tick, v[i].note)) first = &v[i];
+    text(r.x + 8, r.y + 14, 10.5f, cnt ? ACCENT : DIM, cnt ? std::to_string(cnt) + " PICKED" : "TAP NOTES OR DRAG A BOX", 0, true);
+    // actions: the first row
+    const float bw = (r.w - 16 - 8 * 4 - 96) / 8.f; float bx = r.x + 104;
+    auto act = [&](const std::string& label, std::function<void()> f) { if (cnt) button({bx, r.y + 4, bw, 22}, label, false, std::move(f), 9.f); else { rrect({bx, r.y + 4, bw, 22}, R_CONTROL, BG); text(bx + bw / 2, r.y + 15, 9.f, OUTLINE, label, 1, true); } bx += bw + 4; };
+    auto op = [this, t](int o, int arg) { app_.session().seqApply(t, sel_.data(), (int)sel_.size(), o, arg); };
+    act("DEL", [this, op] { op(Session::OP_DELETE, 0); sel_.clear(); });
+    act("COPY", [this, op, pt, st] {   // a copy of the picked notes right after them (the length of the span, to the next step), and the copies are the new selection
+        int lo = 1 << 30, hi = 0; const auto s0 = sel_; Session::SeqView vv[kSeqMax]; const int nn = app_.session().seqNotes(app_.track(), vv, kSeqMax);
+        for (int i = 0; i < nn; i++) if (isSel(vv[i].tick, vv[i].note)) { lo = std::min(lo, vv[i].tick); hi = std::max(hi, vv[i].tick + vv[i].len); }
+        const int span = std::max(st, (hi - lo + st - 1) / st * st); op(Session::OP_DUP, span);
+        sel_.clear(); for (auto& q : s0) sel_.push_back({(q.tick + span) % pt, q.note}); });
+    act("-12", [this, op] { op(Session::OP_TRANSPOSE, -12); for (auto& q : sel_) q.note = std::max(0, q.note - 12); });
+    act("-1", [this, op] { op(Session::OP_TRANSPOSE, -1); for (auto& q : sel_) q.note = std::max(0, q.note - 1); });
+    act("+1", [this, op] { op(Session::OP_TRANSPOSE, 1); for (auto& q : sel_) q.note = std::min(127, q.note + 1); });
+    act("+12", [this, op] { op(Session::OP_TRANSPOSE, 12); for (auto& q : sel_) q.note = std::min(127, q.note + 12); });
+    act("<", [this, op, pt, st] { op(Session::OP_SHIFT, -st); for (auto& q : sel_) q.tick = ((q.tick - st) % pt + pt) % pt; });
+    act(">", [this, op, pt, st] { op(Session::OP_SHIFT, st); for (auto& q : sel_) q.tick = (q.tick + st) % pt; });
+    // values: velocity, chance, ratchet, nudge: dragged along the bar, applied when the finger lifts (one undo step)
+    struct Val { const char* name; int op, lo, hi; int cur; };
+    const Val vals[4] = {{"VELOCITY", Session::OP_VEL, 1, 127, first ? first->vel : 100}, {"CHANCE", Session::OP_PROB, 0, 100, first ? first->prob : 100},
+                         {"RATCHET", Session::OP_RATCHET, 1, 8, first ? first->ratchet : 1}, {"NUDGE", Session::OP_NUDGE, -16, 15, first ? first->nudge : 0}};
+    const float vw = (r.w - 16 - 3 * 8) / 4.f;
+    for (int k = 0; k < 4; k++) {
+        const Rect b{r.x + 8 + k * (vw + 8), r.y + 36, vw, 40};
+        const bool live = selDrag_ == 10000 + k;
+        const float cur = live ? selDragVal_ : (float)vals[k].cur;
+        text(b.x, b.y + 5, 8.5f, DIM, vals[k].name, 0, true);
+        text(b.x + vw, b.y + 5, 10.5f, cnt ? TEXT : DIM, (vals[k].op == Session::OP_PROB ? std::to_string((int)std::lround(cur)) + "%" : vals[k].op == Session::OP_NUDGE ? (cur > 0 ? "+" : "") + std::to_string((int)std::lround(cur)) : std::to_string((int)std::lround(cur))), 2, true);
+        const Rect sl{b.x, b.y + 16, vw, 18}; rrect(sl, 0, BG); stroke(sl, 0, OUTLINE, 1);
+        const float frac = (cur - vals[k].lo) / (float)(vals[k].hi - vals[k].lo);
+        rrect({sl.x, sl.y, std::max(2.f, sl.w * clamp01(frac)), sl.h}, 0, cnt ? ACCENT : OUTLINE);
+        if (!cnt) continue;
+        const int lo = vals[k].lo, hi = vals[k].hi, o = vals[k].op;
+        hit({sl.x, sl.y - 8, sl.w, sl.h + 16},
+            [this, k, sl, lo, hi](float x, float) { selDrag_ = 10000 + k; selDragVal_ = lo + clamp01((x - sl.x) / sl.w) * (hi - lo); },
+            [this, sl, lo, hi](float x, float) { selDragVal_ = lo + clamp01((x - sl.x) / sl.w) * (hi - lo); },
+            [this, op, o]() { op(o, (int)std::lround(selDragVal_)); selDrag_ = -1; });
+    }
 }
 
 void SamplerUI::pagePanel(Rect r) {
