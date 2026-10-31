@@ -44,7 +44,7 @@ public:
         bool metro;
         int countBeats;          // > 0 while the count-in runs: beats left
         int seqState[kTracks], seqBars[kTracks], seqCount[kTracks];   // sequencer: 0 mute 1 play 2 record 3 step entry, pattern length in bars, notes in the pattern
-        bool seqRun[kTracks], seqPend[kTracks], keyTrig[kTracks]; int seqTrans[kTracks], seqPos[kTracks];   // seqPos: tick inside the pattern, -1 when it is not playing
+        bool seqRun[kTracks], seqPend[kTracks], keyTrig[kTracks], seqOne[kTracks]; int seqTrans[kTracks], seqPos[kTracks];   // seqPos: tick inside the pattern, -1 when it is not playing
           // pattern play / stop, a start waiting for the beat, the keys trigger the pattern, its transposition
         int seqCursor[kTracks];  // step entry cursor, in ticks
         int globalUndoN, globalRedoN;   // the UNDO / REDO button: steps back / forward over every track
@@ -115,6 +115,7 @@ public:
     // ---- note sequencer (per track pattern on the beat clock, locked to the loop) ----
     void seqRun(int track, bool run);         // play the pattern from its first tick (on the next beat or bar) / stop it, the transport keeps going
     void seqKeyTrigger(int track, bool on);   // OP-1 style: the keys start the pattern (C4 = as written, every other key moves it by its distance), release stops it
+    void seqOneShot(int track, bool on);      // the pattern plays one pass and stops (false: it loops)
     void seqTrigQuant(int track, int q);      // when a key starts the pattern: 0 at once, 1 on the beat, 2 on the bar
     void seqNudge(int track, int ticks);      // shift the whole pattern round its length (one undo step)
     void seqSetState(int track, int state);   // 0 mute, 1 play, 2 record (starts the transport; one track records at a time), 3 step entry (keys write at the cursor)

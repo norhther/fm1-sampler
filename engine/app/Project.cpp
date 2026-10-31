@@ -90,7 +90,7 @@ std::string SamplerApp::stateText() {
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
         io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
-        int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15); io.i(k + "keyTrig", x.keyTrig, 0, 1); io.i(k + "trigQ", x.trigQ, 0, 2);
+        int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15); io.i(k + "keyTrig", x.keyTrig, 0, 1); io.i(k + "trigQ", x.trigQ, 0, 2); io.i(k + "seqOne", x.seqOne, 0, 1);
         if (x.entry >= 0 && x.entry < (int)lib_.size()) io.out << k << "sample=" << lib_[(size_t)x.entry].group << '|' << lib_[(size_t)x.entry].label << '\n';
         io.out << k << "slot=" << st_.seqSlot[t] << '\n';
         for (int q = 0; q < 8; q++) {   // every pattern bank of the track
@@ -131,7 +131,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
         io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
-        int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15); io.i(k + "keyTrig", x.keyTrig, 0, 1); io.i(k + "trigQ", x.trigQ, 0, 2);
+        int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15); io.i(k + "keyTrig", x.keyTrig, 0, 1); io.i(k + "trigQ", x.trigQ, 0, 2); io.i(k + "seqOne", x.seqOne, 0, 1);
         if (fmtv < 2) bars2 = std::min(3, bars2) == 0 ? 0 : (1 << std::min(3, bars2)) - 1;   // format 1 kept 0..3 for 1, 2, 4, 8 bars
         if (x.start > x.end - 0.02f) { x.start = 0.f; x.end = 1.f; }
         x.seqState = sq; x.seqBars = bars2;
@@ -143,7 +143,7 @@ void SamplerApp::applyStateText(const std::string& text) {
             for (size_t i = 0; i < lib_.size(); i++) if (lib_[i].group == group && lib_[i].label == label) { x.entry = (int)i; break; }
         }
         if (x.entry >= 0 && !resolvePath(x.entry).empty()) s_.loadSamplePath(resolvePath(x.entry), lib_[(size_t)x.entry].kit, t); else s_.unloadSample(t);
-        applyAll(t); applyTrackFx(t); applyPattern(t); s_.seqTrigQuant(t, x.trigQ); s_.seqKeyTrigger(t, x.keyTrig != 0);
+        applyAll(t); applyTrackFx(t); applyPattern(t); s_.seqTrigQuant(t, x.trigQ); s_.seqKeyTrigger(t, x.keyTrig != 0); s_.seqOneShot(t, x.seqOne != 0);
         auto parseNotes = [&](const std::string& text) {
             std::vector<Session::SeqView> out; std::istringstream ns(text); std::string item;
             while (std::getline(ns, item, ';') && (int)out.size() < kSeqMax) {

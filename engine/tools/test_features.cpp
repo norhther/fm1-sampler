@@ -1472,6 +1472,11 @@ int main() {
         a6.playNote(64, false); run6(0.2); CHECK(a6.status().seqRun[0], "one key up, one still held: it goes on");
         a6.playNote(62, false); run6(2.0); CHECK(!a6.status().seqRun[0] && level(1.5) < 0.002, "the last key up stops it (rms %.4f)", rms(heard));
         a6.setKeyTrigger(0, false); run6(0.3); CHECK(!a6.status().keyTrig[0] && a6.seqRunning(0), "KEYS = SOUND: the pattern runs again");
+        // ONE SHOT: one pass of the pattern, then it stops by itself (LOOPS is the default)
+        a6.setOneShot(0, true); a6.seqRunToggle(); run6(0.3); a6.seqRunToggle(); run6(0.3);
+        CHECK(a6.status().seqOne[0] && a6.seqRunning(0), "ONE SHOT: PLAY starts the pattern");
+        run6(3.0); CHECK(!a6.seqRunning(0) && level(1.0) < 0.002, "...it stops after one pass (rms %.4f)", rms(heard));
+        a6.setOneShot(0, false); a6.seqRunToggle(); run6(4.5); CHECK(a6.seqRunning(0), "LOOPS: it keeps going past one pass");
         // the TRIGGER page
         a6.gotoPage(SamplerApp::P_TRIG); { auto k = a6.knobs(); int v = 0; for (auto& kn : k) v += kn.valid; CHECK(v == 4 && SamplerApp::modeOf(SamplerApp::P_TRIG) == 2, "the TRIGGER page: four knobs, in the SEQ tab"); }
         // the full screen editor
