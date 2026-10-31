@@ -33,7 +33,7 @@ public class SamplerView extends View {
 
     @Override protected void onDraw(Canvas c) {
         long now = SystemClock.uptimeMillis();
-        d = getHeight() / 400f;
+        d = Math.min(getHeight() / 400f, getWidth() / 860f);   // tablets (4:3, 16:10): fixed 860 units wide, taller virtual height
         Object[] fr = Native.uiFrame(h, getWidth() / d, getHeight() / d, topDp, bottomDp, now);
         int[] a = (int[]) fr[0];
         String[] texts = ((String) fr[1]).split("\u0001", -1);

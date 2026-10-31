@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     if (argc > 2) app.setTheme(atoi(argv[2]));
     SamplerUI ui(app);
-    const float W = 860, H = 400;
+    const float W = getenv("UI_W") ? atof(getenv("UI_W")) : 860, H = getenv("UI_H") ? atof(getenv("UI_H")) : 400;
     ui.setSize(W, H, 0, 0); ui.setLink(true, true);
     std::vector<float> buf(512), in(512, 0.f);
     uint32_t now = 0;
