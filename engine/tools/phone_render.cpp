@@ -61,7 +61,10 @@ int main(int argc, char** argv) {
     { double ph = 0; for (long i = 0; i < 3 * sr / 256; i++) { for (int k = 0; k < 256; k++) { double env = 0.15 + 0.6 * std::fabs(std::sin(i * 256.0 / sr * 2.2)); float v = (float)(env * std::sin(ph)); ph += 0.05; in[2 * k] = in[2 * k + 1] = v; } std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(200)); if (i % 5 == 0) { now += 33; app.tick(now); } } }
     ui.frame(now); dump("mic_rec");
     app.micSample(); in.assign(512, 0.f); run(2.0); app.tick(now + 100);
-    tapAt(176 + 8 + 100, 44 + 8 + 66 + 142 + 6 + 10 + 12 + 17); ui.frame(now); dump("library");
+    tapAt(176 + 8 + 100, 74 + 8 + 66 + 142 + 6 + 10 + 12 + 17); ui.frame(now); dump("library");
+    ui.touch(0, 5, 5, now); ui.touch(2, 5, 5, now); ui.frame(now);
+    app.selectTrack(0); tab(SamplerApp::P_TAPEV); ui.frame(now); dump("tape_view");
+    tapAt(232, 22); ui.frame(now); dump("clear_ask");
     fprintf(f, "]}\n"); fclose(f);
     return 0;
 }

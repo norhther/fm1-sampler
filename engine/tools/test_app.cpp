@@ -67,6 +67,7 @@ int main() {
     int wavs = 0; { FILE* p = popen("ls /tmp/fm1sampler_t2/sample_*.wav 2>/dev/null | wc -l", "r"); if (p) { fscanf(p, "%d", &wavs); pclose(p); } }
     CHECK(wavs == 1, "SAVE wrote the loop into the library (%d files)", wavs);
     app.onMidi(sd, 3); run(0.9); app.onMidi(su, 3); run(0.3);
+    CHECK(app.takeClearAsk(), "holding SAVE asks before clearing"); app.loopClear(); run(0.3);
     CHECK(!app.status().track_has_clip[0] && !app.loopExists(), "holding SAVE cleared the loop");
     { bool any = false; for (int t = 0; t < 8; t++) any |= app.status().track_has_clip[t]; CHECK(!any, "...and every other track's loop"); }
     // microphone sample
@@ -81,7 +82,9 @@ int main() {
     app.selectTrack(4); app.importFile("/tmp/fm1sampler_t2/sample_FromDisk.wav"); run(2.0);
     CHECK(app.hasSample(4) && app.sampleLabel(4) == "sample_FromDisk", "import from disk loads into the selected track (%s)", app.sampleLabel(4).c_str());
     // presets audition
-    app.selectTrack(4); size_t pm = all.size(); enc(6, 1); run(1.5); CHECK(rmsFrom(pm) > 0.002, "browsing plays the sample (rms %.4f)", rmsFrom(pm));
+    app.selectTrack(4); size_t pq = all.size(); enc(6, 1); run(1.5); CHECK(rmsFrom(pq) < 0.002, "browsing is silent while AUDITION is off (rms %.4f)", rmsFrom(pq));
+    app.setAudition(true);
+    app.selectTrack(4); size_t pm = all.size(); enc(6, 1); run(1.5); CHECK(rmsFrom(pm) > 0.002, "browsing plays the sample with AUDITION on (rms %.4f)", rmsFrom(pm));
     // DSP units: offline stretch / pitch and the slicer
     {
         const int N = 44100; std::vector<float> sine((size_t)N * 2);

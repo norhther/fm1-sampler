@@ -1058,6 +1058,7 @@ int main() {
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TOMB, "SEQ again: tombola");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PADS, "SEQ again: pads");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TAPEV, "SEQ again: tape view");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ again: back to the pattern");
         app.gotoPage(SamplerApp::P_FX);
     }
@@ -1122,7 +1123,7 @@ int main() {
         CHECK(std::fabs(L - 4.0 * sr) < 2 && std::fabs(app.status().bpm - 120.f) < 0.6f && app.status().loopBars == 2, "take snapped to 2 bars: %.0f samples (expect %d), %.0f bpm", L, 4 * sr, app.status().bpm);
         app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].step(5); } run(0.1);
         CHECK(std::fabs(app.status().bpm - 120.f) < 0.6f, "tempo is locked while a loop exists (%.0f)", app.status().bpm);
-        btn(SamplerApp::SAVE); app.onMidi((uint8_t[]){0x91, (uint8_t)SamplerApp::SAVE, 100}, 3); run(0.9); app.onMidi((uint8_t[]){0x81, (uint8_t)SamplerApp::SAVE, 100}, 3); run(0.3);
+        btn(SamplerApp::SAVE); app.onMidi((uint8_t[]){0x91, (uint8_t)SamplerApp::SAVE, 100}, 3); run(0.9); app.onMidi((uint8_t[]){0x81, (uint8_t)SamplerApp::SAVE, 100}, 3); run(0.3); CHECK(app.takeClearAsk(), "a SAVE hold asks before clearing"); app.loopClear(); run(0.3);
         CHECK(!app.loopExists(), "loops cleared");
         app.gotoPage(SamplerApp::P_TEMPO);
         { auto k = app.knobs(); k[0].set((90.f - 30.f) / 270.f); k[3].set(0.f); } run(0.2);
@@ -1195,7 +1196,7 @@ int main() {
         run(0.9);
         CHECK(app.status().freeRecording && app.status().countBeats == 0, "the take starts when the bar is over");
         run(1.0); btn(SamplerApp::REC); run(0.3);
-        { const uint8_t d[3] = {0x91, (uint8_t)SamplerApp::SAVE, 100}, u[3] = {0x81, (uint8_t)SamplerApp::SAVE, 100}; app.onMidi(d, 3); run(0.9); app.onMidi(u, 3); run(0.3); }
+        { const uint8_t d[3] = {0x91, (uint8_t)SamplerApp::SAVE, 100}, u[3] = {0x81, (uint8_t)SamplerApp::SAVE, 100}; app.onMidi(d, 3); run(0.9); app.onMidi(u, 3); run(0.3); CHECK(app.takeClearAsk(), "a SAVE hold asks before clearing"); app.loopClear(); run(0.3); }
         CHECK(!app.loopExists(), "loop cleared again");
         // count-in before a sequencer recording
         if (app.status().playing) { btn(SamplerApp::PLAY); run(0.2); }
@@ -1293,6 +1294,22 @@ int main() {
         run(5.0);
         CHECK(app.status().bounceDone == done1 + 1 && app.status().bounce == 0 && std::fabs(app.status().loopSamples - 2.0 * sr) < 2, "...and ends after one cycle without changing the loop");
         app.loopClear(); run(0.3); stop();
+    }
+    {   // global undo / redo: pattern edits on two tracks, taken back in the order they were made
+        Session& g = app.session(); Session::SeqView nv[2] = {{0, 48, 60, 100}, {96, 48, 64, 100}}; Session::SeqView buf[kSeqMax];
+        g.seqSet(6, nv, 1); g.seqSet(7, nv, 2); run(0.2);
+        CHECK(app.status().globalUndoN >= 2, "two pattern edits are in the global log (%d)", app.status().globalUndoN);
+        app.globalUndo(); run(0.2);
+        CHECK(g.seqNotes(7, buf, kSeqMax) == 0 && g.seqNotes(6, buf, kSeqMax) == 1, "UNDO takes back the last edit, on track 8");
+        app.globalUndo(); run(0.2);
+        CHECK(g.seqNotes(6, buf, kSeqMax) == 0, "...then the one before, on track 7");
+        app.globalRedo(); app.globalRedo(); run(0.2);
+        CHECK(g.seqNotes(6, buf, kSeqMax) == 1 && g.seqNotes(7, buf, kSeqMax) == 2 && app.status().globalRedoN == 0, "REDO brings both back in order");
+        app.globalUndo(); app.globalUndo(); run(0.2);
+    }
+    {   // the tape is only erased after the dialog: the CLEAR button opens it, the FM-1 SAVE hold asks for it too
+        SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(5000);
+        CHECK(!app.takeClearAsk(), "no clear request without a SAVE hold");
     }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;

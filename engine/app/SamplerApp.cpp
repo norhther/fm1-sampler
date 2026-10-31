@@ -14,7 +14,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -70,10 +70,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_KEY, P_SAVE, P_LEN, P_TEQ, P_DUCK}};
+    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TAPEV}, {P_MIX, P_KEY, P_SAVE, P_LEN, P_TEQ, P_DUCK}};
     return p[m & 3];
 }
-int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 ? 6 : (m & 3) == 0 ? 8 : (m & 3) == 3 ? 6 : 4; }
+int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 ? 7 : (m & 3) == 0 ? 8 : (m & 3) == 3 ? 6 : 4; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -782,7 +782,7 @@ void SamplerApp::tick(uint32_t now) {
     if (st_.loopSamples != lastLoopSamples_) { lastLoopSamples_ = st_.loopSamples; tempo_ = st_.bpm; }   // a take or a clear changed the tempo
     if (now - lastLoss_ > 4000 && now - lastRaise_ > 2000 && gap_ > 16) { gap_ = std::max<uint32_t>(16, gap_ * 9 / 10); lastRaise_ = now; }
     if (now - lastPing_ >= 500) { lastPing_ = now; pingId_ = (pingId_ + 1) & 0x3fff; sysex(5, n14(pingId_)); }
-    if (saveHeld_ && !saveHoldDone_ && now - saveDownAt_ > 700) { saveHoldDone_ = true; loopClear(); }
+    if (saveHeld_ && !saveHoldDone_ && now - saveDownAt_ > 700) { saveHoldDone_ = true; clearAsk_ = true; say("CLEAR THE TAPE? ANSWER ON THE PHONE"); }
     if (seqHeld_ && !seqRecStarted_ && now - seqDownAt_ > 300) {   // SEQ held: the pattern records what is played
         seqRecStarted_ = true; gotoPage(P_SQ); ts_[track_].seqState = 2; applyPattern(track_); say("RECORDING: PLAY KEYS");
     }

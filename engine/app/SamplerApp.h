@@ -23,7 +23,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -72,6 +72,14 @@ public:
     void transportPlay();
     void loopRecord();                            // REC: arm / end the first take, or toggle overdub once a loop exists
     // sequencer (also used by the phone's piano roll)
+    // ---- the global strip: undo / redo over every track, the tempo, the tape ----
+    void globalUndo() { s_.globalUndo(); say("UNDO"); }
+    void globalRedo() { s_.globalRedo(); say("REDO"); }
+    float tempoNow() const { return st_.loopSamples > 0 ? (float)st_.bpm : tempo_; }
+    bool tempoLocked() const { return st_.loopSamples > 0; }
+    void tempoStep(int d) { setTempo(tempo_ + d); }   // says so when the loop holds the tempo
+    void clearTrackLoop(int t) { s_.clipClear(t); say("TRACK " + std::to_string(t + 1) + " TAPE CLEARED"); }
+    bool takeClearAsk() { const bool b = clearAsk_; clearAsk_ = false; return b; }   // the SAVE hold on the FM-1 wants the clear dialog of the phone
     void seqUndo() { s_.seqUndo(track_); say("UNDO"); }
     void seqRedo() { s_.seqRedo(track_); say("REDO"); }
     void seqClear() { s_.seqClear(track_); say("PATTERN CLEARED"); }
@@ -229,7 +237,7 @@ private:
     
     uint32_t backupAt_ = 0;
     int midiSync_ = 0; uint64_t clkLast_ = 0, clkWindowStart_ = 0; int clkCount_ = 0; uint64_t tapLast_ = 0; double tapAvg_ = 0; int tapN_ = 0; bool extPlaying_ = false;
-    bool phoneOut_ = false, audition_ = false;
+    bool phoneOut_ = false, audition_ = false, clearAsk_ = false;
     int theme_ = 0; bool fullscreen_ = false; void loadSettings(); void saveSettings();
     std::string project_ = "autosave"; uint32_t autosaveAt_ = 0, loadedAt_ = 0; bool tapeDirty_ = false, loading_ = false, wantMidi_ = false, anyRec_ = false;
     int lastBounceSeen_ = 0; double lastLoopSeen_ = 0; std::string sharePath_, pendingShare_; uint32_t pendingShareAt_ = 0;

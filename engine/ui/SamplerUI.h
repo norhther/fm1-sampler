@@ -72,6 +72,8 @@ private:
     // a finger on the grid: a new note being stretched, or an existing one being resized (tap = remove)
     struct NoteDrag { bool on = false, existing = false, moved = false; int tick = 0, note = 0, len = 0, origLen = 0; } drag_;
     int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
+    int clearAsk_ = 0; float tempoDragX_ = 0;   // the tape clear dialog: 0 closed, 1 the whole tape, 2 + n track n
+    void globalBar(Rect r); void tapeView(Rect r); void clearSheet();
     uint32_t clearAt_ = 0;   // CLEAR asks twice
     bool songOpen_ = false, copyArm_ = false; bool projOpen_ = false; int projSel_ = -1; float projScroll_ = 0, projLastY_ = 0, projMoved_ = 0; uint32_t projDelAt_ = 0; std::vector<std::string> projList_; Rect projListRect_{0, 0, 0, 0};
     // SELECT mode of the roll: notes picked by tap or by a box, edited together

@@ -63,7 +63,8 @@ struct Session::Impl {
         static constexpr int kDelayMax = 32;
         Delayed delayed[kDelayMax]; int nDelayed = 0; int lastDelay[128] = {}, lastShift[128] = {};
         std::unique_ptr<MasterFx> fx;   // per track effects (DJ filter, chorus, gate, crush ...)
-        explicit Track(int sr) : tape(sr), fx(new MasterFx(sr, 1.f)) {}
+        int idx = 0;   // which track this is (the global undo log tells tracks apart)
+        explicit Track(int sr, int i = 0) : idx(i), tape(sr), fx(new MasterFx(sr, 1.f)) {}
     };
 
     int sr;
@@ -132,7 +133,7 @@ struct Session::Impl {
     std::vector<float> bus, tmp, sendBus[2], wet;
 
     explicit Impl(int rate) : sr(rate), reverb(rate), delay(rate), mfx(rate) {
-        for (int i = 0; i < kTracks; i++) tracks.emplace_back(new Track(rate));
+        for (int i = 0; i < kTracks; i++) tracks.emplace_back(new Track(rate, i));
         bus.resize(kBlock * 2); tmp.resize(kBlock * 2); wet.resize(kBlock * 2); sendBus[0].resize(kBlock * 2); sendBus[1].resize(kBlock * 2);
         for (auto& a : a_lpk) a = 0.f;
         for (auto& r : a_tpk) for (auto& a : r) a = 0.f;
@@ -264,7 +265,15 @@ struct Session::Impl {
     }
     // undo / redo of whole patterns: a snapshot is taken before every edit
     static void snapOf(const Track& t, Track::SeqSnap& s) { std::copy(t.sn, t.sn + t.snCount, s.sn); s.count = t.snCount; s.bars = t.seqBars; }
+    // global undo / redo: one log over every track, pattern edits and sample edits in the order they were made (a stale entry whose own history is gone is skipped)
+    struct GEntry { int track; bool sample; };
+    static constexpr int kGLog = 64;
+    GEntry glog[kGLog], gredo[kGLog]; int glogN = 0, gredoN = 0; std::atomic<int> a_gUndoN{0}, a_gRedoN{0};
+    static void gPush(GEntry* a, int& n, GEntry e) { if (n == kGLog) { std::move(a + 1, a + kGLog, a); n--; } a[n++] = e; }
+    void gPublish() { a_gUndoN = glogN; a_gRedoN = gredoN; }
+    void gRecord(int track, bool sample) { gPush(glog, glogN, {track, sample}); gredoN = 0; gPublish(); }
     void checkpoint(Track& t) {
+        gRecord(t.idx, false);
         if (t.histN == Track::kHist) { std::move(t.hist + 1, t.hist + Track::kHist, t.hist); t.histN--; }
         snapOf(t, t.hist[t.histN++]); t.redoN = 0;
     }
@@ -274,19 +283,21 @@ struct Session::Impl {
         for (int& o : t.openIdx) o = 0;
         seqRelease(t); publishSeq(ti);
     }
-    void seqUndoStep(int ti) {
+    bool seqUndoStep(int ti) {
         Track& t = *tracks[(size_t)ti];
-        if (t.histN == 0) return;
+        if (t.histN == 0) return false;
         if (t.redoN == Track::kHist) { std::move(t.redo + 1, t.redo + Track::kHist, t.redo); t.redoN--; }
         snapOf(t, t.redo[t.redoN++]);
         restoreSnap(ti, t.hist[--t.histN]);
+        return true;
     }
-    void seqRedoStep(int ti) {
+    bool seqRedoStep(int ti) {
         Track& t = *tracks[(size_t)ti];
-        if (t.redoN == 0) return;
+        if (t.redoN == 0) return false;
         if (t.histN == Track::kHist) { std::move(t.hist + 1, t.hist + Track::kHist, t.hist); t.histN--; }
         snapOf(t, t.hist[t.histN++]);
         restoreSnap(ti, t.redo[--t.redoN]);
+        return true;
     }
     int stepTicks() const { const int g = gridTicks(seqGrid); return g ? g : kPpq / 4; }   // step entry advances by the quantize grid (1/16 when it is off)
     void seqRemove(Track& t, int i) { for (int k = i; k + 1 < t.snCount; k++) t.sn[k] = t.sn[k + 1]; t.snCount--; for (int& o : t.openIdx) if (o > i + 1) o--; else if (o == i + 1) o = 0; }
@@ -904,6 +915,31 @@ void Session::seqSetBars(int t, int b) { if (t >= 0 && t < kTracks) d->post([=] 
 void Session::seqClear(int t) {
     if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; if (tr.snCount > 0) d->checkpoint(tr); d->seqRelease(tr); tr.snCount = 0; d->publishSeq(t); });
 }
+// the user's UNDO / REDO button: the last thing done on any track, pattern or sample (a sample edit is taken back by swapping the old sample in, so the same call redoes it)
+void Session::globalUndo() {
+    d->post([this] {
+        while (d->glogN > 0) {
+            const Impl::GEntry e = d->glog[--d->glogN];
+            const bool ok = e.sample ? (bool)d->tracks[(size_t)e.track]->prevOrig : d->seqUndoStep(e.track);
+            if (!ok) continue;
+            if (e.sample) undoEdit(e.track);
+            Impl::gPush(d->gredo, d->gredoN, e); break;
+        }
+        d->gPublish();
+    });
+}
+void Session::globalRedo() {
+    d->post([this] {
+        while (d->gredoN > 0) {
+            const Impl::GEntry e = d->gredo[--d->gredoN];
+            const bool ok = e.sample ? (bool)d->tracks[(size_t)e.track]->prevOrig : d->seqRedoStep(e.track);
+            if (!ok) continue;
+            if (e.sample) undoEdit(e.track);
+            Impl::gPush(d->glog, d->glogN, e); break;
+        }
+        d->gPublish();
+    });
+}
 void Session::seqUndo(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqUndoStep(t); }); }
 void Session::seqRedo(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqRedoStep(t); }); }
 void Session::seqToggle(int t, int tick, int len, int note, int vel) { if (t >= 0 && t < kTracks && note >= 0 && note < 128) d->post([=] { d->seqToggleNote(t, tick, len, note, vel); }); }
@@ -1128,7 +1164,7 @@ void Session::editSample(int t, int op) {
             (void)sr;
             d->post([this, t, op, orig, out, peaks = std::move(peaks), slices = std::move(slices)]() mutable {
                 Impl::Track& tr = *d->tracks[(size_t)t]; if (!tr.sampler || tr.sampler->original() != orig) return;
-                tr.prevOrig = orig;
+                tr.prevOrig = orig; d->gRecord(t, true);
                 if (op == EDIT_TRIM) { tr.rangeA = 0.f; tr.rangeB = 1.f; tr.sampler->setRange(0.f, 1.f); }
                 { std::lock_guard<std::mutex> l(tr.infoMtx); tr.peaks = peaks; tr.frames = out->frames; }
                 tr.sampler->replaceOriginal(out, std::move(peaks), std::move(slices));
@@ -1283,6 +1319,7 @@ Session::Status Session::status() const {
     s.beatPos = d->a_beat; s.metro = d->a_metro; s.countBeats = d->a_countBeats; s.bounce = d->a_bounce; s.bounceDone = d->a_bounceDone;
     for (int i = 0; i < kTracks; i++) { s.seqCursor[i] = d->a_seqCursor[i]; s.seqUndoN[i] = d->a_seqUndoN[i]; s.seqRedoN[i] = d->a_seqRedoN[i]; }
     for (int i = 0; i < kTracks; i++) { s.seqState[i] = d->a_seqState[i]; s.seqBars[i] = d->a_seqBars[i]; s.seqCount[i] = d->a_seqN[i]; }
+    s.globalUndoN = d->a_gUndoN; s.globalRedoN = d->a_gRedoN;
     s.freeRecording = d->a_free; s.freeArmed = d->a_freeArmed; s.freeSeconds = d->a_freeSec;
     s.sampleState = d->a_sampleState; s.sampleTrack = d->a_sampleTrack; s.sampleSeconds = d->a_sampleSec; s.inputPeak = d->a_inPeak;
     s.sampleVersion = d->a_sampleVersion; s.sampleFails = d->a_sampleFails; s.samplePending = d->a_pending;
