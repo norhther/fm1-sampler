@@ -155,6 +155,7 @@ void Sampler::fadeOut(Voice& v) {
 }
 void Sampler::noteOff(int note) {
     if (mode_ == ONESHOT && synth_ < 0) return;   // always plays out
+    if (mode_ == KIT && chopFull_ && synth_ < 0) return;   // so does a whole chop
     if (synth_ >= 0 && kSynths[synth_].engine == 3) return;   // so does a drum hit
     for (auto& v : voices_) if (v.on && v.gate && v.note == note) { v.gate = false; v.env.gateOff(); }
 }

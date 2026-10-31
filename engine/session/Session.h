@@ -76,6 +76,7 @@ public:
     enum EditOp { EDIT_REVERSE, EDIT_NORMALIZE, EDIT_TRIM, EDIT_FADE_IN, EDIT_FADE_OUT, EDIT_UNDO };
     void editSample(int track, int op);                                       // REVERSE, NORMALIZE, TRIM to the play window, FADE IN / OUT (30 ms); UNDO takes the last edit back
     void undoEdit(int track);
+    void setChopFull(int track, bool on);                                     // KIT: a key plays its whole chop (true) / the chop sounds while the key is held (false)
     void setSliceStarts(int track, const std::vector<float>& starts);        // KIT: pad starts placed by hand (0..1 of the sample)
     void setSampleLevel(int track, float level, float fineCents);            // level 0..3, fine tune in cents
     void resample(int bars);                                                  // the master output of `bars` bars becomes a new sample (loaded like a microphone take)

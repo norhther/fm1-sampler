@@ -32,6 +32,7 @@ public:
     bool isSynth() const { return synth_ >= 0; }
     float rootGuess() const { return rootGuess_; }   // pitch of the sample as a MIDI note (0 = not pitched)
     void setRoot(int midi) { root_ = std::min(108, std::max(12, midi)); }   // the key that plays the sample at its own pitch (60 = C4, how the library is tuned)
+    void setChopFull(bool on) { chopFull_ = on; }   // KIT: a pad plays its whole chop when the key goes down (true), or only as long as the key is held (false)
     const std::vector<int>& slices() const { return slices_; }
     void setSlices(std::vector<int> s) { if (s.size() >= 2) slices_ = std::move(s); }
     // per pad (KIT mode and the synth drum kits: pad = note - 60 mod 16): level, tuning in semitones, decay length, pan, choke group (0 = none; a pad cuts the sounding pads of its group)
@@ -81,7 +82,7 @@ private:
     int sr_;
     std::shared_ptr<const SampleBuf> orig_, proc_;
     float procA_ = 0, procB_ = 1, rangeA_ = 0, rangeB_ = 1, bend_ = 0, atk_ = 0.01f, dec_ = 0.3f, sus_ = 0.8f, rel_ = 0.3f;
-    int mode_ = MELODIC; std::vector<int> slices_; std::string label_; std::vector<float> peaks_;
+    bool chopFull_ = false; int mode_ = MELODIC; std::vector<int> slices_; std::string label_; std::vector<float> peaks_;
     Voice voices_[kVoices]; std::vector<std::unique_ptr<PaulStream>> paul_; bool paulBusy_[kVoices] = {};
     uint32_t bornCounter_ = 0, rng_ = 7;
     bool loadSynth(int idx);

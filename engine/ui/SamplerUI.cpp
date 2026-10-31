@@ -109,6 +109,7 @@ void SamplerUI::frame(uint32_t now) {
     rrect({0, 0, W_, H_}, 0, BG);
     const float tb = 44, left = 176, right = 252, y0 = tb + MARGIN, h = H_ - tb - 2 * MARGIN;
     if (seqFull_ && app_.page() == SamplerApp::P_SQ) { seqFullScreen(); }
+    else if (chopScreen_) { chopFullScreen(); }
     else {
     topBar({0, 0, W_, tb});
     const bool lh = app_.leftHanded();   // left-handed: the pages on the left, the tracks on the right
@@ -211,6 +212,45 @@ void SamplerUI::trackList(Rect r) {   // eight rows; the tracks from 9 on make a
     if (canAdd) button({r.x, r.y + r.h - addH, r.w, addH}, "+ ADD TRACK", false, [this] { app_.addTrack(); }, 10.f);
 }
 
+// the waveform: the peaks (the playback window bright), the KIT pad marks and the voices that are sounding
+void SamplerUI::waveDraw(Rect w) {
+    const int t = app_.track(); const auto ts = app_.state(t); const int bins = std::max(20, (int)(w.w / 3));
+    auto pk = app_.peaks(t, bins);
+    const float cy = w.y + w.h / 2, bw = w.w / bins;
+    for (int i = 0; i < (int)pk.size(); i++) {
+        const float pos = (i + 0.5f) / bins, v = std::min(1.f, pk[(size_t)i] * 1.1f);
+        const bool in = pos >= ts.start && pos <= ts.end;
+        rrect({w.x + i * bw + 0.5f, cy - std::max(1.f, v * (w.h / 2 - 8)), std::max(1.f, bw - 1), std::max(2.f, v * (w.h - 16))}, 0, in ? TEXT : OUTLINE);
+    }
+    if (pk.empty()) text(w.x + w.w / 2, cy, T_BODY, DIM, "NO SAMPLE", 1, false);
+    if (ts.algo == 3 && !app_.isSynth(t)) {   // KIT: where the pads start
+        const auto sl = app_.session().slicesOf(t);
+        for (size_t i = 0; i < sl.size(); i++) { const float sx = w.x + 2 + sl[i] * (w.w - 4); line(sx, w.y + 6, sx, w.y + w.h - 6, theme::withAlpha(ACCENT, 170), 1); text(sx + 3, w.y + w.h - 14, 8.f, ACCENT, std::to_string(i + 1), 0, false); }
+    }
+    for (int j = 0; j < st_.voiceN[t]; j++) {   // where the sounding voices are reading
+        const float vx = w.x + 2 + st_.voicePos[t][j] * (w.w - 4);
+        line(vx, w.y + 22, vx, w.y + w.h - 10, ACCENT, 1.5f);
+        circle(vx, w.y + w.h - 10, 3.5f, ACCENT);
+    }
+}
+
+// KIT: tap the waveform to cut a new pad there, tap a mark to remove it (two stay), drag a mark to move it
+void SamplerUI::chopEdit(Rect w) {
+    const int t = app_.track();
+        auto pts = std::make_shared<std::vector<float>>(app_.session().slicesOf(t));
+        const float wx = w.x + 2, ww = w.w - 4;
+        hit({w.x, w.y + 22, w.w, w.h - 22},
+            [this, pts, wx, ww](float x, float) { chopIdx_ = -1; chopMoved_ = false; int best = -1; float bd = 14.f; for (size_t i = 0; i < pts->size(); i++) { const float d = std::fabs(wx + (*pts)[i] * ww - x); if (d < bd) { bd = d; best = (int)i; } }
+                if (best < 0) { pts->push_back(clamp01((x - wx) / ww)); std::sort(pts->begin(), pts->end()); for (size_t i = 0; i < pts->size(); i++) if (std::fabs(wx + (*pts)[i] * ww - x) < 1.5f) best = (int)i; chopNew_ = true; } else chopNew_ = false;
+                chopIdx_ = best; },
+            [this, pts, wx, ww](float x, float) { if (chopIdx_ < 0 || chopIdx_ >= (int)pts->size()) return; chopMoved_ = true; (*pts)[(size_t)chopIdx_] = clamp01((x - wx) / ww); },
+            [this, pts, t]() {
+                if (chopIdx_ < 0) return;
+                if (!chopMoved_ && !chopNew_ && pts->size() > 2) pts->erase(pts->begin() + chopIdx_);   // a tap on a mark removes it (the last two stay)
+                else if (!chopMoved_ && !chopNew_) return;
+                app_.setSliceStarts(*pts); chopIdx_ = -1; });
+}
+
 void SamplerUI::sampleArea(Rect r) {
     const int t = app_.track();
     const auto ts = app_.state(t);
@@ -225,6 +265,7 @@ void SamplerUI::sampleArea(Rect r) {
     if (app_.page() == SamplerApp::P_PADS) { padsView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_TOMB) { tombolaView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_SQ) { sequencerView({r.x, r.y + 28, r.w, r.h - 28}); return; }   // the sequencer page shows the pattern instead of the waveform, with all the room there is
+    if (!app_.isSynth(t) && !lab.empty() && app_.micState() == 0) button({r.x + r.w - 214, r.y, 130, 26}, "CHOP EDITOR", false, [this] { chopScreen_ = true; if (app_.state(app_.track()).algo != 3) app_.setAlgo(3); }, 10.5f);   // the whole screen for cutting the sound into pads
     // algorithm (a synth has none)
     const float cw = (r.w - 5 * 4) / 6;
     if (app_.isSynth(t)) { text(r.x, r.y + 44, T_CAPTION, DIM, "BUILT-IN SYNTH: ENV, SHAPE, OSC, FILTER, LFO", 0, false); button({r.x + r.w - 116, r.y + 30, 116, 28}, "SAVE PATCH", false, [this] { app_.savePatch(); }, 10.5f); }
@@ -260,39 +301,10 @@ void SamplerUI::sampleArea(Rect r) {
         goto after_wave;
     }
     {
-    auto pk = app_.peaks(t, bins);
-    const float cy = w.y + w.h / 2, bw = w.w / bins;
-    for (int i = 0; i < (int)pk.size(); i++) {
-        const float pos = (i + 0.5f) / bins, v = std::min(1.f, pk[(size_t)i] * 1.1f);
-        const bool in = pos >= ts.start && pos <= ts.end;
-        rrect({w.x + i * bw + 0.5f, cy - std::max(1.f, v * (w.h / 2 - 8)), std::max(1.f, bw - 1), std::max(2.f, v * (w.h - 16))}, 0, in ? TEXT : OUTLINE);
-    }
-    if (pk.empty()) text(w.x + w.w / 2, cy, T_BODY, DIM, "NO SAMPLE", 1, false);
-    if (ts.algo == 3 && !app_.isSynth(t)) {   // KIT: where the pads start
-        const auto sl = app_.session().slicesOf(t);
-        for (size_t i = 0; i < sl.size(); i++) { const float sx = w.x + 2 + sl[i] * (w.w - 4); line(sx, w.y + 6, sx, w.y + w.h - 6, theme::withAlpha(ACCENT, 170), 1); text(sx + 3, w.y + w.h - 14, 8.f, ACCENT, std::to_string(i + 1), 0, false); }
-    }
-    for (int j = 0; j < st_.voiceN[t]; j++) {   // where the sounding voices are reading
-        const float vx = w.x + 2 + st_.voicePos[t][j] * (w.w - 4);
-        line(vx, w.y + 22, vx, w.y + w.h - 10, ACCENT, 1.5f);
-        circle(vx, w.y + w.h - 10, 3.5f, ACCENT);
-    }
+    waveDraw(w);
     }
     after_wave:
-    if (ts.algo == 3 && !app_.isSynth(t) && app_.micState() == 0 && app_.page() != SamplerApp::P_SQ) {   // KIT: tap the waveform to cut a new pad there, tap a mark to remove it, drag a mark to move it
-        auto pts = std::make_shared<std::vector<float>>(app_.session().slicesOf(t));
-        const float wx = w.x + 2, ww = w.w - 4;
-        hit({w.x, w.y + 22, w.w, w.h - 22},
-            [this, pts, wx, ww](float x, float) { chopIdx_ = -1; chopMoved_ = false; int best = -1; float bd = 14.f; for (size_t i = 0; i < pts->size(); i++) { const float d = std::fabs(wx + (*pts)[i] * ww - x); if (d < bd) { bd = d; best = (int)i; } }
-                if (best < 0) { pts->push_back(clamp01((x - wx) / ww)); std::sort(pts->begin(), pts->end()); for (size_t i = 0; i < pts->size(); i++) if (std::fabs(wx + (*pts)[i] * ww - x) < 1.5f) best = (int)i; chopNew_ = true; } else chopNew_ = false;
-                chopIdx_ = best; },
-            [this, pts, wx, ww](float x, float) { if (chopIdx_ < 0 || chopIdx_ >= (int)pts->size()) return; chopMoved_ = true; (*pts)[(size_t)chopIdx_] = clamp01((x - wx) / ww); },
-            [this, pts, t]() {
-                if (chopIdx_ < 0) return;
-                if (!chopMoved_ && !chopNew_ && pts->size() > 2) pts->erase(pts->begin() + chopIdx_);   // a tap on a mark removes it (the last two stay)
-                else if (!chopMoved_ && !chopNew_) return;
-                app_.setSliceStarts(*pts); chopIdx_ = -1; });
-    }
+    if (ts.algo == 3 && !app_.isSynth(t) && app_.micState() == 0 && app_.page() != SamplerApp::P_SQ) chopEdit(w);   // KIT: tap the waveform to cut a new pad there, tap a mark to remove it, drag a mark to move it
     // start / end handles (not while the microphone take is shown)
     for (int h = 0; h < (app_.micState() == 1 || app_.micState() == 2 ? 0 : 2); h++) {   // (SQ page returned earlier)
         const float v = h ? ts.end : ts.start, hx = w.x + 2 + v * (w.w - 4);
@@ -603,6 +615,42 @@ void SamplerUI::seqFullScreen() {
     text(W_ - m, m + h + 12, T_CAPTION, run ? ACCENT : DIM, std::string("PATTERN ") + (run ? (st_.seqRun[t] ? "PLAYING" : "WAITING FOR THE ") + std::string(st_.seqRun[t] ? "" : "BEAT") : "STOPPED") + (st_.seqTrans[t] ? num("  %+.0f ST", st_.seqTrans[t]) : ""), 2, true);
     text(m, m + h + 12, T_CAPTION, DIM, "< BEAT / BEAT > SLIDE THE WHOLE PATTERN: LINE UP THE FIRST BEAT WITH THE METRONOME", 0, false);
     sequencerView({m, m + h + 22, W_ - 2 * m, H_ - 2 * m - h - 22});
+}
+
+// ---- the chop editor on the whole screen: the waveform with its marks (drag to move, tap to add or remove), AUTO / EVEN chops, and one button per chop to hear it ----
+void SamplerUI::chopFullScreen() {
+    const int t = app_.track(); const float m = MARGIN, h = 34, gap = 4;
+    if (app_.isSynth(t) || app_.sampleLabel(t).empty()) { chopScreen_ = false; return; }
+    const auto ts = app_.state(t);
+    static const char* sens[] = {"LOW", "MID", "HIGH"};
+    std::vector<std::pair<std::string, std::function<void()>>> items; std::vector<bool> on;
+    auto add = [&](const std::string& l, bool o, std::function<void()> f) { items.push_back({l, std::move(f)}); on.push_back(o); };
+    add("EXIT", false, [this] { chopScreen_ = false; });
+    add("AUTO CHOP", false, [this] { chopEven_ = false; app_.autoChop(); });
+    add("EVEN CHOP", false, [this] { chopEven_ = true; app_.evenChop(); });
+    add("CHOPS: " + std::to_string(SamplerApp::chopCount(ts.sliceCount)), false, [this] { app_.cycleChopCount(); if (chopEven_) app_.evenChop(); else app_.autoChop(); });
+    add(std::string("SENS: ") + sens[ts.sliceSens < 0.3f ? 0 : ts.sliceSens < 0.6f ? 1 : 2], false, [this] { app_.cycleChopSens(); chopEven_ = false; app_.autoChop(); });
+    add(ts.chopFull ? "KEY: WHOLE CHOP" : "KEY: HOLD", ts.chopFull != 0, [this, ts] { app_.setChopFull(!ts.chopFull); });
+    const float w0 = (W_ - 2 * m - gap * (items.size() - 1)) / items.size();
+    for (size_t i = 0; i < items.size(); i++) button({m + i * (w0 + gap), m, w0, h}, items[i].first, on[i], items[i].second, 9.5f, i == 0);
+    const auto sl = app_.session().slicesOf(t); const int n = std::min<int>(16, (int)sl.size());
+    text(m, m + h + 12, T_CAPTION, DIM, "TAP THE WAVEFORM: NEW CUT. DRAG A MARK: MOVE IT. TAP A MARK: REMOVE IT. THE NUMBERS BELOW PLAY EACH CHOP.", 0, false);
+    text(W_ - m, m + h + 12, T_CAPTION, ACCENT, ts.chopFull ? "A KEY PLAYS THE WHOLE CHOP" : "THE CHOP SOUNDS WHILE THE KEY IS HELD", 2, true);
+    const float padH = 44, wy = m + h + 22;
+    const Rect w{m, wy, W_ - 2 * m, H_ - m - padH - 8 - wy};
+    rrect(w, R_CARD, SURFACE); stroke(w, R_CARD, OUTLINE, 1);
+    waveDraw(w);
+    chopEdit(w);
+    if (n > 0) {
+        const float pw = (W_ - 2 * m - gap * (n - 1)) / n;
+        for (int i = 0; i < n; i++) {   // down plays the chop, up lets it go: what KEY: HOLD / WHOLE CHOP means
+            const Rect c{m + i * (pw + gap), H_ - m - padH, pw, padH};
+            const bool lit = (padMask_ >> i) & 1;
+            rrect(c, R_CONTROL, lit ? ACCENT : SURFACE); stroke(c, R_CONTROL, OUTLINE, 1);
+            text(c.x + c.w / 2, c.y + c.h / 2, 12, lit ? ON_ACCENT : TEXT, std::to_string(i + 1), 1, true);
+            hit(c, [this, i](float, float) { padMask_ |= 1u << i; app_.padHit(i, 100, true); }, [](float, float) {}, [this, i]() { padMask_ &= ~(1u << i); app_.padHit(i, 0, false); });
+        }
+    }
 }
 
 // ---- song: banks of patterns one after the other ----

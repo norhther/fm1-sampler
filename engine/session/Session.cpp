@@ -487,6 +487,7 @@ struct Session::Impl {
         state = std::min(3, std::max(0, state));
         if (state == 2 && t.seqState != 2) checkpoint(t);   // one recording pass = one undo step
         t.stepHeld = 0; for (bool& b : t.stepDown) b = false;
+        const bool wasPlaying = playing;
         if (state == 2) {
             if (seqRecTrack >= 0 && seqRecTrack != ti) { Track& o = *tracks[(size_t)seqRecTrack]; if (o.seqState == 2) { o.seqState = 1; for (int& x : o.openIdx) x = 0; publishSeq(seqRecTrack); } }
             seqRecTrack = ti;
@@ -494,6 +495,7 @@ struct Session::Impl {
         }
         if (state != 2) for (int& x : t.openIdx) x = 0;
         if (state == 0) { seqRelease(t); if (counting && countKind == 2) { counting = false; countKind = 0; } }
+        if (state == 2 && !t.keyTrig) { if (!wasPlaying) { t.seqRunning = true; t.seqPhase = 0; t.seqRan = 0; } else if (!t.seqRunning) t.startPending = true; }   // recording: from a stopped transport the pattern starts with it, from its first tick; while the transport runs a stopped pattern starts on the next beat
         t.seqState = state; publishSeq(ti);
     }
     void seqBarsSet(int ti, int bars) {
@@ -949,6 +951,7 @@ void Session::loadSamplePath(const std::string& path, bool kit, int track) {
     d->a_sampleState = 2;
     d->job([this, path, track, kit] { d->installNew(path, track, kit); });
 }
+void Session::setChopFull(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setChopFull(on); }); }
 void Session::setMode(int t, int m) { if (t >= 0 && t < kTracks) d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setMode(m); }); }
 void Session::setEnv(int t, float a, float dc, float s, float r) { if (t >= 0 && t < kTracks) d->post([=] { if (d->tracks[(size_t)t]->sampler) d->tracks[(size_t)t]->sampler->setEnv(a, dc, s, r); }); }
 void Session::setSampleRange(int t, float a, float b) {

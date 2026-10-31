@@ -95,6 +95,10 @@ public:
     void seqRunToggle() { s_.seqRun(track_, !seqRunning(track_)); }
     void setKeyTrigger(int t, bool on) { ts_[t].keyTrig = on; s_.seqKeyTrigger(t, on); say(on ? "KEYS PLAY THE PATTERN, C4 = AS WRITTEN" : "KEYS PLAY THE SOUND"); }
     void setOneShot(int t, bool on) { ts_[t].seqOne = on; s_.seqOneShot(t, on); say(on ? "PATTERN PLAYS ONCE" : "PATTERN LOOPS"); }
+    static int chopCount(int idx);                      // 4 8 12 16 24 32
+    void autoChop(); void evenChop(); void setChopFull(bool full);   // CHOP: cut at the hits / in equal parts, a key plays the whole chop or only while held
+    void cycleChopCount() { TrackState& x = ts_[track_]; x.sliceCount = (x.sliceCount + 1) % 6; }
+    void cycleChopSens() { TrackState& x = ts_[track_]; x.sliceSens = x.sliceSens < 0.3f ? 0.5f : x.sliceSens < 0.6f ? 0.8f : 0.2f; }
     void setTrigQuant(int t, int q) { ts_[t].trigQ = std::min(2, std::max(0, q)); s_.seqTrigQuant(t, ts_[t].trigQ); }
     void seqNudge(int ticks) { s_.seqNudge(track_, ticks); say(ticks < 0 ? "PATTERN EARLIER" : "PATTERN LATER"); }
     void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
@@ -179,7 +183,7 @@ public:
         float tfEqLow = 0.5f, tfEqMid = 0.5f, tfEqHigh = 0.5f, tfComp = 0.f, duckAmt = 0.f;   // MIX mode: track EQ and compressor, how far the sidechain pushes this track down
         float padVol[16], padPitch[16], padDecay[16]; int padGroup[16] = {}; int selPad = 0;   // per pad of a kit (PADS page)
         TrackState() { for (int i = 0; i < 16; i++) { padVol[i] = 2.f / 3.f; padPitch[i] = 0.5f; padDecay[i] = 0.5f; } }
-        int keyTrig = 0, trigQ = 1, seqOne = 0;      // the keys start the pattern (OP-1 style), and when: at once, on the beat, on the bar
+        int keyTrig = 0, trigQ = 1, seqOne = 0, chopFull = 0;      // the keys start the pattern (OP-1 style), and when: at once, on the beat, on the bar
         int seqState = 0, seqBars = 3;   // sequencer: OFF / PLAY / REC, pattern length - 1 (1..16 bars)
     };
     const TrackState& state(int t) const { return ts_[t]; }

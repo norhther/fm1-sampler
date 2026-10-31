@@ -31,6 +31,13 @@ static double rms(const std::vector<float>& v, size_t from = 0, size_t to = 0) {
 static bool finite(const std::vector<float>& v) { for (float f : v) if (!std::isfinite(f) || std::fabs(f) > 8.f) return false; return true; }
 static double diff(const std::vector<float>& a, const std::vector<float>& b) { double d = 0; for (size_t i = 0; i < a.size(); i++) d += std::fabs(a[i] - b[i]); return d / a.size(); }
 
+// a project starts empty: the tests that were written for the old start (Tape Key, Acoustic, Shiny, TrapKit on tracks 1..4) put those sounds back
+static void demoSounds(SamplerApp& app) {
+    static const char* names[4] = {"Tape Key", "Acoustic", "Shiny", "TrapKit"};
+    for (int t = 0; t < 4; t++) { app.selectTrack(t); for (size_t i = 0; i < app.library().size(); i++) if (app.library()[i].label == names[t]) { app.loadEntry((int)i); break; } }
+    app.selectTrack(0);
+}
+
 static void testGrid() {
     CHECK(snapTick(50, 4, 768) == 48 && snapTick(71, 4, 768) == 48 && snapTick(72, 4, 768) == 96, "snap to 1/16 (50->%d, 72->%d)", snapTick(50, 4, 768), snapTick(72, 4, 768));
     CHECK(snapTick(767, 4, 768) == 0, "snap past the end wraps to 0 (%d)", snapTick(767, 4, 768));
@@ -227,7 +234,7 @@ static void testSynths() {
     // in the app: a Synths group in the library, a track plays one, the envelope follows the patch
     system("rm -rf /tmp/fm1sampler_t6; mkdir -p /tmp/fm1sampler_t6");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t6"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     int first = -1, count = 0; for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].group == "Synths") { if (first < 0) first = i; count++; }
     CHECK(count == kSynthCount, "library has the Synths group (%d)", count);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 0;
@@ -256,7 +263,7 @@ static void testOp1() {
     // the dice: a random pattern in the scale, one undo step
     system("rm -rf /tmp/fm1sampler_t7; mkdir -p /tmp/fm1sampler_t7");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t7"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(0.5); app.setScale(2, 0, 0, 0);   // C major
@@ -300,7 +307,7 @@ static void testTombola() {
     }
     system("rm -rf /tmp/fm1sampler_t8; mkdir -p /tmp/fm1sampler_t8");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t8"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5); app.gotoPage(SamplerApp::P_TOMB);
@@ -330,7 +337,7 @@ static void testSwing() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_t9; mkdir -p /tmp/fm1sampler_t9");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t9"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
@@ -385,7 +392,7 @@ static void testProject() {
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     {
         Session s(sr); s.setDataDir("/tmp/fm1sampler_ta"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-        SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+        SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
         auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
         auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
         run(2.5);
@@ -437,7 +444,7 @@ static void testProject() {
     }
     {   // the next start finds the autosave and goes back to it; a start after a failed restore skips it once
         Session s(sr); s.setDataDir("/tmp/fm1sampler_ta"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-        SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+        SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
         auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
         run(2.0); app.restoreLast(); run(3.0); while (s.busyJobs() > 0) run(0.2); run(1.0);
         CHECK(app.status().seqCount[0] == 4 && app.status().loopSamples > 0 && app.sampleLabel(2) == "Hoover", "a new start comes back to the autosave (%d notes, loop %.0f, track 3 %s)", app.status().seqCount[0], app.status().loopSamples, app.sampleLabel(2).c_str());
@@ -510,7 +517,7 @@ static void testSound() {
     }
     system("rm -rf /tmp/fm1sampler_tb; mkdir -p /tmp/fm1sampler_tb");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tb"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5);
@@ -534,7 +541,7 @@ static void testLook() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_tc; mkdir -p /tmp/fm1sampler_tc");
     {
-        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
         CHECK(app.themeId() == 0 && !app.fullscreen() && theme::BG == theme::argb(20, 20, 26), "the default look is DARK, not full screen");
         uint32_t seen[theme::kThemes]; bool distinct = true;
         for (int i = 0; i < theme::kThemes; i++) { app.setTheme(i); seen[i] = theme::BG; for (int j = 0; j < i; j++) distinct &= seen[j] != seen[i]; }
@@ -549,7 +556,7 @@ static void testLook() {
         app.setTheme(2);
     }
     {   // a new start keeps both
-        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
         CHECK(app.themeId() == 2 && app.fullscreen() && theme::BG == theme::argb(12, 12, 14), "the theme and the full screen are remembered (%s, fullscreen %d)", theme::name(app.themeId()), app.fullscreen());
         app.setTheme(0); app.setFullscreen(false);
     }
@@ -564,7 +571,7 @@ static void testNoteEdit() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_td; mkdir -p /tmp/fm1sampler_td");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_td"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
@@ -631,7 +638,7 @@ static void testPads() {
     }
     system("rm -rf /tmp/fm1sampler_te; mkdir -p /tmp/fm1sampler_te");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_te"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5);
@@ -663,11 +670,12 @@ static void testSampleEdit() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_tf; mkdir -p /tmp/fm1sampler_tf");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tf"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
-    wait(3.0);
+    wait(3.0); for (size_t i = 0; i < app.library().size(); i++) if (app.library()[i].label == "Tape Key") app.loadEntry((int)i);
+    wait(1.5);
     auto head = [&](int t, bool first) { auto p = s.samplePeaksOf(t, 64); float a = 0; for (int i = first ? 0 : 44; i < (first ? 20 : 64); i++) a += p[(size_t)i]; return a; };
     const int frames0 = s.sampleFramesOf(0); const float h0 = head(0, true), t0 = head(0, false);
     CHECK(frames0 > 1000 && h0 > t0, "Tape Key decays: loud start, quiet end (%.2f vs %.2f)", h0, t0);
@@ -700,7 +708,7 @@ static void testMixer() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_tg; mkdir -p /tmp/fm1sampler_tg");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tg"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
@@ -764,7 +772,7 @@ static void testSynthEdit() {
     }
     system("rm -rf /tmp/fm1sampler_th; mkdir -p /tmp/fm1sampler_th");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_th"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5); app.selectTrack(2); app.gotoPage(SamplerApp::P_SYN1);
@@ -796,7 +804,7 @@ static void testBanks() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_ti; mkdir -p /tmp/fm1sampler_ti");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_ti"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
@@ -838,7 +846,7 @@ static void testMidiIn() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_tj; mkdir -p /tmp/fm1sampler_tj");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tj"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5); for (size_t i = 0; i < app.library().size(); i++) if (app.library()[i].label == "Tape Key") app.loadEntry((int)i);
@@ -879,7 +887,7 @@ static void testLock() {
     }
     system("rm -rf /tmp/fm1sampler_tk; mkdir -p /tmp/fm1sampler_tk");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tk"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
@@ -897,7 +905,7 @@ static void testLock() {
 
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 0;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(0.5); app.gotoPage(SamplerApp::P_SQ); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 96, 60 + i); run(0.2);
@@ -1020,7 +1028,7 @@ int main() {
     // ---- app level ----
     system("rm -rf /tmp/fm1sampler_t3; mkdir -p /tmp/fm1sampler_t3");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t3"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 0;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto enc = [&](int i, int d) { uint8_t m[3] = {0xb0, (uint8_t)(16 + i), (uint8_t)(64 + d)}; app.onMidi(m, 3); };
@@ -1330,7 +1338,7 @@ int main() {
         CHECK(!app.takeClearAsk(), "no clear request without a SAVE hold");
     }
     {   // the pads play with several fingers, nothing stays down when the fingers go, QUANTIZE in plain words, the track effects, the first take can be undone
-        Session s3(sr); s3.setDataDir("/tmp/fm1sampler_pads"); s3.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a3(s3, [](const uint8_t*, size_t) {}); a3.setTourDone(true);
+        Session s3(sr); s3.setDataDir("/tmp/fm1sampler_pads"); s3.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a3(s3, [](const uint8_t*, size_t) {}); a3.setTourDone(true); demoSounds(a3);
         std::vector<float> ob(512), ib(512, 0.f); auto run3 = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(ob.begin(), ob.end(), 0.f); s3.process(ob.data(), ib.data(), 256); std::this_thread::sleep_for(std::chrono::milliseconds(1)); a3.tick((uint32_t)(i + 1)); } };
         run3(0.5); a3.gotoPage(SamplerApp::P_PADS); SamplerUI u3(a3); u3.setSize(860, 400, 0, 0); u3.frame(100);
         float p1x = -1, p1y = 0, p2x = -1, p2y = 0;
@@ -1389,7 +1397,7 @@ int main() {
             if (!ok) CHECK(false, "scale %d (%s) has sane steps (%d notes)", i, SamplerApp::scaleName(i), n);
         }
         CHECK(std::string(SamplerApp::scaleName(41)) == "MIN6P" && std::string(SamplerApp::scaleName(22)) == "NEAPM", "42 scales, 20 of them new");
-        Session s5(sr); s5.setDataDir("/tmp/fm1sampler_t5"); s5.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a5(s5, [](const uint8_t*, size_t) {}); a5.setTourDone(true);
+        Session s5(sr); s5.setDataDir("/tmp/fm1sampler_t5"); s5.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a5(s5, [](const uint8_t*, size_t) {}); a5.setTourDone(true); demoSounds(a5);
         std::vector<float> ob(512), ib(512, 0.f), heard; auto run5 = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(ob.begin(), ob.end(), 0.f); s5.process(ob.data(), ib.data(), 256); heard.insert(heard.end(), ob.begin(), ob.end()); std::this_thread::sleep_for(std::chrono::milliseconds(1)); a5.tick((uint32_t)(i + 1)); } };
         run5(0.5);
         a5.setScale(2, 0, 0, 0); CHECK(a5.padNote(0) == 60 && a5.padNote(1) == 62 && a5.padNote(6) == 71 && a5.padNote(7) == 72 && a5.padName(2) == "E4", "the pads play the major scale (%d %d %d %d, pad 3 = %s)", a5.padNote(0), a5.padNote(1), a5.padNote(6), a5.padNote(7), a5.padName(2).c_str());
@@ -1447,7 +1455,7 @@ int main() {
         }
     }
     {   // the pattern on its own: play / stop, the keys as triggers (OP-1 style), the first beat, the full screen editor
-        Session s6(sr); s6.setDataDir("/tmp/fm1sampler_t6b"); s6.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a6(s6, [](const uint8_t*, size_t) {}); a6.setTourDone(true);
+        Session s6(sr); s6.setDataDir("/tmp/fm1sampler_t6b"); s6.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a6(s6, [](const uint8_t*, size_t) {}); a6.setTourDone(true); demoSounds(a6);
         std::vector<float> ob(512), ib(512, 0.f), heard; auto run6 = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(ob.begin(), ob.end(), 0.f); s6.process(ob.data(), ib.data(), 256); heard.insert(heard.end(), ob.begin(), ob.end()); std::this_thread::sleep_for(std::chrono::milliseconds(1)); a6.tick((uint32_t)(i + 1)); } };
         auto level = [&](double sec) { heard.clear(); run6(sec); return rms(heard); };
         run6(1.0); a6.seqSetBarCount(1);
@@ -1478,6 +1486,18 @@ int main() {
         CHECK(a6.status().seqOne[0] && a6.seqRunning(0), "ONE SHOT: PLAY starts the pattern");
         run6(3.0); CHECK(!a6.seqRunning(0) && level(1.0) < 0.002, "...it stops after one pass (rms %.4f)", rms(heard));
         a6.setOneShot(0, false); a6.seqRunToggle(); run6(4.5); CHECK(a6.seqRunning(0), "LOOPS: it keeps going past one pass");
+        // CHOP: auto / even chops, and a key that plays the whole chop or only while it is held
+        a6.seqRunToggle(); run6(0.3); a6.setSeqState(0); run6(0.2);
+        for (size_t i = 0; i < a6.library().size(); i++) if (a6.library()[i].label == "Boom Bap Kit") a6.loadEntry((int)i);
+        run6(2.0); a6.setAlgo(3); run6(0.3);
+        a6.evenChop(); run6(0.3); { const auto sl = s6.slicesOf(0); CHECK(sl.size() == 16 && std::fabs(sl[1] - 1.f / 16.f) < 0.001f && std::fabs(sl[8] - 0.5f) < 0.001f, "EVEN CHOP: 16 equal chops (%zu)", sl.size()); }
+        a6.autoChop(); run6(0.3); { const auto sl = s6.slicesOf(0); CHECK(sl.size() == 16, "AUTO CHOP: cut at the hits (%zu chops)", sl.size()); }
+        a6.setChopFull(false); run6(0.2);
+        a6.playNote(60, true); run6(0.1); a6.playNote(60, false); heard.clear(); run6(1.0);
+        { std::vector<float> tail(heard.begin() + (long)(0.6 * sr) * 2, heard.end()); CHECK(rms(tail, 0, tail.size()) < 0.003, "KEY: HOLD: the chop stops with the key (rms %.4f)", rms(tail, 0, tail.size())); }
+        a6.setChopFull(true); run6(0.2);
+        a6.playNote(60, true); run6(0.1); a6.playNote(60, false); heard.clear(); run6(0.5);
+        CHECK(rms(heard, 0, heard.size()) > 0.01, "KEY: WHOLE CHOP: it keeps sounding after the key is up (rms %.4f)", rms(heard, 0, heard.size()));
         // the TRIGGER page
         a6.gotoPage(SamplerApp::P_TRIG); { auto k = a6.knobs(); int v = 0; for (auto& kn : k) v += kn.valid; CHECK(v == 4 && SamplerApp::modeOf(SamplerApp::P_TRIG) == 2, "the TRIGGER page: four knobs, in the SEQ tab"); }
         // the full screen editor

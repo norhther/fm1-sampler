@@ -279,7 +279,11 @@ void SamplerApp::resampleNow() {
     const int bars = st_.loopSamples > 0 ? st_.loopBars : seqBarsOf(track_);
     mic_ = 3; micTrack_ = track_; s_.resample(bars); say("RESAMPLING " + std::to_string(bars) + (bars == 1 ? " BAR..." : " BARS..."));
 }
-void SamplerApp::applyAlgo(int t) { s_.setMode(t, ts_[t].algo); }
+void SamplerApp::applyAlgo(int t) { s_.setMode(t, ts_[t].algo); s_.setChopFull(t, ts_[t].chopFull != 0); }
+int SamplerApp::chopCount(int idx) { static const int c[6] = {4, 8, 12, 16, 24, 32}; return c[std::min(5, std::max(0, idx))]; }
+void SamplerApp::autoChop() { TrackState& x = ts_[track_]; if (x.algo != 3) { x.algo = 3; applyAlgo(track_); } applyShape(track_, true); say("AUTO CHOP: THE HITS OF THE SOUND, UP TO " + std::to_string(chopCount(x.sliceCount))); }
+void SamplerApp::evenChop() { TrackState& x = ts_[track_]; if (x.algo != 3) { x.algo = 3; applyAlgo(track_); } const int n = chopCount(x.sliceCount); std::vector<float> p; for (int i = 0; i < n; i++) p.push_back(i / (float)n); s_.setSliceStarts(track_, p); say(std::to_string(n) + " EVEN CHOPS"); }
+void SamplerApp::setChopFull(bool full) { ts_[track_].chopFull = full; applyAlgo(track_); say(full ? "A KEY PLAYS THE WHOLE CHOP" : "THE CHOP SOUNDS WHILE THE KEY IS HELD"); }
 void SamplerApp::applyEnv(int t) {
     const TrackState& x = ts_[t];
     s_.setEnv(t, 3.f * x.a * x.a, x.d, x.s, 5.f * x.r * x.r);   // seconds (as shown on the screens), sustain level
@@ -387,10 +391,11 @@ SamplerApp::Knob SamplerApp::patternTransport(int t) {
     const int cur = st_.seqState[t] == 2 ? 2 : seqRunning(t) ? 1 : 0;
     k.segs = {"STOP", "PLAY", "REC"}; k.segCur = cur;
     k.value = cur == 2 ? "RECORDING" : cur == 1 ? (st_.seqRun[t] ? "PLAYING" : "WAITING FOR THE BEAT") : "STOPPED"; k.norm = cur / 2.f;
-    k.pick = [this, t](int i) {
-        if (i != 2 && st_.seqState[t] == 2) setSeqState(1);
-        if (i == 0) s_.seqRun(t, false);
-        else { s_.seqRun(t, true); if (i == 2) setSeqState(2); }
+    k.pick = [this, t](int i) {   // the app keeps its own seqState (REC bounces a pattern that plays, the FM-1 screen reads it): it moves with the engine's
+        auto state = [this, t](int v) { ts_[t].seqState = v; applyPattern(t); };
+        if (i == 0) { if (ts_[t].seqState == 2) state(1); s_.seqRun(t, false); }
+        else if (i == 2) state(2);   // REC: the engine starts a stopped pattern, after the count-in when the transport is stopped
+        else { state(1); s_.seqRun(t, true); }
     };
     k.step = [k](int d) { k.pick(std::min(2, std::max(0, k.segCur + (d > 0 ? 1 : -1)))); }; k.set = [k](float v) { k.pick((int)std::lround(v * 2.f)); };
     return k;
