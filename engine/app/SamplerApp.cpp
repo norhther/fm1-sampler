@@ -390,13 +390,29 @@ SamplerApp::Knob SamplerApp::cont(const char* name, float* v, std::function<std:
     k.set = [=](float n) { *v = cl(n); apply(); if (commit) queueCommit(t); };
     return k;
 }
-SamplerApp::Knob SamplerApp::choice(const char* name, int* v, std::vector<std::string> opts, std::function<void()> apply) {
+// STOP / PLAY / REC of the pattern as three buttons: one state out of the two the engine keeps (running or not, and off / play / rec)
+SamplerApp::Knob SamplerApp::patternTransport(int t) {
+    Knob k; k.name = "PATTERN"; k.valid = true; k.isChoice = true;
+    const int cur = st_.seqState[t] == 2 ? 2 : seqRunning(t) ? 1 : 0;
+    k.segs = {"STOP", "PLAY", "REC"}; k.segCur = cur;
+    k.value = cur == 2 ? "RECORDING" : cur == 1 ? (st_.seqRun[t] ? "PLAYING" : "WAITING FOR THE BEAT") : "STOPPED"; k.norm = cur / 2.f;
+    k.pick = [this, t](int i) {
+        if (i != 2 && st_.seqState[t] == 2) setSeqState(1);
+        if (i == 0) s_.seqRun(t, false);
+        else { s_.seqRun(t, true); if (i == 2) setSeqState(2); }
+    };
+    k.step = [k](int d) { k.pick(std::min(2, std::max(0, k.segCur + (d > 0 ? 1 : -1)))); }; k.set = [k](float v) { k.pick((int)std::lround(v * 2.f)); };
+    return k;
+}
+
+SamplerApp::Knob SamplerApp::choice(const char* name, int* v, std::vector<std::string> opts, std::function<void()> apply, bool buttons) {
     Knob k; k.name = name; k.valid = true; k.isChoice = true;
     const int n = (int)opts.size();
     *v = std::min(n - 1, std::max(0, *v));
     k.value = opts[(size_t)*v]; k.norm = n > 1 ? *v / (float)(n - 1) : 0.f;
     k.step = [=](int d) { *v = std::min(n - 1, std::max(0, *v + (d > 0 ? 1 : -1))); apply(); };
     k.set = [=](float x) { *v = std::min(n - 1, std::max(0, (int)std::lround(x * (n - 1)))); apply(); };
+    if (buttons) { k.segs = opts; k.segCur = *v; k.pick = [=](int i) { *v = std::min(n - 1, std::max(0, i)); apply(); }; }   // buttons instead of a slider
     return k;
 }
 
@@ -535,7 +551,7 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         break;
     case P_SQ: {
         std::vector<std::string> grids; for (int g = 0; g < kGrids; g++) grids.push_back(gridName(g));
-        k[0] = choice("PATTERN", &x.seqState, {"OFF", "PLAY", "REC"}, [=] { applyPattern(t); });
+        k[0] = patternTransport(t);
         k[1] = choice("BARS", &x.seqBars, {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"}, [=] { applyPattern(t); });
         k[2] = quantKnob();
         Knob c; c.name = "CLEAR"; c.valid = true; c.isChoice = true;
@@ -577,11 +593,9 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[3] = choice("BEAT REPEAT", &x.tfRepeat, {kRepeat[0], kRepeat[1], kRepeat[2], kRepeat[3], kRepeat[4]}, [=] { applyTrackFx(t); });
         break;
     case P_TRIG: {
-        Knob run; run.name = "PATTERN"; run.valid = true; run.isChoice = true; run.value = seqRunning(t) ? (st_.seqRun[t] ? "PLAYING" : "WAITING") : "STOPPED"; run.norm = seqRunning(t) ? 1.f : 0.f;
-        run.step = [this](int) { seqRunToggle(); }; run.set = [this](float v) { s_.seqRun(track_, v > 0.5f); };
-        k[0] = run;
-        k[1] = choice("KEYS", &x.keyTrig, {"PLAY SOUND", "PLAY PATTERN"}, [=] { setKeyTrigger(t, ts_[t].keyTrig != 0); });
-        k[2] = choice("START ON", &x.trigQ, {"AT ONCE", "THE BEAT", "THE BAR"}, [=] { setTrigQuant(t, ts_[t].trigQ); });
+        k[0] = patternTransport(t);
+        k[1] = choice("KEYS", &x.keyTrig, {"PLAY SOUND", "PLAY PATTERN"}, [=] { setKeyTrigger(t, ts_[t].keyTrig != 0); }, true);
+        k[2] = choice("START ON", &x.trigQ, {"AT ONCE", "THE BEAT", "THE BAR"}, [=] { setTrigQuant(t, ts_[t].trigQ); }, true);
         Knob nu; nu.name = "FIRST BEAT"; nu.valid = true; nu.isChoice = true; nu.value = "< EARLIER  LATER >"; nu.norm = 0.5f;
         nu.step = [this](int d) { seqNudge(d > 0 ? stepTicks() : -stepTicks()); }; nu.set = [this](float v) { if (v < 0.4f) seqNudge(-stepTicks()); else if (v > 0.6f) seqNudge(stepTicks()); };
         k[3] = nu;

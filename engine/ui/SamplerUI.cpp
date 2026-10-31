@@ -429,8 +429,9 @@ void SamplerUI::sequencerView(Rect r) {
     rollZoom_ = std::min(zoomMax, std::max(1.f, rollZoom_)); rollRowsF_ = std::min(60.f, std::max(5.f, rollRowsF_));
     const int rows = (int)std::lround(rollRowsF_), visible = std::max(2 * st, (int)(pt / rollZoom_)); const float zoom = (float)pt / visible;
     const float x0 = roll.x + 2 + keyW, y0 = roll.y + 2 + rulerH, W = roll.w - 4 - keyW, H = roll.h - 4 - rulerH, rh = H / rows;
-    const double playTick = std::fmod(st_.beatPos * kPpq, (double)pt);
-    if (zoom > 1 && (st_.playing || state > 0) && !anyTouch() && now_ - rollTouchAt_ > 3000 && (playTick < rollScroll_ || playTick >= rollScroll_ + visible)) rollScroll_ = (float)(std::floor(playTick / visible) * visible);   // the view pages along with the playhead
+    const int seqPos = st_.seqPos[t];   // where the pattern is, not where the beat clock is: it was launched on a beat of its own, and it can be stopped while the tape runs
+    const double playTick = seqPos >= 0 ? (double)seqPos : 0.0;
+    if (zoom > 1 && seqPos >= 0 && !anyTouch() && now_ - rollTouchAt_ > 3000 && (playTick < rollScroll_ || playTick >= rollScroll_ + visible)) rollScroll_ = (float)(std::floor(playTick / visible) * visible);   // the view pages along with the playhead
     rollScroll_ = std::min((float)(pt - visible), std::max(0.f, rollScroll_));
     rollBase_ = std::min(127.f - rows, std::max(0.f, rollBase_));
     const int base = (int)std::floor(rollBase_); const float sc0 = rollScroll_;   // what is drawn is what a touch lands on, even if the view moves before the finger arrives
@@ -472,7 +473,7 @@ void SamplerUI::sequencerView(Rect r) {
         const int row = base + rows - 1 - drag_.note;
         if (row >= 0 && row < rows) rrect({px(drag_.tick), y0 + row * rh + 1.f, std::max(4.f, (float)drag_.len / visible * W), std::max(3.f, rh - 2)}, 2, ACCENT);
     }
-    if (st_.playing || state > 0) { const float pxx = px(playTick); if (pxx >= x0 && pxx <= x0 + W) line(pxx, y0 - rulerH + 0.f, pxx, y0 + H, ACCENT, 1.5f); }
+    if (seqPos >= 0) { const float pxx = px(playTick); if (pxx >= x0 && pxx <= x0 + W) line(pxx, y0 - rulerH + 0.f, pxx, y0 + H, ACCENT, 1.5f); }
     if (n == 0 && !drag_.on) text(x0 + W / 2, y0 + H / 2, T_BODY, DIM, state == 2 ? "PLAY KEYS: THEY ARE RECORDED" : "TAP A CELL, DRAG SIDEWAYS FOR A LONG NOTE", 1, false);
     text(roll.x + roll.w - 6, roll.y + 2 + rulerH + 9, 8.5f, DIM, zoom > 1.05f ? num("%.1f", zoom) + "X  DRAG THE RULER TO SCROLL" : std::string("PINCH TO ZOOM"), 2, false);
     rollOn_ = true; rollX0_ = x0; rollY0_ = y0; rollW_ = W; rollH_ = H; rollPt_ = pt; rollMinVisible_ = 2 * st;
@@ -563,7 +564,7 @@ void SamplerUI::sequencerView(Rect r) {
         button({ex + sw + gap, sy, sw, slotH}, st_.songOn ? "SONG*" : "SONG", st_.songOn, [this] { songOpen_ = true; }, 9.5f);
     }
     // bars: add or remove one at the end (new bars are empty; the notes behind a removed end are dropped, UNDO brings them back)
-    const float by = r.y + r.h - 38, bwBar = 34, lblW = 64, cpW = 44, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 5 * 6) / 5;
+    const float by = r.y + r.h - 38, bwBar = 34, lblW = 64, cpW = 44, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 4 * 6) / 4;
     const int nb = app_.seqBarsOf(t);
     button({r.x, by, bwBar, 38}, "-", false, [this, nb] { app_.seqSetBarCount(nb - 1); }, 16);
     text(r.x + bwBar + 4 + lblW / 2, by + 13, 13, TEXT, std::to_string(nb) + (nb == 1 ? " BAR" : " BARS"), 1, true);
@@ -572,9 +573,8 @@ void SamplerUI::sequencerView(Rect r) {
     button({r.x + 2 * bwBar + 4 + lblW + 8, by, cpW, 38}, "+COPY", false, [this] { app_.seqAddBarCopy(); }, 9.f);   // a new bar with the notes of the last one
     int bx = 0;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + barsW + 6 + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
-    b(state == 2 ? "STOP" : "REC NOTES", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
-    { const bool run = app_.seqRunning(t); b(run ? (st_.seqRun[t] ? "PATTERN ON" : "WAITING...") : "PATTERN OFF", run, [this] { app_.seqRunToggle(); }); }   // the pattern on its own: PLAY starts it from the first beat on the next beat or bar
-    b("PRINT TO TAPE", false, [this] { app_.seqBounce(); });   // one pass of this pattern recorded on the tape (sets the loop length)
+    b(st_.keyTrig[t] ? "KEY TRIG" : "KEYS", st_.keyTrig[t], [this, t] { app_.setKeyTrigger(t, !st_.keyTrig[t]); }, st_.keyTrig[t]);   // OP-1 style: a key plays the pattern, transposed by its distance from C4. STOP / PLAY / REC are the buttons of the right panel
+    b("TO TAPE", false, [this] { app_.seqBounce(); });   // one pass of this pattern recorded on the tape (sets the loop length)
     b("DICE", false, [this] { app_.seqDice(); });
     b("CLEAR", false, [this] { app_.seqClear(); showUndo("PATTERN CLEARED"); });   // it can be undone: no question, an UNDO that stays a few seconds
 }
@@ -751,6 +751,12 @@ void SamplerUI::pagePanel(Rect r) {
         text(r.x, y + 8, T_CAPTION, DIM, p.name, 0, true);
         text(r.x + r.w, y + 10, T_VALUE, p.isChoice ? ACCENT : TEXT, p.value, 2, true);
         Rect s{r.x, y + 26, r.w, 14};
+        if (!p.segs.empty()) {   // a few choices: one button each, the lit one is the state
+            const float sw = (r.w - 4.f * (p.segs.size() - 1)) / p.segs.size();
+            for (size_t j = 0; j < p.segs.size(); j++)
+                button({r.x + j * (sw + 4), y + 20, sw, 30}, p.segs[j], (int)j == p.segCur, [this, i, j] { auto kk = app_.knobs(); if (kk[(size_t)i].pick) kk[(size_t)i].pick((int)j); }, 9.5f, (int)j == p.segCur);
+            continue;
+        }
         rrect(s, 0, SURFACE); stroke(s, 0, OUTLINE, 1);
         if (p.isChoice) {   // segments are not known here: a notch at the current position
             rrect({s.x + p.norm * (s.w - 8), s.y, 8, s.h}, 0, ACCENT);

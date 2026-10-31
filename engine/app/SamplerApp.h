@@ -31,6 +31,7 @@ public:
         bool valid = false, isChoice = false;
         std::function<void(int)> step;       // encoder detents
         std::function<void(float)> set;      // absolute 0..1 (touch)
+        std::vector<std::string> segs; int segCur = -1; std::function<void(int)> pick;   // buttons instead of a slider: one per choice, the lit one, what a tap does
     };
     using Knobs = std::array<Knob, 4>;
     struct Entry { std::string label, group, path; bool kit; };
@@ -270,7 +271,8 @@ private:
     void setTempo(float bpm);
     void queueCommit(int t);
     Knob cont(const char* name, float* v, std::function<std::string(float)> fmt, std::function<void()> apply, float stepSize = 0.02f, bool commit = false);
-    Knob choice(const char* name, int* v, std::vector<std::string> opts, std::function<void()> apply);
+    Knob patternTransport(int t);
+    Knob choice(const char* name, int* v, std::vector<std::string> opts, std::function<void()> apply, bool buttons = false);
 
     std::string projectDir(const std::string& name) const;
     std::string projectsRoot() const;

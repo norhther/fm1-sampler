@@ -44,7 +44,8 @@ public:
         bool metro;
         int countBeats;          // > 0 while the count-in runs: beats left
         int seqState[kTracks], seqBars[kTracks], seqCount[kTracks];   // sequencer: 0 mute 1 play 2 record 3 step entry, pattern length in bars, notes in the pattern
-        bool seqRun[kTracks], seqPend[kTracks], keyTrig[kTracks]; int seqTrans[kTracks];   // pattern play / stop, a start waiting for the beat, the keys trigger the pattern, its transposition
+        bool seqRun[kTracks], seqPend[kTracks], keyTrig[kTracks]; int seqTrans[kTracks], seqPos[kTracks];   // seqPos: tick inside the pattern, -1 when it is not playing
+          // pattern play / stop, a start waiting for the beat, the keys trigger the pattern, its transposition
         int seqCursor[kTracks];  // step entry cursor, in ticks
         int globalUndoN, globalRedoN;   // the UNDO / REDO button: steps back / forward over every track
         int seqUndoN[kTracks], seqRedoN[kTracks];   // how many steps back / forward are possible

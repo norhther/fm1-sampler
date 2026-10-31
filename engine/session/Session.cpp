@@ -130,7 +130,7 @@ struct Session::Impl {
     std::vector<uint8_t> song; bool songOn = false, songWas = false; int songPos = 0, songTick = 0, songBase = -1;   // song: a chain of pattern banks, one step after the other, for every track
     std::atomic<int> a_countBeats{0}, a_bounce{0}, a_bounceDone{0}, a_seqCursor[kTracks], a_seqUndoN[kTracks], a_seqRedoN[kTracks];
     std::atomic<uint64_t> a_seq[kTracks][kSeqMax]; std::atomic<int> a_seqN[kTracks], a_seqBars[kTracks], a_seqState[kTracks];
-    std::atomic<int> a_seqFlags[kTracks], a_seqTrans[kTracks];   // run | start pending << 1 | key trigger << 2
+    std::atomic<int> a_seqFlags[kTracks], a_seqTrans[kTracks], a_seqPos[kTracks];   // a_seqFlags: run | start pending << 1 | key trigger << 2; a_seqPos: tick inside the pattern that is playing, -1 when it is not
     std::atomic<int> a_voiceN[kTracks]; std::atomic<float> a_voicePos[kTracks][kVoiceMax];
 
     std::vector<float> bus, tmp, sendBus[2], wet;
@@ -143,7 +143,7 @@ struct Session::Impl {
         for (auto& a : a_lfo) a = 0.f;
         for (auto& a : a_voiceN) a = 0;
         for (auto& r : a_seq) for (auto& a : r) a = 0;
-        for (int i = 0; i < kTracks; i++) { a_seqFlags[i] = 1; a_seqTrans[i] = 0; a_seqN[i] = 0; a_seqBars[i] = 1; a_slot[i] = 0; a_slotPending[i] = -1; for (int q = 0; q < kSlots; q++) { a_bankN[i][q] = 0; a_bankBars[i][q] = 1; } a_seqState[i] = 0; a_seqCursor[i] = 0; a_seqUndoN[i] = 0; a_seqRedoN[i] = 0; }
+        for (int i = 0; i < kTracks; i++) { a_seqFlags[i] = 1; a_seqTrans[i] = 0; a_seqPos[i] = -1; a_seqN[i] = 0; a_seqBars[i] = 1; a_slot[i] = 0; a_slotPending[i] = -1; for (int q = 0; q < kSlots; q++) { a_bankN[i][q] = 0; a_bankBars[i][q] = 1; } a_seqState[i] = 0; a_seqCursor[i] = 0; a_seqUndoN[i] = 0; a_seqRedoN[i] = 0; }
         hits.reserve(64);
         worker = std::thread([this] {
             for (;;) {
@@ -894,6 +894,12 @@ struct Session::Impl {
         }
         freeBeat = playing ? pos / spb : freeBeat + n / spb;
         a_beat.store(freeBeat);
+        for (int ti = 0; ti < kTracks; ti++) {   // where each pattern really is: it started on a beat of its own, so it is not the beat clock mod its length
+            const Track& t = *tracks[(size_t)ti];
+            if (!playing || !t.seqRunning || t.seqState == 0) { a_seqPos[ti].store(-1); continue; }
+            const int pt = patTicks(t);
+            a_seqPos[ti].store((int)((((int64_t)(freeBeat * kPpq) - t.seqPhase) % pt + pt) % pt));
+        }
         if (counting) { countLeft -= n; a_countBeats.store((int)std::ceil(std::max(0.0, countLeft) / spb)); if (countLeft <= 0) { endCount(); a_countBeats.store(0); } }
         if (sampling) a_sampleSec = (float)sampleBuf.size() / sr;
     }
@@ -1427,7 +1433,7 @@ Session::Status Session::status() const {
     }
     s.beatPos = d->a_beat; s.metro = d->a_metro; s.countBeats = d->a_countBeats; s.bounce = d->a_bounce; s.bounceDone = d->a_bounceDone;
     for (int i = 0; i < kTracks; i++) { s.seqCursor[i] = d->a_seqCursor[i]; s.seqUndoN[i] = d->a_seqUndoN[i]; s.seqRedoN[i] = d->a_seqRedoN[i]; }
-    for (int i = 0; i < kTracks; i++) { s.seqState[i] = d->a_seqState[i]; { const int f = d->a_seqFlags[i]; s.seqRun[i] = f & 1; s.seqPend[i] = f >> 1 & 1; s.keyTrig[i] = f >> 2 & 1; s.seqTrans[i] = d->a_seqTrans[i]; } s.seqBars[i] = d->a_seqBars[i]; s.seqCount[i] = d->a_seqN[i]; }
+    for (int i = 0; i < kTracks; i++) { s.seqState[i] = d->a_seqState[i]; { const int f = d->a_seqFlags[i]; s.seqRun[i] = f & 1; s.seqPend[i] = f >> 1 & 1; s.keyTrig[i] = f >> 2 & 1; s.seqTrans[i] = d->a_seqTrans[i]; s.seqPos[i] = d->a_seqPos[i]; } s.seqBars[i] = d->a_seqBars[i]; s.seqCount[i] = d->a_seqN[i]; }
     s.globalUndoN = d->a_gUndoN; s.globalRedoN = d->a_gRedoN;
     s.freeRecording = d->a_free; s.freeArmed = d->a_freeArmed; s.freeSeconds = d->a_freeSec;
     s.sampleState = d->a_sampleState; s.sampleTrack = d->a_sampleTrack; s.sampleSeconds = d->a_sampleSec; s.inputPeak = d->a_inPeak;
