@@ -50,6 +50,7 @@ struct Session::Impl {
         // note sequencer pattern (audio thread owns it)
         static constexpr int kSlots = 8;
         int slot = 0, pendingSlot = -1;   // pattern banks A..H: which one is the pattern now, which one starts at the next pattern end
+        int lockCut = 0;   // the filter lock of the last note of the pattern
         bool pskip[kSeqMax] = {};   // the chance of a note was lost: it stays quiet this pass
         SeqNote sn[kSeqMax]; int snCount = 0, seqState = 0, seqBars = 1; bool sounding[128] = {}; int openIdx[128] = {};
         int seqCursor = 0, stepHeld = 0; bool stepDown[128] = {};   // step entry
@@ -79,9 +80,10 @@ struct Session::Impl {
     bool metroOn = false; float metroVol = 0.6f, clickEnv = 0, clickFreq = 1000, clickPh = 0;
     int duckSrc = -1; float duckAmt[kTracks] = {}, duckRel = 0.25f, duckEnv = 0.f; bool duckTrig = false;   // sidechain: a note of the source track pushes the other tracks down
     bool limOn = false; float limCeil = 0.9f, limG = 1.f; std::atomic<int> a_clip{0};   // master limiter; the clip light
+    std::atomic<int> a_clockPulses{0}, a_clockEv{0}; bool clkWas = false;   // MIDI clock out: 24 pulses per beat while the transport runs, start / stop events
     bool resampling = false; std::vector<float> resBuf; int64_t resLeft = 0;   // the master output being recorded into a sample
     uint32_t rngState = 99; uint32_t tombolaSeed = 1; float swing = 0.5f; std::atomic<int> busy{0};   // file jobs in flight (project save / load)
-    int takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
+    int takeBars = 0, takeQuant = 0, seqGrid = 0, seqRecTrack = -1, inQuant = 0;
     // count-in: clicks for countIn bars, then the take (kind 1) or the sequencer recording (kind 2) starts
     int countIn = 0, countKind = 0; bool counting = false; double countLeft = 0;
     // bounce: the pattern of one track is recorded onto its tape clip for exactly one loop cycle
@@ -170,7 +172,7 @@ struct Session::Impl {
     int patTicks(const Track& t) const { return patternTicks(t.seqBars); }
     void publishSeq(int ti) {
         Track& t = *tracks[(size_t)ti];
-        for (int i = 0; i < t.snCount; i++) { const SeqNote& n = t.sn[i]; a_seq[ti][i].store((uint64_t)n.tick | (uint64_t)n.len << 16 | (uint64_t)n.note << 32 | (uint64_t)n.vel << 40 | (uint64_t)std::min<int>(100, n.prob) << 48 | (uint64_t)(std::max<int>(1, std::min<int>(8, n.ratchet)) - 1) << 55 | (uint64_t)(n.nudge + 16) << 58); }
+        for (int i = 0; i < t.snCount; i++) a_seq[ti][i].store(packNote(t.sn[i]));
         for (int i = 0; i < t.snCount; i++) a_bank[ti][t.slot][i].store(a_seq[ti][i].load());
         a_bankN[ti][t.slot].store(t.snCount); a_bankBars[ti][t.slot].store(t.seqBars); a_slot[ti].store(t.slot); a_slotPending[ti].store(t.pendingSlot);
         a_seqN[ti].store(t.snCount); a_seqBars[ti].store(t.seqBars); a_seqState[ti].store(t.seqState); a_seqUndoN[ti].store(t.histN); a_seqRedoN[ti].store(t.redoN);
@@ -206,7 +208,7 @@ struct Session::Impl {
         if (from == to) return;
         Track::SeqSnap src; if (from == t.slot) snapOf(t, src); else src = t.bank[from];
         if (to == t.slot) { checkpoint(t); restoreSnap(ti, src); }
-        else { t.bank[to] = src; for (int i = 0; i < src.count; i++) a_bank[ti][to][i].store((uint64_t)src.sn[i].tick | (uint64_t)src.sn[i].len << 16 | (uint64_t)src.sn[i].note << 32 | (uint64_t)src.sn[i].vel << 40 | (uint64_t)std::min<int>(100, src.sn[i].prob) << 48 | (uint64_t)(std::max<int>(1, std::min<int>(8, src.sn[i].ratchet)) - 1) << 55 | (uint64_t)(src.sn[i].nudge + 16) << 58); a_bankN[ti][to].store(src.count); a_bankBars[ti][to].store(src.bars); }
+        else { t.bank[to] = src; for (int i = 0; i < src.count; i++) a_bank[ti][to][i].store(packNote(src.sn[i])); a_bankN[ti][to].store(src.count); a_bankBars[ti][to].store(src.bars); }
     }
     int slotBars(const Track& t, int slot) const { return slot == t.slot ? (t.snCount ? t.seqBars : 0) : (t.bank[slot].count ? t.bank[slot].bars : 0); }
     int songStepTicks(int slot) const { int bars = 1; for (auto& tr : tracks) bars = std::max(bars, slotBars(*tr, slot)); return patternTicks(bars); }
@@ -254,6 +256,7 @@ struct Session::Impl {
                     if (k == 0) { rngState = rngState * 1664525u + 1013904223u; t.pskip[i] = e.prob < 100 && (int)((rngState >> 8) % 100u) >= e.prob; }   // the chance is rolled once per note, its repeats follow
                     if (t.pskip[i]) continue;
                     if (t.sounding[e.note]) noteTo(t, e.note, 0, h.offset, evs);
+                    t.lockCut = e.cut;   // a note with a filter lock closes the track filter, a note without one lets it go
                     t.sounding[e.note] = true; noteTo(t, e.note, e.vel, h.offset, evs);
                 }
             }
@@ -340,6 +343,7 @@ struct Session::Impl {
                 case Session::OP_PROB: n.prob = (uint8_t)std::min(100, std::max(0, arg)); break;
                 case Session::OP_RATCHET: n.ratchet = (uint8_t)std::min(8, std::max(1, arg)); break;
                 case Session::OP_NUDGE: n.nudge = (int8_t)std::min(15, std::max(-16, arg)); break;
+                case Session::OP_CUT: n.cut = (uint8_t)std::min(127, std::max(0, arg)); break;
             }
         }
         for (int& o : t.openIdx) o = 0;
@@ -493,7 +497,11 @@ struct Session::Impl {
         freeRec = false;
         const double len = pos;
         if (len < 0.25 * sr) { pos = 0; freeBuf.clear(); return; }   // too short: treat as cancelled
-        if (takeQuant > 0) {   // the tempo stays: the take is cut or padded to whole beats / bars
+        if (takeBars > 0) {   // the user said how many bars: the tempo stays and the loop is exactly that long
+            const double spb = samplesPerBeat();
+            loopSamples = (int32_t)std::lround(std::min(takeBars * 4 * spb, 180.0 * sr)); a_loop = loopSamples;
+            loopBars = takeBars; a_bars = takeBars;
+        } else if (takeQuant > 0) {   // the tempo stays: the take is cut or padded to whole beats / bars
             const double spb = samplesPerBeat(), unit = takeQuant == 1 ? spb : 4 * spb;
             const double units = std::max(1.0, std::round(len / unit));
             loopSamples = (int32_t)std::lround(std::min(units * unit, 180.0 * sr)); a_loop = loopSamples;
@@ -650,6 +658,8 @@ struct Session::Impl {
         bool anyEvents;
         std::vector<Arp::Ev> evs;
         songAdvance();
+        if (playing) for (auto& h : hits) if (h.tick % (kPpq / 24) == 0) a_clockPulses.fetch_add(1);
+        if (playing != clkWas) { a_clockEv.fetch_or(playing ? 1 : 2); clkWas = playing; }
         const float duckEnv0 = duckEnv; duckTrig = false;
         for (int ti = 0; ti < kTracks; ti++) {
             Track& t = *tracks[(size_t)ti];
@@ -667,6 +677,8 @@ struct Session::Impl {
                 else if (t.lfo.target == 2) lfoGain = 1.f - t.lfo.depth * (0.5f - 0.5f * v);
                 else lfoPan = v * t.lfo.depth;
             } else t.lfoVal = 0.f;
+            if (!playing || t.seqState == 0) t.lockCut = 0;
+            if (t.lockCut > 0) { filterOn = true; t.filt.set(80.f * std::pow(150.f, (t.lockCut - 1) / 126.f), (float)sr); }
             if (filterOn != t.filtOn) { t.filtOn = filterOn; t.filt.reset(); }
             a_lfo[ti].store(t.lfoVal);
             // notes of the block: live ones at the start, the arpeggiator's with sample accurate offsets
@@ -798,7 +810,7 @@ struct Session::Impl {
         if (playing) {
             const double pos0 = pos;
             pos += n;
-            if (freeRec) a_freeSec = (float)(pos / sr);
+            if (freeRec) { a_freeSec = (float)(pos / sr); if (takeBars > 0 && pos >= takeBars * 4 * samplesPerBeat()) { freeStop(); } }   // the bars asked for are full: the take ends by itself
             else if (loopSamples > 0 && pos >= loopSamples) pos -= loopSamples;
             if (bounceArmed && loopSamples > 0 && pos < pos0) { bounceArmed = false; tracks[(size_t)bounceTrack]->clipRec = true; bounceLeft = loopSamples; a_bounce = 2; }   // recording covers every position of the loop once
         }
@@ -885,6 +897,7 @@ void Session::setRetLevel(int w, float v) { d->post([=] { d->ret[w & 1] = clampf
 // ---- tempo, metronome, sequencer, master fx ----
 void Session::setTempo(float b) { d->post([=] { if (d->loopSamples == 0 && !d->freeRec) { d->bpm = clampf(b, 30.f, 300.f); d->a_bpm = d->bpm; } }); }
 void Session::setMetronome(bool on, float vol) { d->post([=] { d->metroOn = on; d->metroVol = clampf(vol, 0.f, 1.f); d->a_metro = on; }); }
+void Session::setTakeBars(int b) { d->post([=] { d->takeBars = std::min(32, std::max(0, b)); }); }
 void Session::setTakeQuant(int m) { d->post([=] { d->takeQuant = std::min(2, std::max(0, m)); }); }
 void Session::seqSetState(int t, int s) { if (t >= 0 && t < kTracks) d->post([=] { d->seqState(t, s); }); }
 void Session::seqSetBars(int t, int b) { if (t >= 0 && t < kTracks) d->post([=] { d->seqBarsSet(t, b); }); }
@@ -896,7 +909,7 @@ void Session::seqRedo(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqRe
 void Session::seqToggle(int t, int tick, int len, int note, int vel) { if (t >= 0 && t < kTracks && note >= 0 && note < 128) d->post([=] { d->seqToggleNote(t, tick, len, note, vel); }); }
 void Session::seqSet(int t, const SeqView* nv, int n) {
     if (t < 0 || t >= kTracks) return;
-    std::vector<SeqNote> list; for (int i = 0; i < n && i < kSeqMax; i++) list.push_back({(uint16_t)std::max(0, nv[i].tick), (uint16_t)std::max(1, nv[i].len), (uint8_t)std::min(127, std::max(0, nv[i].note)), (uint8_t)std::min(127, std::max(1, nv[i].vel)), (uint8_t)std::min(100, std::max(0, nv[i].prob)), (uint8_t)std::min(8, std::max(1, nv[i].ratchet)), (int8_t)std::min(15, std::max(-16, nv[i].nudge))});
+    std::vector<SeqNote> list; for (int i = 0; i < n && i < kSeqMax; i++) list.push_back({(uint16_t)std::max(0, nv[i].tick), (uint16_t)std::max(1, nv[i].len), (uint8_t)std::min(127, std::max(0, nv[i].note)), (uint8_t)std::min(127, std::max(1, nv[i].vel)), (uint8_t)std::min(100, std::max(0, nv[i].prob)), (uint8_t)std::min(8, std::max(1, nv[i].ratchet)), (int8_t)std::min(15, std::max(-16, nv[i].nudge)), (uint8_t)std::min(127, std::max(0, nv[i].cut))});
     d->post([=] { d->seqSetNotes(t, list); });
 }
 void Session::seqResize(int t, int tick, int note, int len) { if (t >= 0 && t < kTracks) d->post([=] { d->seqResizeNote(t, tick, note, len); }); }
@@ -921,20 +934,20 @@ void Session::seqCopyPattern(int t, int from, int to) { if (t >= 0 && t < kTrack
 int Session::seqSlotNotes(int t, int slot, SeqView* out, int maxNotes, int* bars) const {
     if (t < 0 || t >= kTracks || slot < 0 || slot >= Impl::kSlots) return 0;
     const int n = std::min(maxNotes, std::min(kSeqMax, d->a_bankN[t][slot].load()));
-    for (int i = 0; i < n; i++) { const uint64_t v = d->a_bank[t][slot][i].load(); out[i] = {(int)(v & 0xffff), (int)(v >> 16 & 0xffff), (int)(v >> 32 & 0xff), (int)(v >> 40 & 0xff), (int)(v >> 48 & 0x7f), (int)(v >> 55 & 7) + 1, (int)(v >> 58 & 31) - 16}; }
+    for (int i = 0; i < n; i++) { const SeqNote nn = unpackNote(d->a_bank[t][slot][i].load()); out[i] = {nn.tick, nn.len, nn.note, nn.vel, nn.prob, nn.ratchet, nn.nudge, nn.cut}; }
     if (bars) *bars = d->a_bankBars[t][slot].load();
     return n;
 }
 // a whole pattern into a bank (a project is loaded): the current bank is replaced in place, the others are stored
 void Session::seqSetSlot(int t, int slot, const SeqView* nv, int n, int bars) {
     if (t < 0 || t >= kTracks || slot < 0 || slot >= Impl::kSlots) return;
-    std::vector<SeqNote> list; for (int i = 0; i < n && i < kSeqMax; i++) list.push_back({(uint16_t)std::max(0, nv[i].tick), (uint16_t)std::max(1, nv[i].len), (uint8_t)std::min(127, std::max(0, nv[i].note)), (uint8_t)std::min(127, std::max(1, nv[i].vel)), (uint8_t)std::min(100, std::max(0, nv[i].prob)), (uint8_t)std::min(8, std::max(1, nv[i].ratchet)), (int8_t)std::min(15, std::max(-16, nv[i].nudge))});
+    std::vector<SeqNote> list; for (int i = 0; i < n && i < kSeqMax; i++) list.push_back({(uint16_t)std::max(0, nv[i].tick), (uint16_t)std::max(1, nv[i].len), (uint8_t)std::min(127, std::max(0, nv[i].note)), (uint8_t)std::min(127, std::max(1, nv[i].vel)), (uint8_t)std::min(100, std::max(0, nv[i].prob)), (uint8_t)std::min(8, std::max(1, nv[i].ratchet)), (int8_t)std::min(15, std::max(-16, nv[i].nudge)), (uint8_t)std::min(127, std::max(0, nv[i].cut))});
     d->post([=] {
         Impl::Track& tr = *d->tracks[(size_t)t];
         if (slot == tr.slot) { tr.seqBars = std::min(Impl::kMaxBars, std::max(1, bars)); d->seqSetNotes(t, list); return; }
         Impl::Track::SeqSnap& b = tr.bank[slot]; b.count = 0; b.bars = std::min(Impl::kMaxBars, std::max(1, bars));
         for (auto& e : list) if (b.count < kSeqMax) b.sn[b.count++] = e;
-        for (int i = 0; i < b.count; i++) d->a_bank[t][slot][i].store((uint64_t)b.sn[i].tick | (uint64_t)b.sn[i].len << 16 | (uint64_t)b.sn[i].note << 32 | (uint64_t)b.sn[i].vel << 40 | (uint64_t)std::min<int>(100, b.sn[i].prob) << 48 | (uint64_t)(std::max<int>(1, std::min<int>(8, b.sn[i].ratchet)) - 1) << 55 | (uint64_t)(b.sn[i].nudge + 16) << 58);
+        for (int i = 0; i < b.count; i++) d->a_bank[t][slot][i].store(packNote(b.sn[i]));
         d->a_bankN[t][slot].store(b.count); d->a_bankBars[t][slot].store(b.bars);
     });
 }
@@ -951,7 +964,7 @@ void Session::setQuantize(int g) { d->post([=] { d->seqGrid = std::min(kGrids - 
 int Session::seqNotes(int t, SeqView* out, int maxNotes) const {
     if (t < 0 || t >= kTracks) return 0;
     const int n = std::min(maxNotes, std::min(kSeqMax, d->a_seqN[t].load()));
-    for (int i = 0; i < n; i++) { const uint64_t v = d->a_seq[t][i].load(); out[i] = {(int)(v & 0xffff), (int)(v >> 16 & 0xffff), (int)(v >> 32 & 0xff), (int)(v >> 40 & 0xff), (int)(v >> 48 & 0x7f), (int)(v >> 55 & 7) + 1, (int)(v >> 58 & 31) - 16}; }
+    for (int i = 0; i < n; i++) { const SeqNote nn = unpackNote(d->a_seq[t][i].load()); out[i] = {nn.tick, nn.len, nn.note, nn.vel, nn.prob, nn.ratchet, nn.nudge, nn.cut}; }
     return n;
 }
 void Session::setInputQuant(int g) { d->post([=] { d->inQuant = std::min(kGrids - 1, std::max(0, g)); }); }
@@ -1154,6 +1167,8 @@ void Session::setSliceStarts(int t, const std::vector<float>& pts) {
     });
 }
 void Session::setSampleLevel(int t, float level, float fineCents) { if (t >= 0 && t < kTracks) d->post([=] { if (d->tracks[(size_t)t]->sampler) { d->tracks[(size_t)t]->sampler->setLevel(level); d->tracks[(size_t)t]->sampler->setFine(fineCents); } }); }
+int Session::clockPulses() { return d->a_clockPulses.exchange(0); }
+int Session::clockEvents() { return d->a_clockEv.exchange(0); }
 void Session::setLimiter(bool on, float ceilingDb) { d->post([=] { d->limOn = on; d->limCeil = std::pow(10.f, clampf(ceilingDb, -12.f, 0.f) / 20.f); }); }
 void Session::setDuck(int sourceTrack, float release) { d->post([=] { d->duckSrc = sourceTrack; d->duckRel = clampf(release, 0.02f, 1.5f); }); }
 void Session::setDuckAmount(int t, float amount) { if (t >= 0 && t < kTracks) d->post([=] { d->duckAmt[t] = clampf(amount, 0.f, 1.f); }); }

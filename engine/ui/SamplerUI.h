@@ -72,6 +72,7 @@ private:
     // a finger on the grid: a new note being stretched, or an existing one being resized (tap = remove)
     struct NoteDrag { bool on = false, existing = false, moved = false; int tick = 0, note = 0, len = 0, origLen = 0; } drag_;
     int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
+    uint32_t clearAt_ = 0;   // CLEAR asks twice
     bool songOpen_ = false, copyArm_ = false; bool projOpen_ = false; int projSel_ = -1; float projScroll_ = 0, projLastY_ = 0, projMoved_ = 0; uint32_t projDelAt_ = 0; std::vector<std::string> projList_; Rect projListRect_{0, 0, 0, 0};
     // SELECT mode of the roll: notes picked by tap or by a box, edited together
     int drumView_ = 0;   // the roll as a drum grid: 0 off, 1 pads 1-8, 2 pads 9-16 (one row per pad)

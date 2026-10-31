@@ -49,9 +49,9 @@ public:
         int bounce;              // 0 idle, 1 waiting for the loop start, 2 recording the pattern to tape
         int bounceDone;          // counts up when a bounce finished
     };
-    struct SeqView { int tick, len, note, vel, prob = 100, ratchet = 1, nudge = 0; };
+    struct SeqView { int tick, len, note, vel, prob = 100, ratchet = 1, nudge = 0, cut = 0; };
     struct SeqRef { int tick, note; };   // a note of a pattern is told by its start and its pitch
-    enum SeqOp { OP_DELETE, OP_TRANSPOSE, OP_SHIFT, OP_DUP, OP_VEL, OP_PROB, OP_RATCHET, OP_NUDGE };
+    enum SeqOp { OP_DELETE, OP_TRANSPOSE, OP_SHIFT, OP_DUP, OP_VEL, OP_PROB, OP_RATCHET, OP_NUDGE, OP_CUT };
     struct Lfo { float rate = 1.f, depth = 0.f, base = 0.5f; int target = 0 /*0 pitch 1 filter 2 volume 3 pan*/, shape = 0 /*0 sine 1 tri 2 square 3 s&h*/; };
 
     explicit Session(int sampleRate = 48000);
@@ -95,6 +95,8 @@ public:
     void setPan(int track, float p);      // -1..1
     void setSend(int track, int which /*0 reverb 1 delay*/, float level);
     void setMasterVolume(float v);
+    int clockPulses();                          // MIDI clock out: the pulses (24 per beat) since the last call
+    int clockEvents();                          // bit 0: the transport started, bit 1: it stopped, since the last call
     void setLimiter(bool on, float ceilingDb);   // master limiter: nothing passes the ceiling (-12 .. 0 dB)
     void setDuck(int sourceTrack, float release);   // sidechain: every note of this track (-1 = off) pushes the tracks with a duck amount down, releasing over `release` seconds
     void setDuckAmount(int track, float amount);    // 0..1
@@ -139,6 +141,7 @@ public:
 
     // ---- timing helpers ----
     void setInputQuant(int grid);             // live quantize: played keys sound on the nearest grid line of the beat clock (0 = off); recording snaps to it too
+    void setTakeBars(int bars);               // 0: the take ends when told to; n: it ends by itself after n bars, at the current tempo
     void setCountIn(int bars);                // 0..2 bars of clicks before a free take or a sequencer recording starts from a stopped transport
 
     // ---- effects: FX 2 inserts and LIVE FX on the master, the same set on every track ----

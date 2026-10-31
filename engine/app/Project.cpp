@@ -68,7 +68,7 @@ std::string SamplerApp::stateText() {
         x.f("chorus", chorus_); x.f("phaser", phaser_); x.f("comp", comp_); x.f("width", width_); x.f("djFilter", djFilter_); x.f("crush", crush_);
         x.f("spring", spring_); x.f("springDamp", springDamp_); x.f("phone", phone_); x.f("punch", punch_); x.f("flanger", flanger_); x.f("drive", drive_); x.f("eqLow", eqLow_); x.f("eqMid", eqMid_); x.f("eqHigh", eqHigh_); x.f("tremolo", tremolo_); x.f("wah", wah_); x.f("ringmod", ringmod_); x.f("tapeStop", tapeStop_);
         x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
-        x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2);
+        x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2); x.i("takeBars", takeBars_, 0, kTakeBarsN - 1);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
         x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
         x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
@@ -95,7 +95,7 @@ std::string SamplerApp::stateText() {
             Session::SeqView v[kSeqMax]; int bars = 1; const int n = s_.seqSlotNotes(t, q, v, kSeqMax, &bars);
             if (n == 0 && bars <= 1) continue;
             io.out << k << "s" << q << ".bars=" << bars << '\n';
-            if (n > 0) { io.out << k << "s" << q << ".notes="; for (int i = 0; i < n; i++) io.out << (i ? ";" : "") << v[i].tick << ',' << v[i].len << ',' << v[i].note << ',' << v[i].vel << ',' << v[i].prob << ',' << v[i].ratchet << ',' << v[i].nudge; io.out << '\n'; }
+            if (n > 0) { io.out << k << "s" << q << ".notes="; for (int i = 0; i < n; i++) io.out << (i ? ";" : "") << v[i].tick << ',' << v[i].len << ',' << v[i].note << ',' << v[i].vel << ',' << v[i].prob << ',' << v[i].ratchet << ',' << v[i].nudge << ',' << v[i].cut; io.out << '\n'; }
         }
     }
     return io.out.str();
@@ -110,7 +110,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         x.f("chorus", chorus_); x.f("phaser", phaser_); x.f("comp", comp_); x.f("width", width_); x.f("djFilter", djFilter_); x.f("crush", crush_);
         x.f("spring", spring_); x.f("springDamp", springDamp_); x.f("phone", phone_); x.f("punch", punch_); x.f("flanger", flanger_); x.f("drive", drive_); x.f("eqLow", eqLow_); x.f("eqMid", eqMid_); x.f("eqHigh", eqHigh_); x.f("tremolo", tremolo_); x.f("wah", wah_); x.f("ringmod", ringmod_); x.f("tapeStop", tapeStop_);
         x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
-        x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2);
+        x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2); x.i("takeBars", takeBars_, 0, kTakeBarsN - 1);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
         x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
         x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
@@ -143,8 +143,8 @@ void SamplerApp::applyStateText(const std::string& text) {
         auto parseNotes = [&](const std::string& text) {
             std::vector<Session::SeqView> out; std::istringstream ns(text); std::string item;
             while (std::getline(ns, item, ';') && (int)out.size() < kSeqMax) {
-                int a, b, c, d, pr = 100, ra = 1, nu = 0; const int got = sscanf(item.c_str(), "%d,%d,%d,%d,%d,%d,%d", &a, &b, &c, &d, &pr, &ra, &nu);
-                if (got >= 4 && a >= 0 && a < patternTicks(16) && b > 0 && c >= 0 && c < 128) out.push_back({a, std::min(b, 65535), c, std::min(127, std::max(1, d)), std::min(100, std::max(0, pr)), std::min(8, std::max(1, ra)), std::min(15, std::max(-16, nu))});
+                int a, b, c, d, pr = 100, ra = 1, nu = 0, cu = 0; const int got = sscanf(item.c_str(), "%d,%d,%d,%d,%d,%d,%d,%d", &a, &b, &c, &d, &pr, &ra, &nu, &cu);
+                if (got >= 4 && a >= 0 && a < patternTicks(16) && b > 0 && c >= 0 && c < 128) out.push_back({a, std::min(b, 65535), c, std::min(127, std::max(1, d)), std::min(100, std::max(0, pr)), std::min(8, std::max(1, ra)), std::min(15, std::max(-16, nu)), std::min(127, std::max(0, cu))});
             }
             return out;
         };
@@ -218,6 +218,12 @@ void SamplerApp::autosave(bool force) {
     autosaveAt_ = nowMs_ + 20000;
     if (anyRec_ && !force) return;
     std::error_code ec; fs::create_directories(projectDir("autosave"), ec);
+    if (nowMs_ >= backupAt_ && fs::exists(projectDir("autosave") + "/project.txt")) {   // every ten minutes the last autosave is kept as Backup 1 (older ones move down, three are kept)
+        backupAt_ = nowMs_ + 600000u;
+        for (int i = 3; i >= 2; i--) { fs::remove_all(projectDir("Backup " + std::to_string(i)), ec); if (fs::exists(projectDir("Backup " + std::to_string(i - 1)))) fs::rename(projectDir("Backup " + std::to_string(i - 1)), projectDir("Backup " + std::to_string(i)), ec); }
+        fs::remove_all(projectDir("Backup 1"), ec); fs::create_directories(projectDir("Backup 1"), ec);
+        fs::copy_file(projectDir("autosave") + "/project.txt", projectDir("Backup 1") + "/project.txt", fs::copy_options::overwrite_existing, ec);
+    }
     const std::string text = stateText();
     { std::ofstream f(projectDir("autosave") + "/project.txt.tmp"); if (!f) return; f << text; }
     fs::rename(projectDir("autosave") + "/project.txt.tmp", projectDir("autosave") + "/project.txt", ec);
@@ -279,12 +285,46 @@ bool SamplerApp::importMidi(const std::string& path) {
 // ---- settings: the look of the app, outside of any project ----
 void SamplerApp::loadSettings() {
     const KV kv = parse(readFile(s_.dataDir() + "/settings.txt")); Io io{false, &kv, {}};
-    int th = 0, fs = 0; io.i("theme", th, 0, theme::kThemes - 1); io.i("fullscreen", fs, 0, 1);
-    theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_);
+    int th = 0, fs = 0, ms = 0, po = 0; io.i("theme", th, 0, theme::kThemes - 1); io.i("fullscreen", fs, 0, 1); io.i("midiSync", ms, 0, 2); io.i("phoneOut", po, 0, 1);
+    midiSync_ = ms; phoneOut_ = po != 0; theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_);
 }
 void SamplerApp::saveSettings() {
     if (s_.dataDir().empty()) return;
     std::error_code ec; fs::create_directories(s_.dataDir(), ec);
-    std::ofstream f(s_.dataDir() + "/settings.txt"); f << "theme=" << theme_ << "\nfullscreen=" << (fullscreen_ ? 1 : 0) << "\n";
+    std::ofstream f(s_.dataDir() + "/settings.txt"); f << "theme=" << theme_ << "\nfullscreen=" << (fullscreen_ ? 1 : 0) << "\nmidiSync=" << midiSync_ << "\nphoneOut=" << (phoneOut_ ? 1 : 0) << "\n";
 }
 void SamplerApp::setTheme(int id) { theme_ = std::min(theme::kThemes - 1, std::max(0, id)); theme::apply(theme_); saveSettings(); }
+
+// ---- other gear on the MIDI bus ----
+void SamplerApp::midiExternal(const uint8_t* b, size_t n, uint64_t nowNs) {
+    for (size_t i = 0; i < n;) {
+        const uint8_t st = b[i];
+        if (st == 0xf8) {   // clock: 24 per beat; every 24 pulses give a tempo
+            i++;
+            if (midiSync_ != 1) continue;
+            if (clkCount_ == 0) clkWindowStart_ = nowNs;
+            if (++clkCount_ >= 25) {   // 24 intervals between 25 pulses = one beat
+                const double sec = (double)(nowNs - clkWindowStart_) / 1e9;
+                if (sec > 0.1 && sec < 2.1 && st_.loopSamples <= 0) { const float bpm = (float)(60.0 / sec); if (bpm >= 30.f && bpm <= 300.f && std::fabs(bpm - tempo_) > 0.4f) setTempo(std::round(bpm * 10.f) / 10.f); }
+                clkCount_ = 0;
+            }
+            continue;
+        }
+        if (st == 0xfa || st == 0xfb) { i++; if (midiSync_ == 1) { clkCount_ = 0; extPlaying_ = true; s_.play(true); } continue; }
+        if (st == 0xfc) { i++; if (midiSync_ == 1) { extPlaying_ = false; s_.play(false); } continue; }
+        if ((st & 0xf0) == 0x90 || (st & 0xf0) == 0x80) {
+            if (i + 2 >= n) break;
+            const int note = b[i + 1] & 0x7f, vel = b[i + 2] & 0x7f; i += 3;
+            const bool on = (st & 0xf0) == 0x90 && vel > 0;
+            if (on) { heldNote_[note] = track_; s_.noteOn(track_, note, vel); if (page_ == P_TOMB) s_.tombolaAdd(track_, note); } else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
+            continue;
+        }
+        i++;   // anything else is ignored (a damaged message, active sensing, controllers)
+    }
+}
+void SamplerApp::tapTempo() {
+    const uint64_t now = (uint64_t)nowMs_ * 1000000ull;
+    if (tapLast_ && now - tapLast_ < 2000000000ull) { const double d = (double)(now - tapLast_) / 1e9; tapAvg_ = tapN_ == 0 ? d : tapAvg_ * 0.6 + d * 0.4; tapN_++; if (tapN_ >= 2 && st_.loopSamples <= 0) setTempo((float)std::round(60.0 / tapAvg_ * 10.0) / 10.f); say("TAP " + std::to_string((int)std::lround(60.0 / tapAvg_)) + " BPM"); }
+    else { tapN_ = 0; tapAvg_ = 0; say("TAP AGAIN..."); }
+    tapLast_ = now;
+}

@@ -132,7 +132,7 @@ public:
         float start = 0.f, end = 1.f, speed = 0.5f, pitch = 0.5f;
         int arpRate = 0, arpPatt = 0, arpOct = 0; float arpLen = 0.7f;
         
-        float vol = 0.8f, pan = 0.5f, sendR = 0.5f, sendD = 0.2f;
+        float vol = 0.8f, pan = 0.5f, sendR = 0.f, sendD = 0.f;
         int entry = -1;
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
@@ -167,6 +167,17 @@ public:
     void setTheme(int id);
     bool fullscreen() const { return fullscreen_; }
     void setFullscreen(bool on) { fullscreen_ = on; saveSettings(); }
+    // ---- MIDI from other gear: a keyboard plays the selected track; the clock of a sequencer sets the tempo and starts / stops the transport (SYNC: FOLLOW) ----
+    int midiSync() const { return midiSync_; }     // 0 off, 1 follow the clock that comes in, 2 send the clock out
+    void setMidiSync(int m) { midiSync_ = std::min(2, std::max(0, m)); saveSettings(); }
+    void midiExternal(const uint8_t* b, size_t n, uint64_t nowNs);
+    // ---- the tape take and the phone speaker ----
+    static constexpr int kTakeBarsN = 6;
+    int takeBars() const { static const int v[kTakeBarsN] = {0, 1, 2, 4, 8, 16}; return v[takeBars_]; }   // 0: the take ends when you press REC again
+    void cycleTakeBars() { takeBars_ = (takeBars_ + 1) % kTakeBarsN; applyTempo(); say(takeBars() ? "TAKE: " + std::to_string(takeBars()) + (takeBars() == 1 ? " BAR" : " BARS") + ", ENDS BY ITSELF" : "TAKE: ENDS WHEN YOU STOP IT"); }
+    bool phoneOut() const { return phoneOut_; }    // true: play through the phone speaker even when the FM-1 is plugged in
+    void setPhoneOut(bool on) { phoneOut_ = on; saveSettings(); say(on ? "SOUND: PHONE SPEAKER" : "SOUND: FM-1"); }
+    void tapTempo();                               // tap four times: the tempo (while there is no loop)
     // ---- projects: everything (settings, patterns, samples used, tape audio) in dataDir/projects/<name>/ ----
     std::vector<std::string> projectList() const;      // newest first
     std::string newProjectName() const;                // "Project 1", "Project 2" ...
@@ -213,6 +224,10 @@ private:
     std::string projectDir(const std::string& name) const;
     std::string projectsRoot() const;
     static std::string cleanName(const std::string& n);
+    
+    uint32_t backupAt_ = 0;
+    int midiSync_ = 0; uint64_t clkLast_ = 0, clkWindowStart_ = 0; int clkCount_ = 0; uint64_t tapLast_ = 0; double tapAvg_ = 0; int tapN_ = 0; bool extPlaying_ = false;
+    bool phoneOut_ = false;
     int theme_ = 0; bool fullscreen_ = false; void loadSettings(); void saveSettings();
     std::string project_ = "autosave"; uint32_t autosaveAt_ = 0, loadedAt_ = 0; bool tapeDirty_ = false, loading_ = false, wantMidi_ = false, anyRec_ = false;
     int lastBounceSeen_ = 0; double lastLoopSeen_ = 0; std::string sharePath_, pendingShare_; uint32_t pendingShareAt_ = 0;
@@ -236,7 +251,7 @@ private:
     void applyMaster();
     int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;
     float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f;   // OP-1 FX page
-    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 4, liveGrid_ = 0, countIn_ = 0;
+    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, takeBars_ = 0, seqGrid_ = 0, liveGrid_ = 0, countIn_ = 0;
     float swing_ = 0.f, tSpin_ = 0.557f, tGrav_ = 0.55f, tMass_ = 0.72f, tShape_ = 0.6f;   // swing 0..1 = 50..75 %, tombola knobs   // the pattern plays on a 1/16 grid unless told otherwise
     float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;
     float exciter_ = 0.f, lofi_ = 0.f, wobble_ = 0.f, loopSpeed_ = 2.f / 3.f, micThr_ = 0.452f;   // loop speed is global

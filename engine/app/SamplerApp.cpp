@@ -276,6 +276,7 @@ void SamplerApp::applyTempo() {
     s_.setQuantize(seqGrid_);
     s_.setInputQuant(liveGrid_);
     s_.setCountIn(countIn_);
+    s_.setTakeBars(takeBars());
     s_.setSwing(0.5f + 0.25f * swing_);
 }
 void SamplerApp::applyTomb() { s_.tombolaSet((tSpin_ - 0.5f) * 14.f, tGrav_, tMass_, tShape_); }

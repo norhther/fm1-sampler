@@ -426,6 +426,9 @@ static void testProject() {
         // the autosave, written on its own
         app.autosave(true); run(0.5); while (s.busyJobs() > 0) run(0.2);
         CHECK(std::filesystem::exists("/tmp/fm1sampler_ta/projects/autosave/project.txt"), "autosave written");
+        // backups: the autosave is kept as Backup 1 (the first autosave of a session does it), the list shows them
+        app.autosave(true); run(0.3); app.autosave(true); run(0.3);
+        CHECK(std::filesystem::exists("/tmp/fm1sampler_ta/projects/Backup 1/project.txt"), "the previous autosave is kept as Backup 1");
         app.deleteProject("Test One"); CHECK(!std::filesystem::exists("/tmp/fm1sampler_ta/projects/Test One"), "a project can be deleted");
     }
     {   // the next start finds the autosave and goes back to it; a start after a failed restore skips it once
@@ -684,7 +687,7 @@ static void testSampleEdit() {
     CHECK(n0 >= 2 && sl.size() == 4 && std::fabs(sl[1] - 0.25f) < 0.001f && std::fabs(sl[3] - 0.75f) < 0.001f, "slice marks placed by hand: %zu pads (was %zu)", sl.size(), n0);
     // resample: what plays becomes a sample
     app.selectTrack(0); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Tape Key") app.loadEntry(i); wait(1.0);
-    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 192, 60 + i * 2, 96); { auto k = app.knobs(); k[0].set(1.f / 3); } wait(0.5);
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 192, 60 + i * 2, 96); { auto k = app.knobs(); k[0].set(1.f / 3); } s.play(true); wait(0.5);
     const std::string before = app.sampleLabel(0); app.resampleNow(); wait(5.0);
     CHECK(app.sampleLabel(0) != before && app.sampleLabel(0).rfind("sample", 0) == 0 && s.sampleFramesOf(0) > sr, "RESAMPLE: the track plays the new sample (%s, %d frames)", app.sampleLabel(0).c_str(), s.sampleFramesOf(0));
 }
@@ -827,6 +830,66 @@ static void testBanks() {
     app.songClear(); run(0.2); if (app.status().playing) btn(SamplerApp::PLAY);
 }
 
+static void testMidiIn() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_tj; mkdir -p /tmp/fm1sampler_tj");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tj"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.5);
+    {   // a keyboard plays the selected track
+        size_t m = all.size(); const uint8_t on[3] = {0x90, 60, 100}, off[3] = {0x80, 60, 0};
+        app.midiExternal(on, 3, 1000000000ull); run(0.5); app.midiExternal(off, 3, 2000000000ull); run(0.3);
+        CHECK(rms(all, m, all.size()) > 0.01, "a note from a MIDI keyboard sounds (rms %.4f)", rms(all, m, all.size()));
+        const uint8_t junk[5] = {0x90, 200, 100, 0xf9, 0x90}; app.midiExternal(junk, 5, 3000000000ull); app.midiExternal(junk, 2, 3000000000ull); run(0.2);
+        CHECK(finite(all), "damaged MIDI is ignored");
+    }
+    {   // the clock of another sequencer: 100 bpm = 24 pulses in 0.6 s
+        app.setMidiSync(1); const uint64_t t0 = 10000000000ull; for (int i = 0; i < 24 * 4; i++) { const uint8_t c = 0xf8; app.midiExternal(&c, 1, t0 + (uint64_t)(i * 0.6e9 / 24.0)); }
+        run(0.3); CHECK(std::fabs(app.status().bpm - 100.f) < 0.6f, "the clock sets the tempo (%.1f bpm)", app.status().bpm);
+        const uint8_t start = 0xfa, stop = 0xfc; app.midiExternal(&start, 1, t0 + 8000000000ull); run(0.4); const bool playing = app.status().playing;
+        app.midiExternal(&stop, 1, t0 + 9000000000ull); run(0.4); CHECK(playing && !app.status().playing, "START and STOP of the other gear start and stop the transport (%d then %d)", playing, app.status().playing);
+        app.setMidiSync(0); const uint8_t c2 = 0xfa; app.midiExternal(&c2, 1, 0); run(0.3); CHECK(!app.status().playing, "with SYNC off the transport messages are ignored");
+    }
+    {   // the clock going out: 24 pulses per beat while it plays
+        app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.3);
+        s.clockPulses(); s.clockEvents(); s.play(true); run(2.0); const int ev = s.clockEvents(), pulses = s.clockPulses(); s.play(false); run(0.3); const int ev2 = s.clockEvents();
+        CHECK((ev & 1) && std::abs(pulses - 24 * 4) <= 3 && (ev2 & 2), "clock out: %d pulses in 2 s at 120 bpm (expect 96), start and stop events (%d, %d)", pulses, ev, ev2);
+    }
+    {   // tap tempo
+        app.setMidiSync(0); uint32_t t = 100000; for (int i = 0; i < 5; i++) { now = t; app.tick(now); app.tapTempo(); t += 500; }   // every 0.5 s = 120... done at 100 bpm: 600 ms
+        t = 200000; for (int i = 0; i < 6; i++) { now = t; app.tick(now); app.tapTempo(); t += 600; } run(0.3);
+        CHECK(std::fabs(app.status().bpm - 100.f) < 1.5f, "tap tempo: six taps 600 ms apart give %.1f bpm", app.status().bpm);
+    }
+    { MidiSong a; (void)a; }
+}
+
+static void testLock() {
+    const int sr = SAMPLERATE;
+    {   // the packed note word keeps every field
+        SeqNote n; n.tick = 12287; n.len = 12288; n.note = 127; n.vel = 127; n.prob = 100; n.ratchet = 8; n.nudge = -16; n.cut = 127; SeqNote m = unpackNote(packNote(n));
+        SeqNote z; z.tick = 0; z.len = 1; z.note = 0; z.vel = 1; z.prob = 0; z.ratchet = 1; z.nudge = 15; z.cut = 0; SeqNote q = unpackNote(packNote(z));
+        CHECK(m.tick == 12287 && m.len == 12288 && m.note == 127 && m.vel == 127 && m.prob == 100 && m.ratchet == 8 && m.nudge == -16 && m.cut == 127 && q.tick == 0 && q.len == 1 && q.prob == 0 && q.nudge == 15 && q.cut == 0, "a note survives packing into one word (both extremes)");
+    }
+    system("rm -rf /tmp/fm1sampler_tk; mkdir -p /tmp/fm1sampler_tk");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tk"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
+    run(2.5); app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    wait(1.0); app.setSend(4, 0, 0.f); app.setSend(4, 1, 0.f);
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); app.seqToggleAt(0, 60, 192); { auto k = app.knobs(); k[0].set(1.f / 3); } s.play(true); wait(0.5);
+    auto zc = [&]() { all.clear(); run(2.6); double d = 0, a = 1e-9; for (size_t i = 2; i < all.size(); i += 2) { d += std::fabs(all[i] - all[i - 2]); a += std::fabs(all[i]); } return d / a; };   // how bright: the movement of the waveform against its size
+    const double open = zc();
+    Session::SeqRef ref[1] = {{0, 60}}; s.seqApply(4, ref, 1, Session::OP_CUT, 1); run(0.3);
+    Session::SeqView v[kSeqMax]; const int n = s.seqNotes(4, v, kSeqMax); const double locked = zc();
+    CHECK(n == 1 && v[0].cut == 1 && locked < open * 0.8, "a filter lock darkens the note (%.4f -> %.4f brightness, lock %d)", open, locked, n ? v[0].cut : -1);
+    s.seqApply(4, ref, 1, Session::OP_CUT, 0); run(0.3); const double freed = zc(); CHECK(freed > locked * 1.2, "lock 0 gives the filter back (%.4f)", freed);
+    app.seqClear(); run(0.2);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -920,6 +983,8 @@ int main() {
     }
     testSynths();
     testOp1();
+    testLock();
+    testMidiIn();
     testBanks();
     testSynthEdit();
     testMixer();
