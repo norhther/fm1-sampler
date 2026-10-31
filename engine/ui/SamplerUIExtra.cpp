@@ -64,8 +64,8 @@ void SamplerUI::menuSheet() {
     row("SOUND GOES TO", {{"THE FM-1", !app_.phoneOut()}, {"PHONE SPEAKER", app_.phoneOut()}}, [this](int i) { app_.setPhoneOut(i == 1); });
     row("SOUNDS", {{app_.audition() ? "AUDITION: ON" : "AUDITION: OFF", app_.audition()}, {"SAVE LOOP TO LIBRARY", false}, {"PROJECTS", false}},
         [this](int i) { if (i == 0) app_.setAudition(!app_.audition()); else if (i == 1) { app_.loopSave(); } else { menuOpen_ = false; projOpen_ = true; projSel_ = -1; projScroll_ = 0; } });
-    row("TEMPO", {{"TAP TEMPO", false}, {"TAKE: " + (app_.takeBars() ? std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("FREE")), app_.takeBars() > 0}},
-        [this](int i) { if (i == 0) app_.tapTempo(); else app_.cycleTakeBars(); });
+    row("TIMING", {{"TAP TEMPO", false}, {"TAKE: " + (app_.takeBars() ? std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("FREE")), app_.takeBars() > 0}, {"QUANTIZE: " + app_.quantText(), app_.quantDiv() > 0}},
+        [this](int i) { if (i == 0) app_.tapTempo(); else if (i == 1) app_.cycleTakeBars(); else app_.cycleQuant(); });
     row("OTHER GEAR", {{"MIDI SYNC: OFF", app_.midiSync() == 0}, {"FOLLOW CLOCK IN", app_.midiSync() == 1}, {"SEND CLOCK OUT", app_.midiSync() == 2}}, [this](int i) { app_.setMidiSync(i); });
     { std::vector<std::pair<std::string, bool>> th; for (int i = 0; i < theme::kThemes; i++) th.push_back({theme::name(i), app_.themeId() == i}); row("LOOK", th, [this](int i) { app_.setTheme(i); }); }
     row("SCREEN", {{app_.fullscreen() ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", app_.fullscreen()}, {app_.leftHanded() ? "LEFT-HANDED: ON" : "LEFT-HANDED: OFF", app_.leftHanded()},

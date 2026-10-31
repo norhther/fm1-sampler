@@ -195,8 +195,9 @@ FN(jobjectArray, uiFrame)(JNIEnv* env, jclass, jlong h, jfloat w, jfloat hh, jfl
     env->SetObjectArrayElement(r, 1, env->NewStringUTF(texts.c_str()));
     return r;
 }
-FN(void, uiTouch)(JNIEnv*, jclass, jlong h, jint action, jfloat x, jfloat y, jlong now) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); e.ui->touch(action, x, y, (uint32_t)now); }
+FN(void, uiTouch)(JNIEnv*, jclass, jlong h, jint id, jint action, jfloat x, jfloat y, jlong now) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); e.ui->touchP(id, action, x, y, (uint32_t)now); }
+FN(void, uiCancel)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); e.ui->cancelTouches(); }
 FN(jboolean, uiHaptic)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); return e.ui->takeHaptic(); }
 FN(jstring, uiAnnounce)(JNIEnv* env, jclass, jlong h) { auto& e = *E(h); std::string s; { std::lock_guard<std::mutex> l(e.surfaceMtx); s = e.ui->takeAnnounce(); } return env->NewStringUTF(s.c_str()); }
-FN(void, uiPinch)(JNIEnv*, jclass, jlong h, jint phase, jfloat x1, jfloat y1, jfloat x2, jfloat y2) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); e.ui->pinch(phase, x1, y1, x2, y2); }
+FN(jboolean, uiPinch)(JNIEnv*, jclass, jlong h, jint phase, jfloat x1, jfloat y1, jfloat x2, jfloat y2) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); return e.ui->pinch(phase, x1, y1, x2, y2); }
 }

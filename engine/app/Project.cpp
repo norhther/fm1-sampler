@@ -88,6 +88,8 @@ std::string SamplerApp::stateText() {
         io.f(k + "tfEqLow", x.tfEqLow); io.f(k + "tfEqMid", x.tfEqMid); io.f(k + "tfEqHigh", x.tfEqHigh); io.f(k + "tfComp", x.tfComp); io.f(k + "duckAmt", x.duckAmt);
         io.i(k + "edW1", x.edW1, 0, 4); io.i(k + "edW2", x.edW2, 0, 4); io.i(k + "edType", x.edType, 0, 2); io.i(k + "edUni", x.edUni, 0, 3); io.i(k + "edVoice", x.edVoice, 0, 3); io.f(k + "edDet2", x.edDet2); io.f(k + "edCut", x.edCut); io.f(k + "edRes", x.edRes);
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
+        io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
+        io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
         int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (x.entry >= 0 && x.entry < (int)lib_.size()) io.out << k << "sample=" << lib_[(size_t)x.entry].group << '|' << lib_[(size_t)x.entry].label << '\n';
         io.out << k << "slot=" << st_.seqSlot[t] << '\n';
@@ -127,6 +129,8 @@ void SamplerApp::applyStateText(const std::string& text) {
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
         for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
+        io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
+        io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
         int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (fmtv < 2) bars2 = std::min(3, bars2) == 0 ? 0 : (1 << std::min(3, bars2)) - 1;   // format 1 kept 0..3 for 1, 2, 4, 8 bars
         if (x.start > x.end - 0.02f) { x.start = 0.f; x.end = 1.f; }

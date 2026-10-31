@@ -116,10 +116,14 @@ static void testFx2() {
       auto highs = sine(N, 10000, sr); FxParams q; q.eqHigh = 0.f; auto h = run(q, highs); CHECK(rms(h, 24000, 48000) < rms(highs, 24000, 48000) * 0.5, "EQ high cut lowers 10 kHz (%.3f -> %.3f)", rms(highs, 24000, 48000), rms(h, 24000, 48000)); }
     { FxParams p; p.tremolo = 1.f; auto o = run(p, sine(N, 220, sr)); double lo = 1e9, hi = 0; for (int w = 0; w < 9; w++) { const double r = rms(o, 2 * 2400 * (size_t)(w + 1) * 2, 2 * 2400 * (size_t)(w + 2) * 2); lo = std::min(lo, r); hi = std::max(hi, r); }
       CHECK(lo < hi * 0.6, "tremolo moves the level up and down (%.3f .. %.3f)", lo, hi); }
-    { FxParams p; p.tapeStop = 1.f; MasterFx fx(sr); auto in = sine(N * 2, 220, sr); fx.set(FxParams()); fx.process(in.data(), 12000, 0, 1.0 / 24000); fx.set(p);
-      for (int i = 12000; i < N * 2; i += 256) fx.process(in.data() + 2 * i, std::min(256, N * 2 - i), 0, 1.0 / 24000);
-      CHECK(finite(in) && rms(in, 2 * 80000, 2 * 96000) < 0.02, "tape stop: the sound runs down to nothing (%.4f at the end)", rms(in, 2 * 80000, 2 * 96000));
-      fx.set(FxParams()); auto live = sine(4800, 220, sr); fx.process(live.data(), 4800, 0, 1.0 / 24000); CHECK(rms(live, 2 * 2400, 2 * 4800) > 0.3, "...and it is back when the knob is released (%.3f)", rms(live, 2 * 2400, 2 * 4800)); }
+    { FxParams p; p.tapeStop = 1.f; MasterFx fx(sr); const int T = 12000 + 3 * sr; auto in = sine(T, 220, sr); fx.set(FxParams()); fx.process(in.data(), 12000, 0, 1.0 / 24000); fx.set(p);
+      for (int i = 12000; i < T; i += 256) fx.process(in.data() + 2 * i, std::min(256, T - i), 0, 1.0 / 24000);
+      const double early = rms(in, 2 * 12000 + 2 * 4800, 2 * 12000 + 2 * 9600), late = rms(in, 2 * (T - 9600), 2 * T);
+      CHECK(finite(in) && late < 0.02 && early > 0.2, "tape stop: it takes a while to wind down (%.3f in the first 0.2 s, %.4f at the end)", early, late);
+      // slow: after 0.9 s the sound is still there, half way down
+      CHECK(rms(in, 2 * (12000 + sr * 9 / 10), 2 * (12000 + sr * 9 / 10 + 4800)) > 0.05, "...and it is still sounding after 0.9 s (%.3f)", rms(in, 2 * (12000 + sr * 9 / 10), 2 * (12000 + sr * 9 / 10 + 4800)));
+      fx.set(FxParams()); const int R = 2 * sr; auto live = sine(R, 220, sr); for (int i = 0; i < R; i += 256) fx.process(live.data() + 2 * i, std::min(256, R - i), 0, 1.0 / 24000);
+      CHECK(finite(live) && rms(live, 2 * 4800, 2 * 9600) < 0.25 && rms(live, 2 * (R - 4800), 2 * R) > 0.3, "...and on release it spins up, then the live sound is back (%.3f, %.3f)", rms(live, 2 * 4800, 2 * 9600), rms(live, 2 * (R - 4800), 2 * R)); }
     { MasterFx fx(sr, 1.f); FxParams p; fx.set(p); auto a = sine(12000, 440, sr); fx.process(a.data(), 12000, 0, 1.0 / 24000); p.freeze = 1; fx.set(p);
       std::vector<float> silence(2 * 48000, 0.f); for (int i = 0; i < 48000; i += 256) fx.process(silence.data() + 2 * i, std::min(256, 48000 - i), 0, 1.0 / 24000);
       CHECK(finite(silence) && rms(silence, 2 * 24000, 2 * 48000) > 0.1, "freeze holds the sound after the input stopped (%.3f)", rms(silence, 2 * 24000, 2 * 48000)); }
@@ -332,7 +336,7 @@ static void testSwing() {
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
     run(2.5);
     app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.2);
-    app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(0.f); k[1].set(4.f / 7.f); k[2].set(0.f); k[3].set(0.f); } run(0.2);   // quantize 1/16, no swing
+    app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[2].set(0.f); k[3].set(0.f); } app.setQuantGrids(0, 4); run(0.2);   // quantize 1/16, no swing
     app.selectTrack(1); app.gotoPage(SamplerApp::P_SQ); app.seqClear(); run(0.2);
     { auto k = app.knobs(); k[0].set(1.f / 3); k[1].set(0.f); }   // PLAY, 1 bar
     app.seqToggleAt(48, 60); run(0.2);   // the second 1/16 step: the one swing delays
@@ -566,7 +570,7 @@ static void testNoteEdit() {
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
     run(2.5);
     app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.2);
-    app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(0.f); k[1].set(4.f / 7.f); k[2].set(0.f); k[3].set(0.f); } run(0.2);
+    app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[2].set(0.f); k[3].set(0.f); } app.setQuantGrids(0, 4); run(0.2);
     app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Synth Kit 808") app.loadEntry(i);
     for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
     app.gotoPage(SamplerApp::P_SQ); app.seqClear(); { auto k = app.knobs(); k[1].set(0.f); } app.seqSetBarCount(1); run(0.3);
@@ -1028,7 +1032,6 @@ int main() {
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_MOD, "FX again: modulation");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE, "FX again: live fx");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE2, "FX again: live fx 2");
-    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX again: track fx");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX3, "FX again: the OP-1 effects");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX again: back to sends");
     // the four modes: every page belongs to exactly one, the same button steps through its pages, a mode comes back to the page it was left on
@@ -1048,8 +1051,8 @@ int main() {
         btn(SamplerApp::LFO); CHECK(app.page() == SamplerApp::P_LFO, "LFO: shortcut");
         btn(SamplerApp::ARP); CHECK(app.page() == SamplerApp::P_ARP, "ARP: shortcut");
         btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_MIX, "EDIT: mix mode, mixer");
-        btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_KEY, "EDIT again: key");
-        btn(SamplerApp::HOME); btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_KEY, "mix mode returns to the page it was left on");
+        btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_TEQ, "EDIT again: track eq");
+        btn(SamplerApp::HOME); btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_TEQ, "mix mode returns to the page it was left on");
         btn(SamplerApp::GLO); CHECK(app.page() == SamplerApp::P_KEY, "GLO: shortcut to the key");
         btn(SamplerApp::SEL); CHECK(app.page() == SamplerApp::P_LEN, "SEL: shortcut to the length");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ tap: sequencer mode, pattern page");
@@ -1107,8 +1110,8 @@ int main() {
         { auto k = app.knobs(); k[0].set(0.5f); k[1].set(0.5f); k[2].set(1.f); }
         m = all.size(); app.playNote(60, true); run(1.0); app.playNote(60, false); run(0.5);
         CHECK(finite(all), "LIVE FX 2 (reverse, tape stop, freeze) all on: finite");
-        { auto k = app.knobs(); k[0].set(0.f); k[1].set(0.f); k[2].set(0.f); }
-        run(0.5);
+        { auto k = app.knobs(); k[0].set(0.f); k[1].set(0.f); k[2].set(0.f); } app.setQuantGrids(0, 0);
+        run(2.5);   // the tape spins up again before the live sound is back
         app.gotoPage(SamplerApp::P_TONE); { auto k = app.knobs(); k[1].set(1.f); }
         CHECK(std::string(app.knobs()[1].value) == "+12 DB" && std::string(app.knobs()[2].value) == "FLAT", "EQ shows its gain in dB (%s, %s)", app.knobs()[1].value.c_str(), app.knobs()[2].value.c_str());
         { auto k = app.knobs(); k[1].set(0.5f); }
@@ -1124,7 +1127,17 @@ int main() {
         const double L = app.status().loopSamples;
         CHECK(std::fabs(L - 4.0 * sr) < 2 && std::fabs(app.status().bpm - 120.f) < 0.6f && app.status().loopBars == 2, "take snapped to 2 bars: %.0f samples (expect %d), %.0f bpm", L, 4 * sr, app.status().bpm);
         app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].step(5); } run(0.1);
-        CHECK(std::fabs(app.status().bpm - 120.f) < 0.6f, "tempo is locked while a loop exists (%.0f)", app.status().bpm);
+        CHECK(std::fabs(app.status().bpm - 120.f) < 0.6f && std::fabs(app.tempoNow() - 125.f) < 0.6f, "a new tempo with a loop waits for the finger to rest (tape %.0f, asked %.0f)", app.status().bpm, app.tempoNow());
+        run(4.0);
+        CHECK(std::fabs(app.status().bpm - 125.f) < 1.f && std::fabs(app.status().loopSamples - 4.0 * sr * 120.0 / 125.0) < 0.002 * sr && app.status().loopBars == 2, "...then the loop is stretched to it (%.1f bpm, %.0f samples, expect %.0f)", app.status().bpm, app.status().loopSamples, 4.0 * sr * 120.0 / 125.0);
+        app.globalUndo(); run(1.0);
+        CHECK(std::fabs(app.status().bpm - 120.f) < 0.6f && std::fabs(app.status().loopSamples - 4.0 * sr) < 2, "UNDO takes the stretch back (%.1f bpm, %.0f samples)", app.status().bpm, app.status().loopSamples);
+        { const size_t m0 = all.size(); app.playNote(60, true); run(0.2); app.playNote(60, false); run(0.3); (void)m0; }
+        // an overdub on another track is a tape edit too: UNDO takes it away
+        { const int tr0 = app.track(); app.selectTrack(3); const int u0 = app.status().globalUndoN; btn(SamplerApp::REC); run(0.2); app.playNote(64, true); run(0.5); app.playNote(64, false); run(0.2); btn(SamplerApp::REC); run(0.3);
+          CHECK(app.status().track_has_clip[3] && app.status().globalUndoN > u0, "an overdub is in the global log (%d -> %d)", u0, app.status().globalUndoN);
+          app.globalUndo(); run(0.3); CHECK(!app.status().track_has_clip[3] && app.status().track_has_clip[0], "UNDO takes the overdub off the tape and keeps the first take");
+          app.globalRedo(); run(0.3); CHECK(app.status().track_has_clip[3], "REDO puts it back"); app.globalUndo(); run(0.3); app.selectTrack(tr0); }
         btn(SamplerApp::SAVE); app.onMidi((uint8_t[]){0x91, (uint8_t)SamplerApp::SAVE, 100}, 3); run(0.9); app.onMidi((uint8_t[]){0x81, (uint8_t)SamplerApp::SAVE, 100}, 3); run(0.3); CHECK(app.takeClearAsk(), "a SAVE hold asks before clearing"); app.loopClear(); run(0.3);
         CHECK(!app.loopExists(), "loops cleared");
         app.gotoPage(SamplerApp::P_TEMPO);
@@ -1173,7 +1186,7 @@ int main() {
         // live quantize: 1/4 grid, the sequencer records where the keys were snapped to
         quiet();
         if (app.status().playing) { btn(SamplerApp::PLAY); run(0.2); }
-        app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(1.f / 7.f); k[1].set(0.f); k[2].set(0.f); }   // 1/4, playback quantize OFF
+        app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[2].set(0.f); } app.setQuantGrids(1, 0);   // 1/4, playback quantize OFF
         app.gotoPage(SamplerApp::P_SQ); { auto k = app.knobs(); k[1].set(0.f); k[0].set(1.f); }                          // 1 bar, REC from a stopped transport
         run(0.01);
         run(0.79); size_t mark = all.size(); app.playNote(60, true); run(0.12); size_t early = all.size(); run(0.28); app.playNote(60, false);   // 0.8 s: closer to beat 2 (1.0 s)
@@ -1185,7 +1198,7 @@ int main() {
         if (n == 2) CHECK(std::abs(v[0].tick - 384) <= 3 && std::abs(v[1].tick - 576) <= 3, "recorded on the grid: ticks %d (expect 384) and %d (expect 576)", v[0].tick, v[1].tick);
         CHECK(rEarly < 0.003 && rLate > 0.003, "the early key waits for the grid line (before %.4f, after %.4f)", rEarly, rLate);
         { auto k = app.knobs(); k[0].set(0.f); } app.seqClear();   // stop and clear
-        app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(0.f); }
+        app.gotoPage(SamplerApp::P_TIMING); app.setQuantGrids(0, app.seqGridIndex());
         if (app.status().playing) { btn(SamplerApp::PLAY); run(0.2); }
         quiet();
         // count-in before a take: clicks (metronome is off), the take starts after one bar, keys during the count do not start it
@@ -1220,15 +1233,15 @@ int main() {
         const double all4 = note(); CHECK(all4 > 0.001 && finite(all), "track fx: chorus + gate + crush sound (%.4f)", all4);
         { auto k = app.knobs(); k[1].set(0.f); k[2].set(0.f); k[3].set(0.f); }
         CHECK(other > 0.003, "the other tracks are untouched (%.4f)", other);
-        app.gotoPage(SamplerApp::P_FX); for (int i = 0; i < 6; i++) btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX x6 from the sends: track fx");
-        app.gotoPage(SamplerApp::P_SQ); btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TFX, "FX returns to the page it was left on");
+        app.gotoPage(SamplerApp::P_FX); for (int i = 0; i < 6; i++) btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX3, "FX x6 from the sends: the OP-1 effects");
+        app.gotoPage(SamplerApp::P_SQ); btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX3, "FX returns to the page it was left on");
     }
     // ---- sequencer v2: overdub with undo, step entry, erase, touch, bounce to tape ----
     {
         auto quiet = [&] { run(4.0); };
         auto stop = [&] { if (app.status().playing) { btn(SamplerApp::PLAY); run(0.2); } };
         stop(); quiet(); app.selectTrack(0); app.seqClear(); run(0.3);
-        app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(0.f); k[1].set(0.f); k[2].set(0.f); }
+        app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[2].set(0.f); } app.setQuantGrids(0, 0);
         app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); k[1].set(0.f); k[3].set(0.f); } run(0.2);
         app.gotoPage(SamplerApp::P_SQ); { auto k = app.knobs(); k[0].set(1.f / 3); k[1].set(0.f); }   // PLAY, 1 bar
         // SEQ held = record the pattern while keys are played; let go and it loops
@@ -1312,6 +1325,33 @@ int main() {
     {   // the tape is only erased after the dialog: the CLEAR button opens it, the FM-1 SAVE hold asks for it too
         SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(5000);
         CHECK(!app.takeClearAsk(), "no clear request without a SAVE hold");
+    }
+    {   // the pads play with several fingers, nothing stays down when the fingers go, QUANTIZE in plain words, the track effects, the first take can be undone
+        Session s3(sr); s3.setDataDir("/tmp/fm1sampler_pads"); s3.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a3(s3, [](const uint8_t*, size_t) {}); a3.setTourDone(true);
+        std::vector<float> ob(512), ib(512, 0.f); auto run3 = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(ob.begin(), ob.end(), 0.f); s3.process(ob.data(), ib.data(), 256); std::this_thread::sleep_for(std::chrono::milliseconds(1)); a3.tick((uint32_t)(i + 1)); } };
+        run3(0.5); a3.gotoPage(SamplerApp::P_PADS); SamplerUI u3(a3); u3.setSize(860, 400, 0, 0); u3.frame(100);
+        float p1x = -1, p1y = 0, p2x = -1, p2y = 0;
+        for (auto& o : u3.ops()) if (o.type == UiOp::TEXT && o.f[2] == 10.f && o.f[0] > 170 && o.f[0] < 600) { if (o.text == "1") { p1x = o.f[0] + 20; p1y = o.f[1] + 18; } if (o.text == "2") { p2x = o.f[0] + 20; p2y = o.f[1] + 18; } }
+        CHECK(p1x > 0 && p2x > 0, "the pads page shows pads 1 and 2");
+        u3.touchP(0, 0, p1x, p1y, 200); u3.touchP(1, 0, p2x, p2y, 210); run3(0.4);
+        CHECK(s3.status().voiceN[a3.track()] >= 2, "two fingers on two pads: both sound (%d voices)", s3.status().voiceN[a3.track()]);
+        u3.touchP(0, 2, p1x, p1y, 600); u3.touchP(1, 2, p2x, p2y, 610); u3.frame(700); run3(4.0);
+        CHECK(s3.status().voiceN[a3.track()] == 0, "...and nothing is stuck once the fingers are up (%d voices)", s3.status().voiceN[a3.track()]);
+        u3.touchP(0, 0, p1x, p1y, 800); u3.touchP(1, 0, p2x, p2y, 810); run3(0.3); u3.cancelTouches(); u3.frame(900); run3(4.0);
+        CHECK(s3.status().voiceN[a3.track()] == 0, "...also when the system takes the touches away (%d voices)", s3.status().voiceN[a3.track()]);
+        a3.setQuant(3, false); CHECK(a3.quantText() == "1/16" && a3.seqGridIndex() == 4, "QUANTIZE 1/16 sets the pattern grid (%s)", a3.quantText().c_str());
+        a3.setQuant(3, true); CHECK(a3.quantText() == "1/16 TRIPLET" && a3.seqGridIndex() == 5, "...triplets are a switch on top (%s)", a3.quantText().c_str());
+        a3.setQuant(1, true); CHECK(a3.quantText() == "1/4", "...a quarter has no triplet here (%s)", a3.quantText().c_str());
+        a3.cycleQuant(); a3.cycleQuant(); a3.cycleQuant(); a3.cycleQuant(); CHECK(a3.quantText() == "OFF", "one button cycles it round to OFF (%s)", a3.quantText().c_str());
+        int tfx = 0; for (auto pg : {SamplerApp::P_TFX, SamplerApp::P_TFX2, SamplerApp::P_TFX3, SamplerApp::P_TFX4}) { a3.gotoPage(pg); auto k = a3.knobs(); int v = 0; for (auto& kn : k) v += kn.valid; tfx += v == 4 && SamplerApp::modeOf(pg) == 3; }
+        CHECK(tfx == 4, "four track effect pages with four knobs each, in the MIX tab");
+        a3.gotoPage(SamplerApp::P_TFX2); { auto k = a3.knobs(); k[0].set(0.8f); } CHECK(a3.state(a3.track()).tfDrive > 0.7f, "the track effect knobs reach the track (drive %.2f)", a3.state(a3.track()).tfDrive);
+        // the first take: UNDO empties the tape again
+        a3.gotoPage(SamplerApp::P_TEMPO); { auto k = a3.knobs(); k[3].set(1.f); } run3(0.2);
+        a3.loopRecord(); run3(0.1); a3.playNote(60, true); run3(0.2); a3.playNote(60, false); run3(2.5); a3.loopRecord(); run3(0.5);
+        CHECK(a3.loopExists(), "a first take is on the tape");
+        a3.globalUndo(); run3(0.5); CHECK(!a3.loopExists(), "UNDO of the first take empties the tape (tempo free again)");
+        a3.globalRedo(); run3(0.5); CHECK(a3.loopExists(), "REDO brings the take back");
     }
     {   // the overhaul: mute / solo, the first-run tour, the left-handed layout, the long press on a track
         Session s2(sr); s2.setDataDir("/tmp/fm1sampler_tour"); SamplerApp a2(s2, [](const uint8_t*, size_t) {});

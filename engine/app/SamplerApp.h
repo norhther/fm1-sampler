@@ -23,7 +23,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -76,9 +76,9 @@ public:
     // ---- the global strip: undo / redo over every track, the tempo, the tape ----
     void globalUndo() { s_.globalUndo(); say("UNDO"); }
     void globalRedo() { s_.globalRedo(); say("REDO"); }
-    float tempoNow() const { return st_.loopSamples > 0 ? (float)st_.bpm : tempo_; }
-    bool tempoLocked() const { return st_.loopSamples > 0; }
-    void tempoStep(int d) { setTempo(tempo_ + d); }   // says so when the loop holds the tempo
+    float tempoNow() const { return tempoPending_ > 0 ? tempoPending_ : st_.loopSamples > 0 ? (float)st_.bpm : tempo_; }
+    bool tempoLocked() const { return st_.loopSamples > 0; }   // a loop is on the tape: a new tempo stretches it (about a second, one UNDO step)
+    void tempoStep(int d);                                     // free tempo, or with a loop: after a short rest the loops are stretched to it
     void clearTrackLoop(int t) { s_.clipClear(t); say("TRACK " + std::to_string(t + 1) + " TAPE CLEARED"); }
     void toggleMute(int t) { ts_[t].mute = !ts_[t].mute; for (int i = 0; i < kTracks; i++) applyMix(i); }
     void toggleSolo(int t) { ts_[t].solo = !ts_[t].solo; for (int i = 0; i < kTracks; i++) applyMix(i); }
@@ -120,6 +120,13 @@ public:
     void seqResizeAt(int tick, int note, int len);        // touch: stretch the note that starts at `tick`
     int stepTicks() const { const int g = gridTicks(seqGrid_); return g ? g : kPpq / 4; }
     int seqGridIndex() const { return seqGrid_; }
+    // ---- QUANTIZE in plain words: what you play snaps to the beat. One setting for the keys, the pad and the pattern; triplets are a switch ----
+    int quantDiv() const { static const int m[kGrids] = {0, 1, 2, 2, 3, 3, 4, 4}; return m[std::min(kGrids - 1, std::max(0, seqGrid_))]; }   // 0 off, 1 1/4, 2 1/8, 3 1/16, 4 1/32
+    bool quantTrip() const { return seqGrid_ == 3 || seqGrid_ == 5 || seqGrid_ == 7; }
+    void setQuant(int div, bool trip) { static const int g[5] = {0, 1, 2, 4, 6}; div = std::min(4, std::max(0, div)); seqGrid_ = liveGrid_ = g[div] + (trip && div >= 2 ? 1 : 0); applyTempo(); }
+    void setQuantGrids(int live, int seq) { liveGrid_ = std::min(kGrids - 1, std::max(0, live)); seqGrid_ = std::min(kGrids - 1, std::max(0, seq)); applyTempo(); }   // the keys and the pattern apart (a saved project may have them so)
+    void cycleQuant() { setQuant((quantDiv() + 1) % 5, quantTrip()); say("QUANTIZE: " + quantText()); }
+    std::string quantText() const { static const char* n[5] = {"OFF", "1/4", "1/8", "1/16", "1/32"}; return std::string(n[quantDiv()]) + (quantTrip() ? " TRIPLET" : ""); }
     void cycleSeqGrid() { seqGrid_ = seqGrid_ >= kGrids - 1 || seqGrid_ < 1 ? 1 : seqGrid_ + 1; applyTempo(); }   // 1/4, 1/8, 1/8T ... 1/32T (the grid of the roll and of the quantize)
     int seqBarsOf(int t) const { return ts_[t].seqBars + 1; }
     void seqAddBarCopy() { if (ts_[track_].seqBars < 15) { ts_[track_].seqBars++; barsLocalAt_[track_] = nowMs_; s_.seqAddBar(track_, true); } }   // one more bar holding a copy of the last one
@@ -147,6 +154,7 @@ public:
         float vol = 0.8f, pan = 0.5f, sendR = 0.f, sendD = 0.f; bool mute = false, solo = false;   // mute / solo: only for this session
         int entry = -1;
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
+        float tfDrive = 0.f, tfFlanger = 0.f, tfPhaser = 0.f, tfTremolo = 0.f, tfWah = 0.f, tfRing = 0.f, tfWidth = 0.5f, tfSpring = 0.f, tfPhone = 0.f, tfPunch = 0.f; int tfRepeat = 0, tfFreeze = 0;   // ...the same set as the master
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
         int editOp = 0; float fineN = 0.5f, levelN = 1.f / 3.f;   // SAMPLE EDIT page: the edit to apply, fine tune (+-50 cents), sample level (0..3)
         int edW1 = 0, edW2 = 0, edType = 0, edUni = 0, edVoice = 0; float edDet2 = 0.5f, edCut = 0.5f, edRes = 0.f;   // SYNTH pages: the patch edited (0 = as the patch)
@@ -231,6 +239,7 @@ private:
     void encoder(int i, int delta);
     // ---- parameters ----
     void applyAll(int t);
+    Knob quantKnob(); Knob tripletKnob();
     void applyShape(int t, bool reslice = false); void applySynthEdit(int t); void applyPad(int t, int pad); void applyPads(int t); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
     void applyFx();
     void applyMasterFx();
@@ -248,6 +257,7 @@ private:
     
     uint32_t backupAt_ = 0;
     int midiSync_ = 0; uint64_t clkLast_ = 0, clkWindowStart_ = 0; int clkCount_ = 0; uint64_t tapLast_ = 0; double tapAvg_ = 0; int tapN_ = 0; bool extPlaying_ = false;
+    float tempoPending_ = 0; uint32_t tempoApplyAt_ = 0, tempoSentAt_ = 0; bool tempoSent_ = false;   // the tempo asked for while a loop is on the tape
     bool phoneOut_ = false, audition_ = false, clearAsk_ = false, leftHanded_ = false, access_ = false, tourDone_ = false;
     int theme_ = 0; bool fullscreen_ = false; void loadSettings(); void saveSettings();
     std::string project_ = "autosave"; uint32_t autosaveAt_ = 0, loadedAt_ = 0; bool tapeDirty_ = false, loading_ = false, wantMidi_ = false, anyRec_ = false;

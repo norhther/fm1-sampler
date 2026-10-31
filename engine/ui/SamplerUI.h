@@ -15,7 +15,9 @@ public:
     void setLink(bool midi, bool usbAudio) { linkMidi_ = midi; linkAudio_ = usbAudio; }
     void frame(uint32_t nowMs);
     const std::vector<UiOp>& ops() const { return ops_; }
-    void touch(int action /*0 down 1 move 2 up*/, float x, float y, uint32_t nowMs);
+    void touch(int action /*0 down 1 move 2 up*/, float x, float y, uint32_t nowMs) { touchP(0, action, x, y, nowMs); }
+    void touchP(int id, int action, float x, float y, uint32_t nowMs);   // one finger by its id: every finger has its own control under it (the pads play together)
+    void cancelTouches();                                                 // all fingers lifted at once (the system took the touch away)
     bool takeHaptic() { const bool h = haptic_; haptic_ = false; return h; }                     // a touch landed on a control: the phone should tick
     std::string takeAnnounce() { std::string s; s.swap(announce_); return s; }                    // a message for the screen reader (TalkBack)
     void openMenu() { menuOpen_ = true; }
@@ -33,7 +35,7 @@ public:
     float rollBase() const { return rollBase_; }
     float rollScroll() const { return rollScroll_; }
     void rollGrid(float& x, float& y, float& w, float& h) const { x = rollX0_; y = rollY0_; w = rollW_; h = rollH_; }   // the note grid of the last frame
-    void pinch(int phase /*0 start 1 move 2 end*/, float x1, float y1, float x2, float y2);   // two fingers on the piano roll: horizontally apart = zoom in time, vertically = pitch
+    bool pinch(int phase /*0 start 1 move 2 end*/, float x1, float y1, float x2, float y2);   // true: the two fingers are a pinch of the piano roll   // two fingers on the piano roll: horizontally apart = zoom in time, vertically = pitch
 
 private:
     struct Rect { float x, y, w, h; bool has(float px, float py) const { return px >= x && px < x + w && py >= y && py < y + h; } };
@@ -68,8 +70,10 @@ private:
     float W_ = 860, H_ = 400, top_ = 0, bottom_ = 0;
     std::vector<UiOp> ops_;
     std::vector<Hit> hits_;
-    Hit active_{};
-    bool haveActive_ = false;
+    struct Slot { Hit h{}; bool on = false, lpFired = false, lpMoved = false; uint32_t downAt = 0; float dx = 0, dy = 0; } slot_[16];   // a finger each
+    Slot* cur_ = nullptr;
+    bool anyTouch() const { for (auto& s : slot_) if (s.on) return true; return false; }
+    uint16_t padMask_ = 0;   // the pads that are down
     uint32_t now_ = 0;
     Session::Status st_{};
     bool linkMidi_ = false, linkAudio_ = false, sheetOpen_ = false;
@@ -89,8 +93,8 @@ private:
     void askTapeClear(int track);   // -1: the whole tape
     void confirmSheet(); void menuSheet(); void tourSheet(); void trackMenuSheet(); void mixerView(Rect r); void flowStrip(Rect r); void undoToast();
     void showUndo(const std::string& msg) { undoMsg_ = msg; undoMsgAt_ = now_ ? now_ : 1; }
-    bool menuOpen_ = false, tourOpen_ = false, tourSeen_ = false, haptic_ = false, lpFired_ = false, lpMoved_ = false; int tourStep_ = 0, trackMenu_ = -1;
-    float textScale_ = 1.f, downX_ = 0, downY_ = 0; uint32_t downAt_ = 0, undoMsgAt_ = 0;
+    bool menuOpen_ = false, tourOpen_ = false, tourSeen_ = false, haptic_ = false; int tourStep_ = 0, trackMenu_ = -1;
+    float textScale_ = 1.f; uint32_t undoMsgAt_ = 0;
     std::string announce_, lastToast_, undoMsg_;
     Rect rTracks_{0, 0, 0, 0}, rPanel_{0, 0, 0, 0}, rArea_{0, 0, 0, 0}, rRec_{0, 0, 0, 0}, rUndo_{0, 0, 0, 0}, rTempo_{0, 0, 0, 0};   // where things are, for the tour
     bool songOpen_ = false, copyArm_ = false; bool projOpen_ = false; int projSel_ = -1; float projScroll_ = 0, projLastY_ = 0, projMoved_ = 0; uint32_t projDelAt_ = 0; std::vector<std::string> projList_; Rect projListRect_{0, 0, 0, 0};

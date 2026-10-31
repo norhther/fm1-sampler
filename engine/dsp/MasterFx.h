@@ -37,7 +37,7 @@ public:
     bool active() const {
         return p_.chorus > 0.004f || p_.flanger > 0.004f || p_.phaser > 0.004f || p_.comp >= 0.01f || std::fabs(p_.width - 0.5f) >= 0.01f
             || p_.drive > 0.004f || eqOn() || p_.tremolo > 0.004f || p_.wah > 0.004f || p_.ringmod > 0.004f
-            || std::fabs(p_.filter - 0.5f) >= 0.02f || p_.crush >= 0.005f || p_.tapeStop > 0.02f || p_.spring > 0.004f || p_.phone > 0.004f || p_.punch > 0.004f
+            || std::fabs(p_.filter - 0.5f) >= 0.02f || p_.crush >= 0.005f || p_.tapeStop > 0.02f || tsOn_ || p_.spring > 0.004f || p_.phone > 0.004f || p_.punch > 0.004f
             || p_.repeat > 0 || p_.reverse > 0 || p_.gate > 0 || p_.freeze > 0;
     }
     void feedOnly(const float* x, int n) {
@@ -323,28 +323,27 @@ private:
             if (++repK_ >= repLen_) repK_ = 0;
         }
     }
-    // ---- tape stop: the signal slows down and stops (a read head that decelerates behind the writing one); letting go jumps back to live ----
+    // ---- tape stop, as on the OP-1: the tape winds down over about two seconds (the pitch falls with it), and on release it spins up again before the live signal comes back ----
     void tapeStop(float* x, int n) {
         const size_t N = ts_.size() / 2;
         const float brake = p_.tapeStop;
-        if (brake < 0.02f) {
-            if (tsOn_) { tsOn_ = false; tsRel_ = 64; }
-            for (int i = 0; i < n; i++) {
-                ts_[2 * tsW_] = x[2 * i]; ts_[2 * tsW_ + 1] = x[2 * i + 1]; if (++tsW_ >= N) tsW_ = 0;
-                if (tsRel_ > 0) { const float k = 1.f - (float)tsRel_-- / 64.f; x[2 * i] *= k; x[2 * i + 1] *= k; }   // fade the live signal back in
-            }
-            return;
-        }
-        if (!tsOn_) { tsOn_ = true; tsPos_ = (double)tsW_; tsSpeed_ = 1.f; }
+        const float down = 1.f / (1.8f * (float)sr_), up = 1.f / (0.9f * (float)sr_);   // speed per sample: 1 -> 0 in 1.8 s, 0 -> 1 in 0.9 s
+        const int xf = 1024;                                                              // hand-over from the spun-up tape to the live signal
+        if (!tsOn_ && brake >= 0.02f) { tsOn_ = true; tsPos_ = (double)tsW_; tsSpeed_ = 1.f; tsRel_ = 0; }
+        const float target = brake < 0.02f ? 1.f : 1.f - brake;
         for (int i = 0; i < n; i++) {
-            ts_[2 * tsW_] = x[2 * i]; ts_[2 * tsW_ + 1] = x[2 * i + 1]; if (++tsW_ >= N) tsW_ = 0;
-            tsSpeed_ += ((1.f - brake) - tsSpeed_) * 0.0005f;
+            const float l0 = x[2 * i], r0 = x[2 * i + 1];
+            ts_[2 * tsW_] = l0; ts_[2 * tsW_ + 1] = r0; if (++tsW_ >= N) tsW_ = 0;
+            if (!tsOn_) continue;   // live
+            if (tsSpeed_ > target) tsSpeed_ = std::max(target, tsSpeed_ - down); else if (tsSpeed_ < target) tsSpeed_ = std::min(target, tsSpeed_ + up);
             tsPos_ += tsSpeed_; if (tsPos_ >= (double)N) tsPos_ -= (double)N;
             double lag = (double)tsW_ - tsPos_; if (lag < 0) lag += (double)N;
             if (lag > (double)N - 2) { tsPos_ = (double)tsW_; lag = 0; }   // the write head lapped the read head: start again
             const size_t i0 = (size_t)tsPos_ % N, i1 = (i0 + 1) % N; const float fr = (float)(tsPos_ - std::floor(tsPos_)), g = std::sqrt(std::max(0.f, tsSpeed_));
-            x[2 * i] = (ts_[2 * i0] + (ts_[2 * i1] - ts_[2 * i0]) * fr) * g;
-            x[2 * i + 1] = (ts_[2 * i0 + 1] + (ts_[2 * i1 + 1] - ts_[2 * i0 + 1]) * fr) * g;
+            float dl = (ts_[2 * i0] + (ts_[2 * i1] - ts_[2 * i0]) * fr) * g, dr = (ts_[2 * i0 + 1] + (ts_[2 * i1 + 1] - ts_[2 * i0 + 1]) * fr) * g;
+            if (brake < 0.02f && tsSpeed_ >= 1.f && tsRel_ == 0) tsRel_ = xf;   // released and spun up: cross over to live
+            if (tsRel_ > 0) { const float k = (float)tsRel_ / xf; dl = dl * k + l0 * (1.f - k); dr = dr * k + r0 * (1.f - k); if (--tsRel_ == 0) tsOn_ = false; }
+            x[2 * i] = dl; x[2 * i + 1] = dr;
         }
     }
     // ---- compressor: linked peak detector, 4:1, threshold 0 .. -24 dB, half the lost level made up ----

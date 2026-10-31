@@ -30,7 +30,8 @@ public final class Native {
     public static native Object[] uiFrame(long h, float w, float hh, float top, float bottom, long nowMs);
     public static native boolean uiHaptic(long h);      // a touch landed on a control: tick
     public static native String uiAnnounce(long h);      // a message for the screen reader (empty: none)
-    public static native void uiTouch(long h, int action, float x, float y, long nowMs);
-    public static native void uiPinch(long h, int phase /* 0 start, 1 move, 2 end */, float x1, float y1, float x2, float y2);
+    public static native void uiTouch(long h, int id, int action, float x, float y, long nowMs);   // one finger by its pointer id
+    public static native void uiCancel(long h);                                                     // every finger lifted at once
+    public static native boolean uiPinch(long h, int phase /* 0 start, 1 move, 2 end */, float x1, float y1, float x2, float y2);
     private Native() { }
 }

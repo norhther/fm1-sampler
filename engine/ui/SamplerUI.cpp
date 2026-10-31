@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -32,27 +32,30 @@ std::string SamplerUI::fit(const std::string& s, float width, float size) const 
     const size_t maxc = (size_t)std::max(1.f, width / (size * textScale_ * 0.60f));
     return s.size() <= maxc ? s : s.substr(0, maxc > 1 ? maxc - 1 : 1) + "\xE2\x80\xA6";
 }
-void SamplerUI::touch(int action, float x, float y, uint32_t now) {
+void SamplerUI::touchP(int id, int action, float x, float y, uint32_t now) {
     now_ = now;
+    Slot& sl = slot_[id & 15];
     if (action == 0) {
-        haveActive_ = false; lpFired_ = lpMoved_ = false; downAt_ = now; downX_ = x; downY_ = y;
-        for (size_t i = hits_.size(); i-- > 0;) if (hits_[i].r.has(x, y)) { active_ = hits_[i]; haveActive_ = true; haptic_ = true; if (active_.down) active_.down(x, y); break; }
+        if (sl.on && sl.h.up) { cur_ = &sl; sl.h.up(); }   // a finger that never lifted (a lost event): let go of what it held
+        sl = Slot{}; sl.downAt = now; sl.dx = x; sl.dy = y;
+        for (size_t i = hits_.size(); i-- > 0;) if (hits_[i].r.has(x, y)) { sl.h = hits_[i]; sl.on = true; haptic_ = true; cur_ = &sl; if (sl.h.down) sl.h.down(x, y); break; }
     } else if (action == 1) {
-        if (std::fabs(x - downX_) + std::fabs(y - downY_) > 16) lpMoved_ = true;
-        if (haveActive_ && active_.move) active_.move(x, y);
-    } else if (haveActive_) {
-        if (active_.up) active_.up();
-        haveActive_ = false;
+        if (std::fabs(x - sl.dx) + std::fabs(y - sl.dy) > 16) sl.lpMoved = true;
+        if (sl.on && sl.h.move) { cur_ = &sl; sl.h.move(x, y); }
+    } else if (sl.on) {
+        cur_ = &sl; sl.on = false;
+        if (sl.h.up) sl.h.up();
     }
 }
+void SamplerUI::cancelTouches() { for (int i = 0; i < 16; i++) if (slot_[i].on) touchP(i, 2, 0, 0, now_); }
 // two fingers on the piano roll: the distance between them in x zooms the time, in y the pitch range; what is under the fingers stays under them
-void SamplerUI::pinch(int phase, float x1, float y1, float x2, float y2) {
-    if (phase == 2) { pinchOn_ = false; return; }
+bool SamplerUI::pinch(int phase, float x1, float y1, float x2, float y2) {
+    if (phase == 2) { pinchOn_ = false; return false; }
     const float cx = 0.5f * (x1 + x2), cy = 0.5f * (y1 + y2), dx = std::fabs(x1 - x2), dy = std::fabs(y1 - y2), minD = 60.f;   // (tiny distances would make the zoom jump)
     if (phase == 0) {
         pinchOn_ = false;
-        if (!rollOn_ || cx < rollX0_ || cx > rollX0_ + rollW_ || cy < rollY0_ || cy > rollY0_ + rollH_) return;
-        rollTouchAt_ = now_; haveActive_ = false; rollMoved_ = true; drag_ = {};   // the first finger was a touch of the roll: it must not become a tap or a stretched note
+        if (!rollOn_ || cx < rollX0_ || cx > rollX0_ + rollW_ || cy < rollY0_ || cy > rollY0_ + rollH_) return false;
+        rollTouchAt_ = now_; for (auto& sl : slot_) sl.on = false; rollMoved_ = true; drag_ = {};   // the first finger was a touch of the roll: it must not become a tap or a stretched note
         if (auditionNote_ >= 0) { app_.session().noteOff(app_.track(), auditionNote_); auditionNote_ = -1; }
         pinchOn_ = true; pinchDx0_ = std::max(dx, minD); pinchDy0_ = std::max(dy, minD);
         pinchZoom0_ = rollZoom_; pinchRows0_ = rollRowsF_; pinchBase0_ = rollBase_;
@@ -60,15 +63,16 @@ void SamplerUI::pinch(int phase, float x1, float y1, float x2, float y2) {
         pinchTick0_ = rollScroll_ + (cx - rollX0_) / rollW_ * vis0;
         pinchYFrac0_ = (cy - rollY0_) / rollH_;
         pinchNote0_ = rollBase_ + rollRowsF_ * (1.f - pinchYFrac0_);
-        return;
+        return true;
     }
-    if (!pinchOn_) return;
+    if (!pinchOn_) return false;
     const float zoomMax = std::min(32.f, std::max(1.f, rollPt_ / (float)rollMinVisible_));
     rollZoom_ = std::min(zoomMax, std::max(1.f, pinchZoom0_ * std::max(dx, minD) / pinchDx0_));
     rollRowsF_ = std::min(60.f, std::max(5.f, pinchRows0_ * pinchDy0_ / std::max(dy, minD)));    // fingers apart = fewer, bigger rows
     const float vis = rollPt_ / rollZoom_, yFrac = (cy - rollY0_) / rollH_;
     rollScroll_ = pinchTick0_ - (cx - rollX0_) / rollW_ * vis;                                      // the tick that was between the fingers still is
     rollBase_ = pinchNote0_ - rollRowsF_ * (1.f - yFrac);
+    return true;
 }
 
 void SamplerUI::button(Rect r, const std::string& label, bool on, std::function<void()> f, float size, bool accent) {
@@ -87,7 +91,7 @@ void SamplerUI::dangerButton(Rect r, const std::string& label, std::function<voi
     tap(r, std::move(f));
 }
 void SamplerUI::longPress(Rect r, std::function<void()> onTap, std::function<void()> onLong) {
-    hits_.push_back({r, [](float, float) {}, nullptr, [this, onTap] { if (!lpFired_ && !lpMoved_) onTap(); }, std::move(onLong)});
+    hits_.push_back({r, [](float, float) {}, nullptr, [this, onTap] { if (cur_ && !cur_->lpFired && !cur_->lpMoved) onTap(); }, std::move(onLong)});
 }
 
 // ---- frame ----
@@ -98,7 +102,8 @@ void SamplerUI::frame(uint32_t now) {
     ops_.clear(); hits_.clear(); rollOn_ = false;
     { const std::string t = app_.toast(); if (t != lastToast_) { lastToast_ = t; if (!t.empty()) announce_ = t; } }   // toasts are read out by the screen reader
     if (!app_.tourDone() && !tourSeen_) { tourSeen_ = true; tourOpen_ = true; tourStep_ = 0; }
-    if (haveActive_ && active_.lp && !lpFired_ && !lpMoved_ && now - downAt_ > 500) { lpFired_ = true; haptic_ = true; active_.lp(); }
+    for (auto& sl : slot_) if (sl.on && sl.h.lp && !sl.lpFired && !sl.lpMoved && now - sl.downAt > 500) { sl.lpFired = true; haptic_ = true; cur_ = &sl; sl.h.lp(); }
+    if (padMask_ && !anyTouch()) { for (int p = 0; p < 16; p++) if (padMask_ >> p & 1) app_.padHit(p, 0, false); padMask_ = 0; }   // no finger on the screen, so no pad can be down
     if (app_.takeClearAsk() && app_.loopExists()) askTapeClear(-1);   // the FM-1 SAVE hold asks the same question
     rrect({0, 0, W_, H_}, 0, BG);
     const float tb = 44, left = 176, right = 252, y0 = tb + MARGIN, h = H_ - tb - 2 * MARGIN;
@@ -148,8 +153,8 @@ void SamplerUI::topBar(Rect r) {
     button({x, 6, 30, bh}, "-", false, [this] { app_.tempoStep(-1); }, 14); x += 33;
     rTempo_ = {x, 6, 74, bh};
     rrect(rTempo_, R_CONTROL, SURFACE);
-    text(rTempo_.x + rTempo_.w / 2, cy - 4, 15, locked ? DIM : TEXT, num("%.0f", app_.tempoNow()), 1, true);
-    text(rTempo_.x + rTempo_.w / 2, cy + 11, 8, DIM, locked ? "LOCKED BY LOOP" : "BPM  DRAG", 1, false);
+    text(rTempo_.x + rTempo_.w / 2, cy - 4, 15, TEXT, num("%.0f", app_.tempoNow()), 1, true);
+    text(rTempo_.x + rTempo_.w / 2, cy + 11, 8, locked ? ACCENT : DIM, locked ? "STRETCHES TAPE" : "BPM  DRAG", 1, false);
     hit(rTempo_, [this](float px, float) { tempoDragX_ = px; }, [this](float px, float) { const int d = (int)((px - tempoDragX_) / 5.f); if (d) { app_.tempoStep(d); tempoDragX_ += d * 5.f; } });
     x += 77;
     button({x, 6, 30, bh}, "+", false, [this] { app_.tempoStep(1); }, 14); x += 40;
@@ -203,6 +208,7 @@ void SamplerUI::sampleArea(Rect r) {
     const std::string lab = app_.sampleLabel(t);
     text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - 120, T_TITLE), 0, true);
     text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);
+    if (app_.page() == SamplerApp::P_PADS) button({r.x + r.w - 214, r.y, 214, 26}, "QUANTIZE: " + app_.quantText(), app_.quantDiv() > 0, [this] { app_.cycleQuant(); }, 10.5f);   // the pads snap to the beat too
     if (app_.page() == SamplerApp::P_TEMPO) { button({r.x + r.w - 210, r.y, 110, 26}, "TAP TEMPO", false, [this] { app_.tapTempo(); }, 10.5f, true); }
     if (app_.page() == SamplerApp::P_MIX) { mixerView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_TAPEV) { tapeView({r.x, r.y + 28, r.w, r.h - 28}); return; }
@@ -329,15 +335,31 @@ void SamplerUI::sampleArea(Rect r) {
 }
 
 // ---- tape view: one lane per track with what is recorded there, the bars of the loop and the playhead (like the OP-1 tape) ----
-void SamplerUI::tapeView(Rect r) {
-    const bool has = app_.loopExists();
-    const int bars = std::max(1, st_.loopBars);
-    text(r.x, r.y + 10, T_CAPTION, has ? TEXT : DIM, has ? std::to_string(bars) + (bars == 1 ? " BAR  " : " BARS  ") + num("%.0f BPM", st_.bpm) + "  " + num("%.1f S", st_.loopSamples / std::max(1, app_.session().sampleRate())) : "THE TAPE IS EMPTY: PRESS REC", 0, true);
-    { float bx = r.x + r.w - 112;   // right to left: CLEAR TAPE, SAVE LOOP, and before the first take how many bars it lasts
-      dangerButton({bx, r.y - 2, 112, 26}, "CLEAR TAPE", [this, has] { if (has) askTapeClear(-1); else app_.say("THE TAPE IS ALREADY EMPTY"); }, 9.5f); bx -= 92;
-      button({bx, r.y - 2, 86, 26}, "SAVE LOOP", false, [this] { app_.loopSave(); }, 9.5f); bx -= 90;
-      if (!has && !st_.freeRecording && !st_.freeArmed) button({bx, r.y - 2, 86, 26}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f); }
-    const float labW = 34, top = r.y + 28, laneH = (r.h - 28) / Session::kTracks, wx = r.x + labW + 4, ww = r.w - labW - 4;
+void SamplerUI::tapeView(Rect r) {   // like the OP-1 tape: two reels and the head, a counter, one lane per track with its waveform, a ruler of bars
+    const bool has = app_.loopExists(), rec = st_.freeRecording;
+    const int bars = std::max(1, st_.loopBars), sr = std::max(1, app_.session().sampleRate());
+    const double lenS = has ? st_.loopSamples / sr : 0.0, nowS = rec ? st_.freeSeconds : has ? st_.pos / sr : 0.0;
+    const float lp = has && st_.loopSamples > 0 ? std::min(1.f, std::max(0.f, (float)(st_.pos / st_.loopSamples))) : 0.f;
+    // the reels: the supply shrinks and the take-up grows as the tape runs by; the spokes turn with the time
+    const float cy = r.y + 21, rl = 17.f - 7.f * lp, rr = 10.f + 7.f * lp, lx = r.x + 24, rx = r.x + 82, ph = (float)nowS * 5.f;
+    auto reel = [&](float cx, float rad) {
+        circle(cx, cy, rad, OUTLINE); circle(cx, cy, rad - 2.5f, SURFACE);
+        for (int k = 0; k < 3; k++) { const float a = ph + k * 2.0944f; line(cx, cy, cx + std::cos(a) * (rad - 3), cy + std::sin(a) * (rad - 3), rec ? ACCENT : TEXT, 2); }
+        circle(cx, cy, 3.5f, rec ? ACCENT : TEXT);
+    };
+    reel(lx, rl); reel(rx, rr);
+    line(lx - rl * 0.3f, cy + rl, r.x + 53, cy + 20, DIM, 1); line(r.x + 53, cy + 20, rx + rr * 0.3f, cy + rr, DIM, 1);   // the tape to the head
+    tri(r.x + 48, cy + 19, r.x + 58, cy + 19, r.x + 53, cy + 25, TEXT);
+    const int m = (int)(nowS / 60); const double sec = nowS - m * 60;
+    text(r.x + 108, cy - 4, 15, rec ? ACCENT : TEXT, num("%d:", m) + (sec < 10 ? "0" : "") + num("%.1f", sec), 0, true);
+    text(r.x + 108, cy + 14, T_CAPTION, DIM, has ? std::to_string(bars) + (bars == 1 ? " BAR  " : " BARS  ") + num("%.0f BPM  ", st_.bpm) + num("%.1f S", lenS) : rec ? "RECORDING THE FIRST TAKE" : "THE TAPE IS EMPTY: PRESS REC", 0, true);
+    { float bx = r.x + r.w - 104;   // right to left: CLEAR TAPE, SAVE LOOP, and before the first take how many bars it lasts
+      dangerButton({bx, r.y - 2, 104, 26}, "CLEAR TAPE", [this, has] { if (has) askTapeClear(-1); else app_.say("THE TAPE IS ALREADY EMPTY"); }, 9.5f); bx -= 76;
+      button({bx, r.y - 2, 72, 26}, "SAVE LOOP", false, [this] { app_.loopSave(); }, 9.f); bx -= 80;
+      if (!has && !rec && !st_.freeArmed) button({bx, r.y - 2, 76, 26}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
+      else if (has) button({bx, r.y - 2, 76, 26}, "UNDO TAKE", st_.globalUndoN > 0, [this] { app_.globalUndo(); }, 9.5f); }
+    const float labW = 34, ruler = 12, top = r.y + 48 + ruler, laneH = (r.y + r.h - top) / Session::kTracks, wx = r.x + labW + 4, ww = r.w - labW - 4;
+    if (has) for (int b = 0; b < bars; b++) text(wx + ww * b / bars + 3, top - ruler / 2 - 1, 8, DIM, std::to_string(b + 1), 0, false);   // the ruler: where each bar starts
     for (int t = 0; t < Session::kTracks; t++) {
         const Rect lane{r.x, top + t * laneH, r.w, laneH - 2};
         const bool sel = t == app_.track(), clip = st_.track_has_clip[t];
@@ -346,16 +368,16 @@ void SamplerUI::tapeView(Rect r) {
         float pk[400]; const int n = clip ? app_.session().loopPeaks(t, pk, 400) : 0;
         if (n > 0) {
             float mx = 0.05f; for (int i = 0; i < n; i++) mx = std::max(mx, pk[i]);
-            const float cy = lane.y + lane.h / 2, half = lane.h / 2 - 2, bw = ww / n;
-            for (int i = 0; i < n; i++) { const float v = std::min(1.f, pk[i] / mx); if (v > 0.02f) rrect({wx + i * bw, cy - v * half, std::max(1.f, bw), std::max(1.f, 2 * v * half)}, 0, st_.track_clip_rec[t] ? ACCENT : sel ? TEXT : DIM); }
+            const float lcy = lane.y + lane.h / 2, half = lane.h / 2 - 2, bw = ww / n;
+            const uint32_t col = st_.track_clip_rec[t] ? ACCENT : theme::trackColor(t);   // a colour per track, like the four OP-1 tracks
+            for (int i = 0; i < n; i++) { const float v = std::min(1.f, pk[i] / mx); if (v > 0.02f) rrect({wx + i * bw, lcy - v * half, std::max(1.f, bw), std::max(1.f, 2 * v * half)}, 0, col); }
         } else text(wx + 4, lane.y + lane.h / 2, 9, DIM, "EMPTY", 0, false);
         hit(lane, [this, t](float, float) { app_.selectTrack(t); });   // tap a lane: that track
         if (clip) button({lane.x + lane.w - 36, lane.y + 1, 34, std::min(lane.h - 2, 18.f)}, "X", false, [this, t] { askTapeClear(t); }, 9);
     }
     if (has) {   // bar lines and the playhead over all lanes
         for (int b = 0; b < bars; b++) line(wx + ww * b / bars, top, wx + ww * b / bars, top + laneH * Session::kTracks - 2, OUTLINE, 1);
-        const float lp = st_.loopSamples > 0 ? (float)(st_.pos / st_.loopSamples) : 0.f;
-        rrect({wx + std::min(1.f, std::max(0.f, lp)) * ww - 1, top - 2, 3, laneH * Session::kTracks}, 0, st_.freeRecording ? ACCENT : TEXT);
+        rrect({wx + lp * ww - 1, top - 2, 3, laneH * Session::kTracks}, 0, rec ? ACCENT : TEXT);
     }
 }
 
@@ -385,7 +407,7 @@ void SamplerUI::sequencerView(Rect r) {
     tb("TIME -", false, [this] { rollZoom_ = std::max(1.f, rollZoom_ / 1.6f); });
     tb("TIME +", false, [this, zoomMax] { rollZoom_ = std::min(zoomMax, rollZoom_ * 1.6f); });
     tb("FIT", false, [this] { rollFitTrack_ = -1; });
-    tb(std::string("GRID ") + gridName(app_.seqGridIndex() ? app_.seqGridIndex() : 4), false, [this] { app_.cycleSeqGrid(); }, 1.5f);
+    tb("QUANTIZE " + app_.quantText(), app_.quantDiv() > 0, [this] { app_.cycleQuant(); }, 1.9f);   // one tap: off, 1/4, 1/8, 1/16, 1/32
     tb(drumView_ == 0 ? "DRUMS" : drumView_ == 1 ? "PADS 1-8" : "PADS 9-16", drumView_ != 0, [this] { drumView_ = (drumView_ + 1) % 3;  });
     tb("SELECT", selMode_, [this] { selMode_ = !selMode_; sel_.clear(); drag_ = {}; rbOn_ = false; }, 1.4f);
     // the roll
@@ -398,7 +420,7 @@ void SamplerUI::sequencerView(Rect r) {
     const int rows = (int)std::lround(rollRowsF_), visible = std::max(2 * st, (int)(pt / rollZoom_)); const float zoom = (float)pt / visible;
     const float x0 = roll.x + 2 + keyW, y0 = roll.y + 2 + rulerH, W = roll.w - 4 - keyW, H = roll.h - 4 - rulerH, rh = H / rows;
     const double playTick = std::fmod(st_.beatPos * kPpq, (double)pt);
-    if (zoom > 1 && (st_.playing || state > 0) && !haveActive_ && now_ - rollTouchAt_ > 3000 && (playTick < rollScroll_ || playTick >= rollScroll_ + visible)) rollScroll_ = (float)(std::floor(playTick / visible) * visible);   // the view pages along with the playhead
+    if (zoom > 1 && (st_.playing || state > 0) && !anyTouch() && now_ - rollTouchAt_ > 3000 && (playTick < rollScroll_ || playTick >= rollScroll_ + visible)) rollScroll_ = (float)(std::floor(playTick / visible) * visible);   // the view pages along with the playhead
     rollScroll_ = std::min((float)(pt - visible), std::max(0.f, rollScroll_));
     rollBase_ = std::min(127.f - rows, std::max(0.f, rollBase_));
     const int base = (int)std::floor(rollBase_); const float sc0 = rollScroll_;   // what is drawn is what a touch lands on, even if the view moves before the finger arrives
@@ -585,13 +607,13 @@ void SamplerUI::padsView(Rect r) {
     for (int i = 0; i < 16; i++) {
         const int row = i / 4, col = i % 4, pad = (3 - row) * 4 + col;   // pad 1 is bottom left, like on an MPC
         const Rect b{r.x + col * (pw + gap), r.y + row * (ph + gap), pw, ph};
-        const bool sel = ts.selPad == pad, down = padDown_ == pad;
+        const bool sel = ts.selPad == pad, down = padMask_ >> pad & 1;
         rrect(b, R_CARD, down ? ACCENT : sel ? RAISED : SURFACE); stroke(b, R_CARD, sel || down ? ACCENT : OUTLINE, sel ? 2 : 1);
         text(b.x + 8, b.y + 14, 10, down ? ON_ACCENT : DIM, std::to_string(pad + 1), 0, true);
         text(b.x + b.w / 2, b.y + b.h / 2, 13, down ? ON_ACCENT : TEXT, fit(app_.padName(pad), b.w - 10, 13), 1, true);
         if (ts.padGroup[pad] > 0) text(b.x + b.w - 8, b.y + 14, 9, down ? ON_ACCENT : ACCENT, "CH" + std::to_string(ts.padGroup[pad]), 2, true);
-        hit(b, [this, pad, b](float, float y) { padDown_ = pad; app_.selectPad(pad); app_.padHit(pad, 40 + (int)(87.f * clamp01((y - b.y) / b.h)), true); },
-            nullptr, [this, pad] { padDown_ = -1; app_.padHit(pad, 0, false); });
+        hit(b, [this, pad, b](float, float y) { if (padMask_ >> pad & 1) app_.padHit(pad, 0, false); padMask_ |= 1u << pad; app_.selectPad(pad); app_.padHit(pad, 40 + (int)(87.f * clamp01((y - b.y) / b.h)), true); },
+            nullptr, [this, pad] { padMask_ &= ~(1u << pad); app_.padHit(pad, 0, false); });   // every finger has its own pad
     }
 }
 

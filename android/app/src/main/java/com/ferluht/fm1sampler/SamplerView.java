@@ -84,25 +84,37 @@ public class SamplerView extends View {
         postInvalidateOnAnimation();
     }
 
-    private boolean pinching;   // two fingers are down (or were, and not all of them are up yet): the single finger events are ignored meanwhile
+    private boolean pinching;   // two fingers on the piano roll: a pinch zooms it, the single finger events are ignored meanwhile
 
+    private void touch(MotionEvent e, int index, int action) {
+        Native.uiTouch(h, e.getPointerId(index), action, e.getX(index) / d, e.getY(index) / d, SystemClock.uptimeMillis());
+        if (action == 0 && Native.uiHaptic(h)) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);   // every control ticks under the finger
+    }
+
+    /** Every finger is its own touch (the pads play together); two fingers on the piano roll are a pinch instead. */
     @Override public boolean onTouchEvent(MotionEvent e) {
-        int act = e.getActionMasked();
-        if (act == MotionEvent.ACTION_POINTER_DOWN && e.getPointerCount() == 2) {   // a second finger: pinch (the piano roll zooms)
-            pinching = true;
-            Native.uiPinch(h, 0, e.getX(0) / d, e.getY(0) / d, e.getX(1) / d, e.getY(1) / d);
+        final int act = e.getActionMasked(), idx = e.getActionIndex();
+        switch (act) {
+        case MotionEvent.ACTION_DOWN:
+            pinching = false; touch(e, 0, 0); return true;
+        case MotionEvent.ACTION_POINTER_DOWN:
+            if (pinching) return true;
+            if (e.getPointerCount() == 2 && Native.uiPinch(h, 0, e.getX(0) / d, e.getY(0) / d, e.getX(1) / d, e.getY(1) / d)) { pinching = true; return true; }
+            touch(e, idx, 0); return true;
+        case MotionEvent.ACTION_MOVE:
+            if (pinching) { if (e.getPointerCount() >= 2) Native.uiPinch(h, 1, e.getX(0) / d, e.getY(0) / d, e.getX(1) / d, e.getY(1) / d); }
+            else for (int i = 0; i < e.getPointerCount(); i++) touch(e, i, 1);
             return true;
-        }
-        if (pinching) {
-            if (act == MotionEvent.ACTION_MOVE && e.getPointerCount() >= 2) Native.uiPinch(h, 1, e.getX(0) / d, e.getY(0) / d, e.getX(1) / d, e.getY(1) / d);
-            else if (act == MotionEvent.ACTION_POINTER_UP && e.getPointerCount() == 2) Native.uiPinch(h, 2, 0, 0, 0, 0);
-            else if (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) { Native.uiPinch(h, 2, 0, 0, 0, 0); pinching = false; }
+        case MotionEvent.ACTION_POINTER_UP:
+            if (pinching) { if (e.getPointerCount() == 2) Native.uiPinch(h, 2, 0, 0, 0, 0); } else touch(e, idx, 2);
             return true;
+        case MotionEvent.ACTION_UP:
+            if (pinching) { Native.uiPinch(h, 2, 0, 0, 0, 0); pinching = false; } else touch(e, idx, 2);
+            return true;
+        case MotionEvent.ACTION_CANCEL:   // the system took the touch away: nothing may stay pressed
+            if (pinching) { Native.uiPinch(h, 2, 0, 0, 0, 0); pinching = false; }
+            Native.uiCancel(h); return true;
         }
-        int a = act == MotionEvent.ACTION_DOWN ? 0 : act == MotionEvent.ACTION_MOVE ? 1 : (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) ? 2 : -1;
-        if (a < 0) return super.onTouchEvent(e);
-        Native.uiTouch(h, a, e.getX() / d, e.getY() / d, SystemClock.uptimeMillis());
-        if (a == 0 && Native.uiHaptic(h)) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);   // every control ticks under the finger
-        return true;
+        return super.onTouchEvent(e);
     }
 }
