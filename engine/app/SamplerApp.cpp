@@ -103,7 +103,7 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "Track effects, part 3: ring mod, auto-wah, stereo width, freeze. Only this track.",         // TFX3
     "Track effects, part 4: spring reverb, phone, punch, beat repeat. Only this track.",         // TFX4
     "TAPE STOP of the top bar: run-down time, spin-up time, depth, HOLD or LATCH.",   // TSTOP
-    "Play or stop the pattern by itself. KEYS: a key starts the pattern, the other keys move it up or down. START: on the beat or the bar. NUDGE: slide the first beat.",   // TRIG
+    "PATTERN on/off. KEYS: a key starts it, other keys transpose. LAUNCH: beat or bar.",   // TRIG
 };
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }

@@ -573,8 +573,8 @@ void SamplerUI::sequencerView(Rect r) {
     int bx = 0;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + barsW + 6 + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
     b(state == 2 ? "STOP" : "REC NOTES", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
-    { const bool run = app_.seqRunning(t); b(run ? (st_.seqRun[t] ? "STOP" : "WAITING") : "PLAY", run, [this] { app_.seqRunToggle(); }); }   // the pattern on its own: PLAY starts it from the first beat on the next beat or bar
-    b("TO TAPE", false, [this] { app_.seqBounce(); });   // one pass of this pattern recorded on the tape (sets the loop length)
+    { const bool run = app_.seqRunning(t); b(run ? (st_.seqRun[t] ? "PATTERN ON" : "WAITING...") : "PATTERN OFF", run, [this] { app_.seqRunToggle(); }); }   // the pattern on its own: PLAY starts it from the first beat on the next beat or bar
+    b("PRINT TO TAPE", false, [this] { app_.seqBounce(); });   // one pass of this pattern recorded on the tape (sets the loop length)
     b("DICE", false, [this] { app_.seqDice(); });
     b("CLEAR", false, [this] { app_.seqClear(); showUndo("PATTERN CLEARED"); });   // it can be undone: no question, an UNDO that stays a few seconds
 }
@@ -589,11 +589,11 @@ void SamplerUI::seqFullScreen() {
     add("<", false, [this, t] { app_.selectTrack(std::max(0, t - 1)); });
     add("TRACK " + std::to_string(t + 1), false, [] {});
     add(">", false, [this, t] { app_.selectTrack(std::min(app_.trackCount() - 1, t + 1)); });
-    add(st_.playing ? "PAUSE" : "PLAY", st_.playing, [this] { app_.transportPlay(); });
+    add(st_.playing ? "TAPE: PAUSE" : "TAPE: PLAY", st_.playing, [this] { app_.transportPlay(); });
     add("METRO", app_.metronome(), [this] { app_.toggleMetro(); });
     add(st_.keyTrig[t] ? "KEYS: PATTERN" : "KEYS: SOUND", st_.keyTrig[t], [this, t] { app_.setKeyTrigger(t, !st_.keyTrig[t]); });
     static const char* q[] = {"AT ONCE", "BEAT", "BAR"};
-    add(std::string("START: ") + q[std::min(2, std::max(0, app_.state(t).trigQ))], false, [this, t] { app_.setTrigQuant(t, (app_.state(t).trigQ + 1) % 3); });
+    add(std::string("LAUNCH: ") + q[std::min(2, std::max(0, app_.state(t).trigQ))], false, [this, t] { app_.setTrigQuant(t, (app_.state(t).trigQ + 1) % 3); });
     add("< BEAT", false, [this] { app_.seqNudge(-app_.stepTicks()); });
     add("BEAT >", false, [this] { app_.seqNudge(app_.stepTicks()); });
     const float w = (W_ - 2 * m - gap * (items.size() - 1)) / items.size();
