@@ -7,6 +7,7 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.os.SystemClock;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -24,6 +25,7 @@ public class SamplerView extends View {
         super(c);
         h = engine; this.topDp = topDp; this.bottomDp = bottomDp;
         setBackgroundColor(0xff14141a);
+        setContentDescription("FM-1 sampler");
         p.setAntiAlias(false);
     }
 
@@ -77,6 +79,8 @@ public class SamplerView extends View {
             }
         }
         while (saves-- > 0) c.restore();
+        String say = Native.uiAnnounce(h);   // toasts are read out by TalkBack
+        if (say != null && !say.isEmpty()) announceForAccessibility(say);
         postInvalidateOnAnimation();
     }
 
@@ -98,6 +102,7 @@ public class SamplerView extends View {
         int a = act == MotionEvent.ACTION_DOWN ? 0 : act == MotionEvent.ACTION_MOVE ? 1 : (act == MotionEvent.ACTION_UP || act == MotionEvent.ACTION_CANCEL) ? 2 : -1;
         if (a < 0) return super.onTouchEvent(e);
         Native.uiTouch(h, a, e.getX() / d, e.getY() / d, SystemClock.uptimeMillis());
+        if (a == 0 && Native.uiHaptic(h)) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);   // every control ticks under the finger
         return true;
     }
 }

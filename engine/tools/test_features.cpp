@@ -223,7 +223,7 @@ static void testSynths() {
     // in the app: a Synths group in the library, a track plays one, the envelope follows the patch
     system("rm -rf /tmp/fm1sampler_t6; mkdir -p /tmp/fm1sampler_t6");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t6"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     int first = -1, count = 0; for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].group == "Synths") { if (first < 0) first = i; count++; }
     CHECK(count == kSynthCount, "library has the Synths group (%d)", count);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 0;
@@ -252,7 +252,7 @@ static void testOp1() {
     // the dice: a random pattern in the scale, one undo step
     system("rm -rf /tmp/fm1sampler_t7; mkdir -p /tmp/fm1sampler_t7");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t7"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(0.5); app.setScale(2, 0, 0, 0);   // C major
@@ -296,7 +296,7 @@ static void testTombola() {
     }
     system("rm -rf /tmp/fm1sampler_t8; mkdir -p /tmp/fm1sampler_t8");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t8"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5); app.gotoPage(SamplerApp::P_TOMB);
@@ -326,7 +326,7 @@ static void testSwing() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_t9; mkdir -p /tmp/fm1sampler_t9");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t9"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
@@ -381,7 +381,7 @@ static void testProject() {
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     {
         Session s(sr); s.setDataDir("/tmp/fm1sampler_ta"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-        SamplerApp app(s, [](const uint8_t*, size_t) {});
+        SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
         auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
         auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
         run(2.5);
@@ -433,7 +433,7 @@ static void testProject() {
     }
     {   // the next start finds the autosave and goes back to it; a start after a failed restore skips it once
         Session s(sr); s.setDataDir("/tmp/fm1sampler_ta"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-        SamplerApp app(s, [](const uint8_t*, size_t) {});
+        SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
         auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
         run(2.0); app.restoreLast(); run(3.0); while (s.busyJobs() > 0) run(0.2); run(1.0);
         CHECK(app.status().seqCount[0] == 4 && app.status().loopSamples > 0 && app.sampleLabel(2) == "Hoover", "a new start comes back to the autosave (%d notes, loop %.0f, track 3 %s)", app.status().seqCount[0], app.status().loopSamples, app.sampleLabel(2).c_str());
@@ -506,7 +506,7 @@ static void testSound() {
     }
     system("rm -rf /tmp/fm1sampler_tb; mkdir -p /tmp/fm1sampler_tb");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tb"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5);
@@ -530,22 +530,22 @@ static void testLook() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_tc; mkdir -p /tmp/fm1sampler_tc");
     {
-        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {});
+        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
         CHECK(app.themeId() == 0 && !app.fullscreen() && theme::BG == theme::argb(20, 20, 26), "the default look is DARK, not full screen");
         uint32_t seen[theme::kThemes]; bool distinct = true;
         for (int i = 0; i < theme::kThemes; i++) { app.setTheme(i); seen[i] = theme::BG; for (int j = 0; j < i; j++) distinct &= seen[j] != seen[i]; }
-        CHECK(distinct, "four themes with four different backgrounds (%s, %s, %s, %s)", theme::name(0), theme::name(1), theme::name(2), theme::name(3));
+        CHECK(distinct, "five themes with five different backgrounds (%s, %s, %s, %s, %s)", theme::name(0), theme::name(1), theme::name(2), theme::name(3), theme::name(4));
         app.setTheme(2); CHECK(theme::BG == theme::argb(12, 12, 14) && theme::ACCENT == theme::argb(255, 106, 19) && theme::KNOB[0] == theme::argb(47, 125, 225) && theme::KNOB[1] == theme::argb(62, 196, 109), "OP-1: black screen, orange accent, blue and green encoders");
         app.setTheme(3); CHECK(theme::light && theme::TEXT == theme::argb(26, 26, 28), "OP-1 BODY is a light theme with dark ink");
-        SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(1000); ui.openProjectSheet(); ui.frame(1033);
+        SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(1000); ui.openMenu(); ui.frame(1033);
         bool names = false; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "OP-1 BODY") names = true;
-        CHECK(names, "the project sheet lists the themes");
+        CHECK(names, "the menu lists the themes");
         { float fx = 0, fy = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "FULLSCREEN: OFF") { fx = o.f[0]; fy = o.f[1] - 4; }
           ui.touch(0, fx, fy, 1100); ui.touch(2, fx, fy, 1100); CHECK(fx > 0 && app.fullscreen(), "the FULLSCREEN button switches it on"); }
         app.setTheme(2);
     }
     {   // a new start keeps both
-        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {});
+        Session s(sr); s.setDataDir("/tmp/fm1sampler_tc"); SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
         CHECK(app.themeId() == 2 && app.fullscreen() && theme::BG == theme::argb(12, 12, 14), "the theme and the full screen are remembered (%s, fullscreen %d)", theme::name(app.themeId()), app.fullscreen());
         app.setTheme(0); app.setFullscreen(false);
     }
@@ -560,7 +560,7 @@ static void testNoteEdit() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_td; mkdir -p /tmp/fm1sampler_td");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_td"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
@@ -627,7 +627,7 @@ static void testPads() {
     }
     system("rm -rf /tmp/fm1sampler_te; mkdir -p /tmp/fm1sampler_te");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_te"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5);
@@ -659,7 +659,7 @@ static void testSampleEdit() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_tf; mkdir -p /tmp/fm1sampler_tf");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tf"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
@@ -696,7 +696,7 @@ static void testMixer() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_tg; mkdir -p /tmp/fm1sampler_tg");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tg"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
@@ -760,7 +760,7 @@ static void testSynthEdit() {
     }
     system("rm -rf /tmp/fm1sampler_th; mkdir -p /tmp/fm1sampler_th");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_th"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5); app.selectTrack(2); app.gotoPage(SamplerApp::P_SYN1);
@@ -792,7 +792,7 @@ static void testBanks() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_ti; mkdir -p /tmp/fm1sampler_ti");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_ti"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
@@ -834,7 +834,7 @@ static void testMidiIn() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_tj; mkdir -p /tmp/fm1sampler_tj");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tj"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5);
@@ -874,7 +874,7 @@ static void testLock() {
     }
     system("rm -rf /tmp/fm1sampler_tk; mkdir -p /tmp/fm1sampler_tk");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_tk"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
@@ -892,7 +892,7 @@ static void testLock() {
 
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
     std::vector<float> buf(512), in(512, 0.f); uint32_t now = 0;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(0.5); app.gotoPage(SamplerApp::P_SQ); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 96, 60 + i); run(0.2);
@@ -1015,7 +1015,7 @@ int main() {
     // ---- app level ----
     system("rm -rf /tmp/fm1sampler_t3; mkdir -p /tmp/fm1sampler_t3");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t3"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 0;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto enc = [&](int i, int d) { uint8_t m[3] = {0xb0, (uint8_t)(16 + i), (uint8_t)(64 + d)}; app.onMidi(m, 3); };
@@ -1053,12 +1053,14 @@ int main() {
         btn(SamplerApp::GLO); CHECK(app.page() == SamplerApp::P_KEY, "GLO: shortcut to the key");
         btn(SamplerApp::SEL); CHECK(app.page() == SamplerApp::P_LEN, "SEL: shortcut to the length");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ tap: sequencer mode, pattern page");
-        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SEQ, "SEQ again: tape");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TEMPO, "SEQ again: tempo");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TOMB, "SEQ again: tombola");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PADS, "SEQ again: pads");
-        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TAPEV, "SEQ again: tape view");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TAPEV, "SEQ again: on into the TAPE tab, tape view");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SEQ, "SEQ again: tape fx");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SAVE, "SEQ again: loop source");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_LEN, "SEQ again: loop length");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ again: back to the pattern");
         app.gotoPage(SamplerApp::P_FX);
     }
@@ -1310,6 +1312,32 @@ int main() {
     {   // the tape is only erased after the dialog: the CLEAR button opens it, the FM-1 SAVE hold asks for it too
         SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(5000);
         CHECK(!app.takeClearAsk(), "no clear request without a SAVE hold");
+    }
+    {   // the overhaul: mute / solo, the first-run tour, the left-handed layout, the long press on a track
+        Session s2(sr); s2.setDataDir("/tmp/fm1sampler_tour"); SamplerApp a2(s2, [](const uint8_t*, size_t) {});
+        a2.toggleMute(2); a2.toggleSolo(5);
+        CHECK(a2.state(2).mute && a2.state(5).solo && a2.anySolo(), "mute and solo are kept per track");
+        a2.toggleMute(2); a2.toggleSolo(5); CHECK(!a2.state(2).mute && !a2.anySolo(), "...and switch off again");
+        a2.setTourDone(false);
+        SamplerUI u(a2); u.setSize(860, 400, 0, 0); u.frame(100);
+        CHECK(u.tourOpen(), "the tour opens on the first start");
+        auto at = [&](const char* label, float& x, float& y) { x = y = -1; for (auto& o : u.ops()) if (o.type == UiOp::TEXT && o.text == label) { x = o.f[0]; y = o.f[1] - 4; } return x >= 0; };
+        float x, y; u.frame(133); CHECK(at("SKIP TOUR", x, y), "the tour card has a SKIP TOUR button");
+        u.touch(0, x, y, 200); u.touch(2, x, y, 200); u.frame(233);
+        CHECK(!u.tourOpen() && a2.tourDone(), "skipping the tour closes it for good");
+        at("SOUND", x, y); const float xr = x;
+        a2.setLeftHanded(true); u.frame(300); at("SOUND", x, y);
+        CHECK(xr > 430 && x < 430, "left-handed puts the pages on the left (%.0f -> %.0f)", xr, x);
+        a2.setLeftHanded(false); u.frame(333);
+        { float tx = -1, ty = -1; for (auto& o : u.ops()) if (o.type == UiOp::TEXT && o.text == "2" && o.f[0] < 40) { tx = o.f[0]; ty = o.f[1] - 6; }
+          u.touch(0, tx + 20, ty, 1000); u.frame(1700); u.touch(2, tx + 20, ty, 1710); u.frame(1740);
+          CHECK(at("OPEN ITS SOUND", x, y) && a2.track() == 1, "holding a track opens its menu (track %d)", a2.track() + 1);
+          u.touch(0, x, y, 1800); u.touch(2, x, y, 1800); u.frame(1833); CHECK(!at("OPEN ITS SOUND", x, y), "...and a button of the menu closes it"); }
+        a2.gotoPage(SamplerApp::P_MIX); u.frame(2000);
+        CHECK(at("MUTE", x, y), "the mixer page shows the strips");
+        u.touch(0, x, y, 2100); u.touch(2, x, y, 2100); CHECK(a2.state(7).mute, "MUTE on a strip mutes its track (the last strip was hit)");
+        a2.toggleMute(7);
+        CHECK(std::string(SamplerApp::pageHelp(SamplerApp::P_TAPEV)).size() > 10 && std::string(SamplerApp::modeName(4)) == "TAPE", "every page has a sentence, the fifth tab is TAPE");
     }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;

@@ -65,15 +65,47 @@ float loopSpeedOf(float n) { return 0.25f * std::pow(8.f, n); }       // 0.25..2
 float lfoHz(float n) { return 0.1f * std::pow(200.f, n); }            // 0.1..20
 }  // namespace
 
+const char* kHelp[] = {   // by Page: what the page is for, in plain words
+    "Where the sound starts and ends, how fast and how high it plays.",                         // HOME
+    "Reverb and delay: how much of each track goes into them.",                                  // FX
+    "How the note rises, falls and fades: attack, decay, sustain, release.",                     // ENV
+    "A slow wobble on pitch, filter, volume or pan.",                                            // LFO
+    "Arpeggiator: holds a chord and plays its notes one after another.",                         // ARP
+    "The tape's own sound: speed, shimmer, lo-fi crackle, wobble.",                              // SEQ (tape fx)
+    "Volume, pan and sends of the selected track.",                                              // MIX
+    "Scale and key: keeps the keys on notes that sound good together.",                          // KEY
+    "Where the tape records from (mic or the sound) and how loud it must be to start.",          // SAVE
+    "Make the loop longer, shorter or duplicate it.",                                            // LEN
+    "Chorus, flanger, phaser and compressor on the whole mix.",                                  // FX2
+    "Effects to play with live: filter sweep, beat repeat, gate, crush.",                        // LIVE
+    "The pattern of the selected track: tap the grid to add notes.",                             // SQ
+    "Speed of the music, metronome and how a take snaps to the beat.",                           // TEMPO
+    "Effects for the selected track only.",                                                      // TFX
+    "Quantize (snap to the beat), count-in and swing.",                                          // TIMING
+    "Drive and three-band EQ on the whole mix.",                                                 // TONE
+    "Tremolo, auto-wah, ring mod and stereo width.",                                             // MOD
+    "More live effects: reverse, tape stop, freeze.",                                            // LIVE2
+    "Balls bounce in a drum and make notes: a random pattern maker.",                            // TOMB
+    "OP-1 style effects: spring reverb, phone filter, punch.",                                   // FX3
+    "Shape a sound with four macros, set its root key and slice a loop.",                        // SHAPE
+    "Drum pads of a kit: volume, pitch, pan and decay of each pad.",                             // PADS
+    "Cut, reverse, normalize and fade the sample. Undo is at the top.",                          // SMPED
+    "EQ and compressor of the selected track.",                                                  // TEQ
+    "Sidechain: a track (like the kick) pushes another down. Master limiter.",                   // DUCK
+    "Synth oscillators: waves, detune and unison.",                                              // SYN1
+    "Synth filter and voices: cutoff, resonance, mono or poly.",                                 // SYN2
+    "Everything recorded on the tape, one lane per track.",                                      // TAPEV
+};
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
+const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }
 const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i))]; }
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
-const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
+const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX", "TAPE"}; return n[m % kModes]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TAPEV}, {P_MIX, P_KEY, P_SAVE, P_LEN, P_TEQ, P_DUCK}};
-    return p[m & 3];
+    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_KEY, P_TEQ, P_DUCK}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
+    return p[m % kModes];
 }
-int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 ? 7 : (m & 3) == 0 ? 8 : (m & 3) == 3 ? 6 : 4; }
+int SamplerApp::modePageCount(int m) { static const int n[kModes] = {8, 8, 5, 4, 4}; return n[m % kModes]; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -258,7 +290,8 @@ void SamplerApp::applySeq(int) {   // loop speed and tape colour are global: eve
 }
 void SamplerApp::applyMix(int t) {
     const TrackState& x = ts_[t];
-    s_.setVolume(t, x.vol * 1.2f); s_.setPan(t, x.pan * 2.f - 1.f); s_.setSend(t, 0, x.sendR); s_.setSend(t, 1, x.sendD);
+    const bool audible = !x.mute && (!anySolo() || x.solo);
+    s_.setVolume(t, audible ? x.vol * 1.2f : 0.f); s_.setPan(t, x.pan * 2.f - 1.f); s_.setSend(t, 0, x.sendR); s_.setSend(t, 1, x.sendD);
 }
 void SamplerApp::applyFx() {
     s_.setReverb(reverbSize_);
@@ -304,7 +337,13 @@ void SamplerApp::selectTrack(int t) {
 }
 void SamplerApp::gotoPage(Page p) { page_ = p; lastPage_[modeOf(p)] = p; }
 void SamplerApp::modeButton(int m) {   // a mode button: enter the mode on the page it was left on, press again for the next page
-    gotoPage(modeOf(page_) == m ? modePages(m)[(pageSlot(page_) + 1) % modePageCount(m)] : lastPage_[m]);
+    const int cur = modeOf(page_);
+    if (m == 2 && (cur == 2 || cur == 4)) {   // the FM-1 has no fifth mode button: SEQ steps on through the TAPE pages and back
+        const int n = modePageCount(cur), s = pageSlot(page_);
+        gotoPage(s + 1 < n ? modePages(cur)[s + 1] : modePages(cur == 2 ? 4 : 2)[0]);
+        return;
+    }
+    gotoPage(cur == m ? modePages(m)[(pageSlot(page_) + 1) % modePageCount(m)] : lastPage_[m]);
 }
 
 SamplerApp::Knob SamplerApp::cont(const char* name, float* v, std::function<std::string(float)> f, std::function<void()> apply, float stepSize, bool commit) {

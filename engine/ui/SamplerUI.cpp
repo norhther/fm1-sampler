@@ -18,6 +18,7 @@ SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
 void SamplerUI::rrect(Rect r, float rad, uint32_t c) { UiOp o; o.type = UiOp::RRECT; o.f[0] = r.x; o.f[1] = r.y; o.f[2] = r.w; o.f[3] = r.h; o.f[4] = rad; o.color = c; ops_.push_back(o); }
 void SamplerUI::stroke(Rect r, float rad, uint32_t c, float w) { UiOp o; o.type = UiOp::STROKE; o.f[0] = r.x; o.f[1] = r.y; o.f[2] = r.w; o.f[3] = r.h; o.f[4] = rad; o.f[5] = w; o.color = c; ops_.push_back(o); }
 void SamplerUI::text(float x, float cy, float size, uint32_t c, const std::string& s, int align, bool bold) {
+    size *= textScale_;
     UiOp o; o.type = UiOp::TEXT; o.f[0] = x; o.f[1] = cy + size * 0.36f; o.f[2] = size; o.f[3] = (float)align; o.f[4] = bold; o.color = c; o.text = s; ops_.push_back(o);
 }
 void SamplerUI::line(float x1, float y1, float x2, float y2, uint32_t c, float w) { UiOp o; o.type = UiOp::LINE; o.f[0] = x1; o.f[1] = y1; o.f[2] = x2; o.f[3] = y2; o.f[4] = w; o.color = c; ops_.push_back(o); }
@@ -28,15 +29,16 @@ void SamplerUI::endClip() { UiOp o; o.type = UiOp::ENDCLIP; ops_.push_back(o); }
 void SamplerUI::hit(Rect r, std::function<void(float, float)> d, std::function<void(float, float)> m, std::function<void()> u) { hits_.push_back({r, std::move(d), std::move(m), std::move(u)}); }
 void SamplerUI::tap(Rect r, std::function<void()> f) { hit(r, [f](float, float) { f(); }); }
 std::string SamplerUI::fit(const std::string& s, float width, float size) const {
-    const size_t maxc = (size_t)std::max(1.f, width / (size * 0.60f));
+    const size_t maxc = (size_t)std::max(1.f, width / (size * textScale_ * 0.60f));
     return s.size() <= maxc ? s : s.substr(0, maxc > 1 ? maxc - 1 : 1) + "\xE2\x80\xA6";
 }
 void SamplerUI::touch(int action, float x, float y, uint32_t now) {
     now_ = now;
     if (action == 0) {
-        haveActive_ = false;
-        for (size_t i = hits_.size(); i-- > 0;) if (hits_[i].r.has(x, y)) { active_ = hits_[i]; haveActive_ = true; if (active_.down) active_.down(x, y); break; }
+        haveActive_ = false; lpFired_ = lpMoved_ = false; downAt_ = now; downX_ = x; downY_ = y;
+        for (size_t i = hits_.size(); i-- > 0;) if (hits_[i].r.has(x, y)) { active_ = hits_[i]; haveActive_ = true; haptic_ = true; if (active_.down) active_.down(x, y); break; }
     } else if (action == 1) {
+        if (std::fabs(x - downX_) + std::fabs(y - downY_) > 16) lpMoved_ = true;
         if (haveActive_ && active_.move) active_.move(x, y);
     } else if (haveActive_) {
         if (active_.up) active_.up();
@@ -72,94 +74,107 @@ void SamplerUI::pinch(int phase, float x1, float y1, float x2, float y2) {
 void SamplerUI::button(Rect r, const std::string& label, bool on, std::function<void()> f, float size, bool accent) {
     rrect(r, R_CONTROL, on ? ACCENT : SURFACE);
     if (!on) stroke(r, R_CONTROL, accent ? ACCENT : OUTLINE, 1);
+    else stroke({r.x + 2, r.y + 2, r.w - 4, r.h - 4}, R_CONTROL, ON_ACCENT, 1);   // on is told by a second frame too, not by the colour alone
     text(r.x + r.w / 2, r.y + r.h / 2, size, on ? ON_ACCENT : accent ? ACCENT : TEXT, fit(label, r.w - 6, size), 1, true);
     tap(r, std::move(f));
+}
+void SamplerUI::dangerButton(Rect r, const std::string& label, std::function<void()> f, float size) {
+    rrect(r, R_CONTROL, SURFACE); stroke(r, R_CONTROL, DANGER, 2);
+    const float tx = r.x + 12, cy = r.y + r.h / 2;
+    tri(tx - 6, cy + 6, tx + 6, cy + 6, tx, cy - 6, DANGER);   // the warning mark
+    text(tx, cy + 2, 8, BG, "!", 1, true);
+    text(r.x + r.w / 2 + 10, cy, size, DANGER, fit(label, r.w - 34, size), 1, true);
+    tap(r, std::move(f));
+}
+void SamplerUI::longPress(Rect r, std::function<void()> onTap, std::function<void()> onLong) {
+    hits_.push_back({r, [](float, float) {}, nullptr, [this, onTap] { if (!lpFired_ && !lpMoved_) onTap(); }, std::move(onLong)});
 }
 
 // ---- frame ----
 void SamplerUI::frame(uint32_t now) {
     now_ = now;
     st_ = app_.status();
+    textScale_ = app_.access() ? 1.2f : 1.f;
     ops_.clear(); hits_.clear(); rollOn_ = false;
+    { const std::string t = app_.toast(); if (t != lastToast_) { lastToast_ = t; if (!t.empty()) announce_ = t; } }   // toasts are read out by the screen reader
+    if (!app_.tourDone() && !tourSeen_) { tourSeen_ = true; tourOpen_ = true; tourStep_ = 0; }
+    if (haveActive_ && active_.lp && !lpFired_ && !lpMoved_ && now - downAt_ > 500) { lpFired_ = true; haptic_ = true; active_.lp(); }
+    if (app_.takeClearAsk() && app_.loopExists()) askTapeClear(-1);   // the FM-1 SAVE hold asks the same question
     rrect({0, 0, W_, H_}, 0, BG);
-    const float tb0 = 44, gs = 30, left = 176, right = 252, tb = tb0 + gs;
-    if (app_.takeClearAsk() && app_.loopExists()) clearAsk_ = 1;   // the FM-1 SAVE hold asks the same question
-    topBar({0, 0, W_, tb0});
-    globalBar({0, tb0, W_, gs});
-    trackList({MARGIN, tb + MARGIN, left - MARGIN, H_ - tb - 2 * MARGIN});
-    sampleArea({left + MARGIN, tb + MARGIN, W_ - left - right - 2 * MARGIN, H_ - tb - 2 * MARGIN});
-    pagePanel({W_ - right, tb + MARGIN, right - MARGIN, H_ - tb - 2 * MARGIN});
+    const float tb = 44, left = 176, right = 252, y0 = tb + MARGIN, h = H_ - tb - 2 * MARGIN;
+    topBar({0, 0, W_, tb});
+    const bool lh = app_.leftHanded();   // left-handed: the pages on the left, the tracks on the right
+    rTracks_ = lh ? Rect{W_ - left, y0, left - MARGIN, h} : Rect{MARGIN, y0, left - MARGIN, h};
+    rArea_ = lh ? Rect{right + MARGIN, y0, W_ - left - right - 2 * MARGIN, h} : Rect{left + MARGIN, y0, W_ - left - right - 2 * MARGIN, h};
+    rPanel_ = lh ? Rect{MARGIN, y0, right - MARGIN, h} : Rect{W_ - right, y0, right - MARGIN, h};
+    trackList(rTracks_); sampleArea(rArea_); pagePanel(rPanel_);
     if (sheetOpen_) librarySheet();
     if (projOpen_) projectSheet();
     if (songOpen_) songSheet();
-    if (clearAsk_) clearSheet();
-}
-
-// ---- the strip under the top bar: undo / redo over everything, the tempo, the tape view ----
-void SamplerUI::globalBar(Rect r) {
-    rrect(r, 0, BG); line(0, r.y + r.h, W_, r.y + r.h, OUTLINE, 1);
-    const float by = r.y + 3, bh = r.h - 6, cy = r.y + r.h / 2; float x = MARGIN;
-    button({x, by, 62, bh}, "UNDO", st_.globalUndoN > 0, [this] { app_.globalUndo(); }, 10); x += 66;
-    button({x, by, 62, bh}, "REDO", st_.globalRedoN > 0, [this] { app_.globalRedo(); }, 10); x += 84;
-    const bool locked = app_.tempoLocked();
-    button({x, by, 32, bh}, "-", false, [this] { app_.tempoStep(-1); }, 14); x += 36;
-    const Rect tr{x, by, 96, bh};   // drag sideways on the number: fast tempo change
-    rrect(tr, R_CONTROL, SURFACE);
-    text(tr.x + tr.w / 2, cy, 12, locked ? DIM : TEXT, num("%.0f", app_.tempoNow()) + (locked ? " LOCK" : " BPM"), 1, true);
-    hit(tr, [this](float px, float) { tempoDragX_ = px; }, [this](float px, float) { const int d = (int)((px - tempoDragX_) / 5.f); if (d) { app_.tempoStep(d); tempoDragX_ += d * 5.f; } });
-    x += 100;
-    button({x, by, 32, bh}, "+", false, [this] { app_.tempoStep(1); }, 14); x += 40;
-    button({x, by, 76, bh}, "TAP TEMPO", false, [this] { app_.tapTempo(); }, 9.5f); x += 92;
-    button({x, by, 84, bh}, "TAPE VIEW", app_.page() == SamplerApp::P_TAPEV, [this] { app_.gotoPage(SamplerApp::P_TAPEV); }, 10);
-    const std::string t = app_.toast();
-    if (!t.empty()) text(W_ - MARGIN, cy, 10.5f, ACCENT, fit(t, W_ - x - 120, 10.5f), 2, true);
+    if (menuOpen_) menuSheet();
+    if (trackMenu_ >= 0) trackMenuSheet();
+    undoToast();
+    if (confirmOpen_) confirmSheet();
+    if (tourOpen_) tourSheet();
 }
 
 void SamplerUI::topBar(Rect r) {
     rrect(r, 0, SURFACE);
     line(0, r.h, W_, r.h, OUTLINE, 1);
-    const float cy = r.h / 2;
+    const float cy = r.h / 2, bh = r.h - 12;
     float x = MARGIN;
     // PLAY / STOP
-    Rect pl{x, 6, 44, r.h - 12};
+    Rect pl{x, 6, 44, bh};
     rrect(pl, R_CONTROL, RAISED);
     if (st_.playing) { rrect({pl.x + 15, cy - 8, 5, 16}, 0, ACCENT); rrect({pl.x + 24, cy - 8, 5, 16}, 0, ACCENT); }
     else tri(pl.x + 16, cy - 9, pl.x + 16, cy + 9, pl.x + 30, cy, TEXT);
     tap(pl, [this] { app_.transportPlay(); });
     x += 52;
     // REC: arms the first take on a clean looper, overdub afterwards
-    Rect rc{x, 6, 74, r.h - 12};
+    Rect rc{x, 6, 74, bh};
     const bool recOn = st_.freeRecording || st_.track_clip_rec[app_.track()], armed = st_.freeArmed;
     rrect(rc, R_CONTROL, recOn ? ACCENT : RAISED);
     if (armed) stroke(rc, R_CONTROL, ACCENT, 2);
     circle(rc.x + 18, cy, 6, recOn ? ON_ACCENT : ACCENT);
     text(rc.x + 28, cy, 9.5f, recOn ? ON_ACCENT : TEXT, app_.loopExists() ? "OVERDUB" : "REC", 0, true);
     tap(rc, [this] { app_.loopRecord(); });
-    x += 82;
-    button({x, 6, 56, r.h - 12}, "SAVE", false, [this] { app_.loopSave(); }, 11);
-    x += 62;
-    button({x, 6, 56, r.h - 12}, "CLEAR", false, [this] { if (app_.loopExists()) clearAsk_ = 1; else app_.loopClear(); }, 11);   // the tape is only erased after a yes
-    x += 70;
-    if (!app_.loopExists() && !st_.freeRecording && !armed) {   // how long the first take is: it ends by itself after that many bars (FREE: when you press REC again)
-        button({x, 6, 78, r.h - 12}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
-        x += 86;
-    }
-    text(x, cy - 6, 12, st_.freeRecording || recOn || armed ? ACCENT : TEXT, app_.loopText(), 0, true);
-    text(x, cy + 11, 9.5f, DIM, std::string("LOOP SOURCE: ") + (app_.knobs(SamplerApp::P_SAVE)[1].value), 0, false);
-    tap({x - 4, 0, std::max(120.f, W_ - 410 - x), r.h}, [this] { auto k = app_.knobs(SamplerApp::P_SAVE); k[1].step(k[1].norm > 0.5f ? -1 : 1); });
-    button({W_ - 396, 6, 64, r.h - 12}, app_.phoneOut() ? "PHONE" : "FM-1", app_.phoneOut(), [this] { app_.setPhoneOut(!app_.phoneOut()); }, 10.5f);   // where the sound goes: the FM-1, or the phone's own speaker
-    button({W_ - 326, 6, 104, r.h - 12}, "PROJECT", projOpen_, [this] { projOpen_ = true; projSel_ = -1; projScroll_ = 0; }, 10.5f);
-    // live: hold TAPE STOP and the tape runs down, let go and it spins up
-    { Rect ts{W_ - 214, 6, 104, r.h - 12}; const bool on = app_.tapeStopHeld();
+    rRec_ = rc; x += 82;
+    // UNDO / REDO over every track
+    rUndo_ = {x, 6, 52, bh};
+    button(rUndo_, "UNDO", st_.globalUndoN > 0, [this] { app_.globalUndo(); }, 9.5f); x += 56;
+    button({x, 6, 52, bh}, "REDO", st_.globalRedoN > 0, [this] { app_.globalRedo(); }, 9.5f); x += 64;
+    // the tempo: - and +, or drag sideways on the number
+    const bool locked = app_.tempoLocked();
+    button({x, 6, 30, bh}, "-", false, [this] { app_.tempoStep(-1); }, 14); x += 33;
+    rTempo_ = {x, 6, 74, bh};
+    rrect(rTempo_, R_CONTROL, SURFACE);
+    text(rTempo_.x + rTempo_.w / 2, cy - 4, 15, locked ? DIM : TEXT, num("%.0f", app_.tempoNow()), 1, true);
+    text(rTempo_.x + rTempo_.w / 2, cy + 11, 8, DIM, locked ? "LOCKED BY LOOP" : "BPM  DRAG", 1, false);
+    hit(rTempo_, [this](float px, float) { tempoDragX_ = px; }, [this](float px, float) { const int d = (int)((px - tempoDragX_) / 5.f); if (d) { app_.tempoStep(d); tempoDragX_ += d * 5.f; } });
+    x += 77;
+    button({x, 6, 30, bh}, "+", false, [this] { app_.tempoStep(1); }, 14); x += 40;
+    // right side, from the edge: MENU, the link dot, the master meter, TAPE STOP
+    const float menuX = W_ - MARGIN - 62;
+    button({menuX, 6, 62, bh}, "MENU", menuOpen_, [this] { menuOpen_ = true; }, 10.5f);
+    const uint32_t lc = linkMidi_ && linkAudio_ ? TEXT : linkMidi_ ? ACCENT : DIM;
+    circle(menuX - 10, cy, 4, lc);
+    const Rect mt{menuX - 34, 6, 14, bh};   // master level: red when it clips
+    rrect(mt, 0, BG); stroke(mt, 0, OUTLINE, 1);
+    { const float lv = std::min(1.f, st_.master_peak); rrect({mt.x + 1, mt.y + mt.h - 1 - (mt.h - 2) * lv, mt.w - 2, std::max(1.f, (mt.h - 2) * lv)}, 0, st_.clip ? DANGER : TEXT); }
+    if (st_.clip) text(mt.x + mt.w / 2, mt.y - 1, 7, DANGER, "CLIP", 1, true);
+    { Rect ts{mt.x - 8 - 100, 6, 100, bh}; const bool on = app_.tapeStopHeld();   // live: hold TAPE STOP and the tape runs down, let go and it spins up
       rrect(ts, R_CONTROL, on ? ACCENT : RAISED); if (!on) stroke(ts, R_CONTROL, OUTLINE, 1);
       text(ts.x + ts.w / 2, cy, 10.5f, on ? ON_ACCENT : TEXT, "TAPE STOP", 1, true);
-      hit(ts, [this](float, float) { app_.tapeStopHold(true); }, nullptr, [this] { app_.tapeStopHold(false); }); }
-    // link state and load
-    const uint32_t lc = linkMidi_ && linkAudio_ ? TEXT : linkMidi_ ? ACCENT : DIM;
-    circle(W_ - 22, cy, 5, lc);
-    text(W_ - 34, cy - 6, 10, DIM, linkMidi_ ? "FM-1" : "NO FM-1", 2, true);
-    if (st_.clip) text(W_ - 72, cy - 6, 9.5f, ACCENT, "CLIP", 2, true);
-    text(W_ - 34, cy + 9, 9, DIM, "CPU " + num("%.0f", st_.cpu_permille / 10.0) + "%", 2, false);
+      hit(ts, [this](float, float) { app_.tapeStopHold(true); }, nullptr, [this] { app_.tapeStopHold(false); });
+      // in between: how long the first take is, then what the loop is doing
+      const float right = ts.x - 8; float mx = x;
+      if (!app_.loopExists() && !st_.freeRecording && !armed) {   // it ends by itself after that many bars (FREE: when you press REC again)
+          button({mx, 6, 78, bh}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
+          mx += 86;
+      }
+      text(mx, cy - 6, 11, st_.freeRecording || recOn || armed ? ACCENT : TEXT, fit(app_.loopText(), right - mx, 11), 0, true);
+      text(mx, cy + 11, 9, DIM, fit(std::string("LOOP SOURCE: ") + (app_.knobs(SamplerApp::P_SAVE)[1].value), right - mx, 9), 0, false);
+      tap({mx - 4, 0, std::max(60.f, right - mx), r.h}, [this] { auto k = app_.knobs(SamplerApp::P_SAVE); k[1].step(k[1].norm > 0.5f ? -1 : 1); }); }
 }
 
 void SamplerUI::trackList(Rect r) {
@@ -178,7 +193,7 @@ void SamplerUI::trackList(Rect r) {
         rrect({row.x + 30, row.y + rh - 12, (r.w - 44) * lv, 3}, 0, theme::trackColor(i));
         if (st_.track_clip_rec[i]) circle(row.x + r.w - 10, row.y + 10, 4, ACCENT);
         else if (st_.track_has_clip[i]) circle(row.x + r.w - 10, row.y + 10, 3.5f, TEXT);
-        tap(row, [this, i] { app_.selectTrack(i); });
+        longPress(row, [this, i] { app_.selectTrack(i); }, [this, i] { app_.selectTrack(i); trackMenu_ = i; });   // tap = this track, hold = its menu
     }
 }
 
@@ -189,6 +204,7 @@ void SamplerUI::sampleArea(Rect r) {
     text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - 120, T_TITLE), 0, true);
     text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);
     if (app_.page() == SamplerApp::P_TEMPO) { button({r.x + r.w - 210, r.y, 110, 26}, "TAP TEMPO", false, [this] { app_.tapTempo(); }, 10.5f, true); }
+    if (app_.page() == SamplerApp::P_MIX) { mixerView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_TAPEV) { tapeView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_PADS) { padsView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_TOMB) { tombolaView({r.x, r.y + 28, r.w, r.h - 28}); return; }
@@ -317,7 +333,10 @@ void SamplerUI::tapeView(Rect r) {
     const bool has = app_.loopExists();
     const int bars = std::max(1, st_.loopBars);
     text(r.x, r.y + 10, T_CAPTION, has ? TEXT : DIM, has ? std::to_string(bars) + (bars == 1 ? " BAR  " : " BARS  ") + num("%.0f BPM", st_.bpm) + "  " + num("%.1f S", st_.loopSamples / std::max(1, app_.session().sampleRate())) : "THE TAPE IS EMPTY: PRESS REC", 0, true);
-    button({r.x + r.w - 110, r.y, 110, 22}, "CLEAR TAPE", false, [this, has] { if (has) clearAsk_ = 1; }, 10);
+    { float bx = r.x + r.w - 112;   // right to left: CLEAR TAPE, SAVE LOOP, and before the first take how many bars it lasts
+      dangerButton({bx, r.y - 2, 112, 26}, "CLEAR TAPE", [this, has] { if (has) askTapeClear(-1); else app_.say("THE TAPE IS ALREADY EMPTY"); }, 9.5f); bx -= 92;
+      button({bx, r.y - 2, 86, 26}, "SAVE LOOP", false, [this] { app_.loopSave(); }, 9.5f); bx -= 90;
+      if (!has && !st_.freeRecording && !st_.freeArmed) button({bx, r.y - 2, 86, 26}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f); }
     const float labW = 34, top = r.y + 28, laneH = (r.h - 28) / Session::kTracks, wx = r.x + labW + 4, ww = r.w - labW - 4;
     for (int t = 0; t < Session::kTracks; t++) {
         const Rect lane{r.x, top + t * laneH, r.w, laneH - 2};
@@ -331,29 +350,13 @@ void SamplerUI::tapeView(Rect r) {
             for (int i = 0; i < n; i++) { const float v = std::min(1.f, pk[i] / mx); if (v > 0.02f) rrect({wx + i * bw, cy - v * half, std::max(1.f, bw), std::max(1.f, 2 * v * half)}, 0, st_.track_clip_rec[t] ? ACCENT : sel ? TEXT : DIM); }
         } else text(wx + 4, lane.y + lane.h / 2, 9, DIM, "EMPTY", 0, false);
         hit(lane, [this, t](float, float) { app_.selectTrack(t); });   // tap a lane: that track
-        if (clip) button({lane.x + lane.w - 36, lane.y + 1, 34, std::min(lane.h - 2, 18.f)}, "X", false, [this, t] { clearAsk_ = 2 + t; }, 9);
+        if (clip) button({lane.x + lane.w - 36, lane.y + 1, 34, std::min(lane.h - 2, 18.f)}, "X", false, [this, t] { askTapeClear(t); }, 9);
     }
     if (has) {   // bar lines and the playhead over all lanes
         for (int b = 0; b < bars; b++) line(wx + ww * b / bars, top, wx + ww * b / bars, top + laneH * Session::kTracks - 2, OUTLINE, 1);
         const float lp = st_.loopSamples > 0 ? (float)(st_.pos / st_.loopSamples) : 0.f;
         rrect({wx + std::min(1.f, std::max(0.f, lp)) * ww - 1, top - 2, 3, laneH * Session::kTracks}, 0, st_.freeRecording ? ACCENT : TEXT);
     }
-}
-
-// asks twice as hard as the other buttons: a tape cannot be brought back
-void SamplerUI::clearSheet() {
-    rrect({0, 0, W_, H_}, 0, theme::withAlpha(BG, 225));
-    tap({0, 0, W_, H_}, [this] { clearAsk_ = 0; });
-    const Rect box{W_ * 0.22f, H_ * 0.26f, W_ * 0.56f, H_ * 0.48f};
-    rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 2);
-    tap(box, [] {});
-    const bool all = clearAsk_ == 1; const int t = clearAsk_ - 2;
-    text(box.x + box.w / 2, box.y + 34, T_TITLE, TEXT, all ? "ERASE THE WHOLE TAPE?" : "ERASE THE TAPE OF TRACK " + std::to_string(t + 1) + "?", 1, true);
-    text(box.x + box.w / 2, box.y + 64, T_CAPTION, DIM, all ? "EVERY LOOP OF EVERY TRACK IS DELETED." : "THIS TRACK'S LOOP IS DELETED.", 1, false);
-    text(box.x + box.w / 2, box.y + 84, T_CAPTION, ACCENT, "THIS CANNOT BE UNDONE. ARE YOU ABSOLUTELY SURE?", 1, true);
-    const float bw = (box.w - 36) / 2, by = box.y + box.h - 58;
-    button({box.x + 12, by, bw, 46}, "NO, KEEP IT", false, [this] { clearAsk_ = 0; }, 12);
-    button({box.x + 24 + bw, by, bw, 46}, "YES, ERASE", true, [this, all, t] { if (all) app_.loopClear(); else app_.clearTrackLoop(t); clearAsk_ = 0; }, 12, true);
 }
 
 // ---- sequencer: piano roll with touch editing, zoom and undo / redo ----
@@ -541,7 +544,7 @@ void SamplerUI::sequencerView(Rect r) {
     b(state == 0 ? "UNMUTE" : "MUTE", state == 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
     b("TO TAPE", false, [this] { app_.seqBounce(); });   // one pass of this pattern recorded on the tape (sets the loop length)
     b("DICE", false, [this] { app_.seqDice(); });
-    { const bool sure = clearAt_ && now_ - clearAt_ < 2500; b(sure ? "SURE?" : "CLEAR", sure, [this, sure] { if (sure) { app_.seqClear(); clearAt_ = 0; } else clearAt_ = now_ ? now_ : 1; }); }
+    b("CLEAR", false, [this] { app_.seqClear(); showUndo("PATTERN CLEARED"); });   // it can be undone: no question, an UNDO that stays a few seconds
 }
 
 // ---- song: banks of patterns one after the other ----
@@ -667,26 +670,28 @@ void SamplerUI::selectPanel(Rect r, const Session::SeqView* v, int n, int pt, in
 }
 
 void SamplerUI::pagePanel(Rect r) {
-    // four modes (OP-1 style), then the four pages of the current mode
-    const int mode = SamplerApp::modeOf(app_.page()), mw = (r.w - 3 * 4) / 4.f;
+    // five tabs by task, then the pages of the tab, then one plain sentence about the page, then its four knobs
+    const int mode = SamplerApp::modeOf(app_.page()), mw = (r.w - 4 * 3) / 5.f;
     for (int m = 0; m < SamplerApp::kModes; m++) {
-        Rect c{r.x + m * (mw + 4), r.y, (float)mw, 30};
-        button(c, SamplerApp::modeName(m), m == mode, [this, m] { app_.gotoMode(m); }, 11);
+        Rect c{r.x + m * (mw + 3), r.y, (float)mw, 32};
+        button(c, SamplerApp::modeName(m), m == mode, [this, m] { app_.gotoMode(m); }, 9.5f);
     }
-    const int pn = SamplerApp::modePageCount(mode);
-    for (int i = 0; i < pn; i++) {   // the pages of the mode, four to a row
+    const int pn = SamplerApp::modePageCount(mode), pw = (r.w - 3 * 4) / 4.f;
+    for (int i = 0; i < pn; i++) {   // the pages of the tab, four to a row
         const SamplerApp::Page pg = SamplerApp::modePages(mode)[i];
-        Rect c{r.x + (i % 4) * (mw + 4), r.y + 34 + (i / 4) * 30, (float)mw, 26};
+        Rect c{r.x + (i % 4) * (pw + 4), r.y + 36 + (i / 4) * 30, (float)pw, 26};
         button(c, kPageTab[pg], app_.page() == pg, [this, pg] { app_.gotoPage(pg); }, 9.5f);
     }
-    const float extra = pn > 4 ? 30.f : 0.f;
+    const float rows = pn > 4 ? 2.f : 1.f, hy = r.y + 36 + rows * 30 + 2;
+    { const std::string h = SamplerApp::pageHelp(app_.page()); const size_t per = (size_t)std::max(12.f, r.w / (8.f * textScale_ * 0.6f)); size_t a = 0; int ln = 0;   // wrapped at spaces, three lines at most
+      while (a < h.size() && ln < 3) { size_t b = std::min(h.size(), a + per); if (b < h.size()) { const size_t sp = h.rfind(' ', b); if (sp != std::string::npos && sp > a) b = sp; } text(r.x, hy + 6 + ln * 11 * textScale_, 8.f, DIM, h.substr(a, b - a), 0, false); a = b + (b < h.size() && h[b] == ' ' ? 1 : 0); ln++; } }
     auto k = app_.knobs();
-    const float top = r.y + 72 + extra, rh = (r.h - 72 - extra) / 4;
+    const float top = hy + 38, rh = (r.y + r.h - top) / 4;
     for (int i = 0; i < 4; i++) {
         const auto& p = k[(size_t)i];
         const float y = top + i * rh;
         if (!p.valid) continue;
-        text(r.x, y + 8, T_CAPTION, DIM, "K" + std::to_string(i + 1) + "  " + p.name, 0, true);
+        text(r.x, y + 8, T_CAPTION, DIM, p.name, 0, true);
         text(r.x + r.w, y + 10, T_VALUE, p.isChoice ? ACCENT : TEXT, p.value, 2, true);
         Rect s{r.x, y + 26, r.w, 14};
         rrect(s, 0, SURFACE); stroke(s, 0, OUTLINE, 1);
@@ -714,7 +719,7 @@ void SamplerUI::projectSheet() {
     text(box.x + 110, box.y + 21, T_CAPTION, DIM, cur == "autosave" ? "UNSAVED SESSION (KEPT AUTOMATICALLY)" : "OPEN: " + cur, 0, false);
     button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { projOpen_ = false; }, 10);
     const float colW = 196;
-    projListRect_ = {box.x + 6, box.y + 44, box.w - colW - 18, box.h - 52 - 92};
+    projListRect_ = {box.x + 6, box.y + 44, box.w - colW - 18, box.h - 52 - 28};
     rrect(projListRect_, R_CONTROL, BG);
     const float rh = 36;
     projScroll_ = std::min(std::max(0.f, projScroll_), std::max(0.f, projList_.size() * rh - projListRect_.h));
@@ -737,26 +742,15 @@ void SamplerUI::projectSheet() {
     float by = box.y + 44; const float bh = 30, gap = 4;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({bx, by, bw, bh}, label, on, std::move(f), 10.5f, accent); by += bh + gap; };
     const bool haveSel = projSel_ >= 0 && projSel_ < (int)projList_.size();
-    const bool deleting = projDelAt_ && now_ - projDelAt_ < 2500;
     b(cur == "autosave" ? "SAVE AS NEW" : "SAVE  " + cur, false, [this, cur] { app_.saveProject(cur == "autosave" ? app_.newProjectName() : cur); }, true);
     if (cur != "autosave") b("SAVE AS NEW", false, [this] { app_.saveProject(app_.newProjectName()); });
     b(haveSel ? "LOAD  " + projList_[(size_t)projSel_] : "LOAD (PICK ONE)", false, [this, haveSel] { if (haveSel) { app_.loadProject(projList_[(size_t)projSel_]); projOpen_ = false; } });
-    b(deleting ? "TAP AGAIN TO DELETE" : "DELETE", deleting, [this, haveSel, deleting] { if (!haveSel) return; if (deleting) { app_.deleteProject(projList_[(size_t)projSel_]); projSel_ = -1; projDelAt_ = 0; } else projDelAt_ = now_; });
+    dangerButton({bx, by, bw, bh}, "DELETE PROJECT", [this, haveSel] { if (!haveSel) return; const std::string nm = projList_[(size_t)projSel_]; askConfirm("DELETE THE PROJECT " + nm + "?", "ITS PATTERNS AND ITS TAPE ARE DELETED.", "YES, DELETE", [this, nm] { app_.deleteProject(nm); projSel_ = -1; }); }, 10.5f); by += bh + gap;
     b("EXPORT MIDI (PATTERNS)", false, [this] { app_.exportMidi(); });
     b("EXPORT MIX (WAV)", false, [this] { app_.exportMix(); });
     b("IMPORT MIDI FILE", false, [this] { app_.requestMidi(); });
-    // view: the look of the app and the full screen
-    const float vy = box.y + box.h - 88, vh = 32; const float vw = (box.w - 12 - 4 * 5 - 4) / 5.f;
-    text(box.x + 8, vy - 6, T_CAPTION, DIM, "VIEW", 0, true);
-    for (int i = 0; i < theme::kThemes; i++) button({box.x + 6 + i * (vw + 4), vy, vw, vh}, theme::name(i), app_.themeId() == i, [this, i] { app_.setTheme(i); }, 10);
-    button({box.x + 6 + theme::kThemes * (vw + 4), vy, vw, vh}, app_.fullscreen() ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", app_.fullscreen(), [this] { app_.setFullscreen(!app_.fullscreen()); }, 9.5f);
-    // other gear: follow its clock, or send ours
-    { const float my = box.y + box.h - 46; static const char* nm[3] = {"MIDI SYNC: OFF", "FOLLOW CLOCK IN", "SEND CLOCK OUT"};
-      text(box.x + 8, my - 6, T_CAPTION, DIM, "MIDI", 0, true);
-      const float mw = (box.w - 12 - 2 * 4) / 3.f;
-      for (int i = 0; i < 3; i++) button({box.x + 6 + i * (mw + 4), my, mw, vh}, nm[i], app_.midiSync() == i, [this, i] { app_.setMidiSync(i); }, 10); }
     const std::string t = app_.toast();
-    if (!t.empty()) text(box.x + 90, vy - 6, 11, ACCENT, t, 0, true);
+    if (!t.empty()) text(box.x + 14, box.y + box.h - 16, 11, ACCENT, t, 0, true);
 }
 
 void SamplerUI::librarySheet() {

@@ -10,13 +10,13 @@ constexpr uint32_t withAlpha(uint32_t c, int a) { return (c & 0x00ffffffu) | (ui
 
 // Lo-fi look: two base colours (paper and ink, in a dark and a light variant) and one accent. No gradients, 1 px lines, square corners.
 // The colours are variables so the phone can switch variant at run time (theme::apply); everything else names them through this header.
-inline uint32_t BG, SURFACE, RAISED, OUTLINE, TEXT, DIM, ACCENT, ON_ACCENT;
+inline uint32_t BG, SURFACE, RAISED, OUTLINE, TEXT, DIM, ACCENT, ON_ACCENT, DANGER;   // DANGER: what cannot be taken back (erase, delete)
 inline uint32_t VIOLET, GREEN, RED, AMBER;   // old names kept: they now all resolve to paper / accent, so state is told by fill and position, not hue
 inline uint32_t KNOB[4];                     // colours of the four page knobs (the OP-1 themes use its encoder colours: blue, green, white, orange)
 inline bool light = false;
-inline int id = 0;                           // 0 DARK, 1 LIGHT, 2 OP-1, 3 OP-1 BODY
-constexpr int kThemes = 4;
-inline const char* name(int i) { static const char* n[kThemes] = {"DARK", "LIGHT", "OP-1", "OP-1 BODY"}; return n[i < 0 || i >= kThemes ? 0 : i]; }
+inline int id = 0;                           // 0 DARK, 1 LIGHT, 2 OP-1, 3 OP-1 BODY, 4 HIGH CONTRAST
+constexpr int kThemes = 5;
+inline const char* name(int i) { static const char* n[kThemes] = {"DARK", "LIGHT", "OP-1", "OP-1 BODY", "HI-CONTRAST"}; return n[i < 0 || i >= kThemes ? 0 : i]; }
 inline void apply(int theme) {
     id = theme < 0 || theme >= kThemes ? 0 : theme; light = id == 1 || id == 3;
     const uint32_t paper = argb(237, 235, 228), ink = argb(20, 20, 26);
@@ -26,12 +26,16 @@ inline void apply(int theme) {
     else if (id == 2) {   // the OP-1 screen: near black, off-white line art, orange for what is active
         BG = argb(12, 12, 14); SURFACE = argb(21, 21, 23); RAISED = argb(32, 32, 35); OUTLINE = argb(58, 57, 53); TEXT = argb(244, 243, 239); DIM = argb(117, 114, 109);
         ACCENT = argb(255, 106, 19); ON_ACCENT = argb(12, 12, 14);
+    } else if (id == 4) { // high contrast: pure black and white, yellow for what is active, strong lines
+        BG = argb(0, 0, 0); SURFACE = argb(0, 0, 0); RAISED = argb(38, 38, 38); OUTLINE = argb(255, 255, 255); TEXT = argb(255, 255, 255); DIM = argb(200, 200, 200);
+        ACCENT = argb(255, 224, 0); ON_ACCENT = argb(0, 0, 0);
     } else {              // the OP-1 body: brushed light grey, black ink, orange keys
         BG = argb(201, 198, 191); SURFACE = argb(222, 219, 212); RAISED = argb(233, 231, 225); OUTLINE = argb(156, 152, 145); TEXT = argb(26, 26, 28); DIM = argb(95, 92, 88);
         ACCENT = argb(255, 106, 19); ON_ACCENT = argb(255, 255, 255);
     }
+    DANGER = id == 1 || id == 3 ? argb(190, 30, 30) : id == 4 ? argb(255, 90, 90) : argb(235, 74, 64);
     VIOLET = TEXT; GREEN = TEXT; RED = ACCENT; AMBER = ACCENT;
-    if (id >= 2) { KNOB[0] = argb(47, 125, 225); KNOB[1] = argb(62, 196, 109); KNOB[2] = id == 2 ? argb(244, 243, 239) : argb(26, 26, 28); KNOB[3] = argb(255, 106, 19); }
+    if (id >= 2 && id < 4) { KNOB[0] = argb(47, 125, 225); KNOB[1] = argb(62, 196, 109); KNOB[2] = id == 2 ? argb(244, 243, 239) : argb(26, 26, 28); KNOB[3] = argb(255, 106, 19); }
     else for (auto& k : KNOB) k = TEXT;
 }
 inline void apply(bool lightVariant) { apply(lightVariant ? 1 : 0); }

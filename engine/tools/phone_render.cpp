@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
     Denormals::enableOnThisThread();
     const int sr = SAMPLERATE;
     Session s(sr); s.setDataDir("/tmp/fm1sampler_test"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     if (argc > 2) app.setTheme(atoi(argv[2]));
     SamplerUI ui(app);
     const float W = 860, H = 400;
@@ -63,8 +63,14 @@ int main(int argc, char** argv) {
     app.micSample(); in.assign(512, 0.f); run(2.0); app.tick(now + 100);
     tapAt(176 + 8 + 100, 74 + 8 + 66 + 142 + 6 + 10 + 12 + 17); ui.frame(now); dump("library");
     ui.touch(0, 5, 5, now); ui.touch(2, 5, 5, now); ui.frame(now);
-    app.selectTrack(0); tab(SamplerApp::P_TAPEV); ui.frame(now); dump("tape_view");
-    tapAt(232, 22); ui.frame(now); dump("clear_ask");
+    app.selectTrack(0);
+    tab(SamplerApp::P_TAPEV); ui.frame(now);
+    app.gotoPage(SamplerApp::P_MIX); app.setVolume(0, 0.9f); app.setVolume(1, 0.5f); app.toggleMute(2); app.toggleSolo(1); ui.frame(now); dump("mixer"); app.toggleMute(2); app.toggleSolo(1);
+    ui.openMenu(); ui.frame(now); dump("menu"); ui.touch(0, 790, 22, now); ui.touch(2, 790, 22, now); ui.frame(now);
+    app.gotoPage(SamplerApp::P_HOME); app.setAccess(true); app.setTheme(4); ui.frame(now); dump("access");
+    app.setAccess(false); app.setTheme(0); app.setLeftHanded(true); ui.frame(now); dump("lefthand"); app.setLeftHanded(false);
+    app.gotoPage(SamplerApp::P_TAPEV); ui.frame(now); dump("tape_view");
+    ui.frame(now); dump("tape_view2");
     fprintf(f, "]}\n"); fclose(f);
     return 0;
 }

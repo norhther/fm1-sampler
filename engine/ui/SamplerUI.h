@@ -16,6 +16,12 @@ public:
     void frame(uint32_t nowMs);
     const std::vector<UiOp>& ops() const { return ops_; }
     void touch(int action /*0 down 1 move 2 up*/, float x, float y, uint32_t nowMs);
+    bool takeHaptic() { const bool h = haptic_; haptic_ = false; return h; }                     // a touch landed on a control: the phone should tick
+    std::string takeAnnounce() { std::string s; s.swap(announce_); return s; }                    // a message for the screen reader (TalkBack)
+    void openMenu() { menuOpen_ = true; }
+    bool menuOpen() const { return menuOpen_; }
+    bool tourOpen() const { return tourOpen_; }
+    void openTour() { tourOpen_ = true; tourStep_ = 0; menuOpen_ = false; }
     int selectedCount() const { return (int)sel_.size(); }       // SELECT mode of the roll (for the tests)
     bool isSelected(int tick, int note) const { return isSel(tick, note); }
     bool songSheetOpen() const { return songOpen_; }
@@ -31,7 +37,7 @@ public:
 
 private:
     struct Rect { float x, y, w, h; bool has(float px, float py) const { return px >= x && px < x + w && py >= y && py < y + h; } };
-    struct Hit { Rect r; std::function<void(float, float)> down, move; std::function<void()> up; };
+    struct Hit { Rect r; std::function<void(float, float)> down, move; std::function<void()> up, lp; };   // lp: a finger that rests for half a second
     void rrect(Rect r, float rad, uint32_t c);
     void stroke(Rect r, float rad, uint32_t c, float w = 1);
     void text(float x, float cy, float size, uint32_t c, const std::string& s, int align = 0, bool bold = false);
@@ -44,6 +50,8 @@ private:
     void tap(Rect r, std::function<void()> f);
     std::string fit(const std::string& s, float width, float size) const;
     void button(Rect r, const std::string& label, bool on, std::function<void()> f, float size = 11, bool accent = false);
+    void dangerButton(Rect r, const std::string& label, std::function<void()> f, float size = 11);   // erases something that cannot come back: red, with a warning mark
+    void longPress(Rect r, std::function<void()> onTap, std::function<void()> onLong);               // tap = onTap when the finger lifts, rest for half a second = onLong
 
     void topBar(Rect r);
     void trackList(Rect r);
@@ -73,8 +81,18 @@ private:
     struct NoteDrag { bool on = false, existing = false, moved = false; int tick = 0, note = 0, len = 0, origLen = 0; } drag_;
     int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
     int clearAsk_ = 0; float tempoDragX_ = 0;   // the tape clear dialog: 0 closed, 1 the whole tape, 2 + n track n
-    void globalBar(Rect r); void tapeView(Rect r); void clearSheet();
-    uint32_t clearAt_ = 0;   // CLEAR asks twice
+    void tapeView(Rect r);
+    // one dialog for what cannot be undone, the menu, the first-run tour, the mixer, the long-press menu of a track
+    struct Confirm { std::string title, body, yes; std::function<void()> go; } confirm_;
+    bool confirmOpen_ = false;
+    void askConfirm(const std::string& title, const std::string& body, const std::string& yes, std::function<void()> go) { confirm_ = {title, body, yes, std::move(go)}; confirmOpen_ = true; }
+    void askTapeClear(int track);   // -1: the whole tape
+    void confirmSheet(); void menuSheet(); void tourSheet(); void trackMenuSheet(); void mixerView(Rect r); void flowStrip(Rect r); void undoToast();
+    void showUndo(const std::string& msg) { undoMsg_ = msg; undoMsgAt_ = now_ ? now_ : 1; }
+    bool menuOpen_ = false, tourOpen_ = false, tourSeen_ = false, haptic_ = false, lpFired_ = false, lpMoved_ = false; int tourStep_ = 0, trackMenu_ = -1;
+    float textScale_ = 1.f, downX_ = 0, downY_ = 0; uint32_t downAt_ = 0, undoMsgAt_ = 0;
+    std::string announce_, lastToast_, undoMsg_;
+    Rect rTracks_{0, 0, 0, 0}, rPanel_{0, 0, 0, 0}, rArea_{0, 0, 0, 0}, rRec_{0, 0, 0, 0}, rUndo_{0, 0, 0, 0}, rTempo_{0, 0, 0, 0};   // where things are, for the tour
     bool songOpen_ = false, copyArm_ = false; bool projOpen_ = false; int projSel_ = -1; float projScroll_ = 0, projLastY_ = 0, projMoved_ = 0; uint32_t projDelAt_ = 0; std::vector<std::string> projList_; Rect projListRect_{0, 0, 0, 0};
     // SELECT mode of the roll: notes picked by tap or by a box, edited together
     int drumView_ = 0;   // the roll as a drum grid: 0 off, 1 pads 1-8, 2 pads 9-16 (one row per pad)

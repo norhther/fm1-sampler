@@ -18,7 +18,7 @@ int main() {
     const int sr = SAMPLERATE;
     system("rm -rf /tmp/fm1sampler_t2; mkdir -p /tmp/fm1sampler_t2");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t2"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
-    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 0;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(200)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto rmsFrom = [&](size_t from) { double a = 0; size_t n = 0; for (size_t i = from; i < all.size(); i++) { a += all[i] * all[i]; n++; } return n ? std::sqrt(a / n) : 0.0; };

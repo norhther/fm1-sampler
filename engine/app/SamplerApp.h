@@ -44,13 +44,14 @@ public:
     // ---- state for the phone UI (all of it can also be edited from there) ----
     Page page() const { return page_; }
     void gotoPage(Page p);
-    void gotoMode(int m) { gotoPage(lastPage_[m & 3]); }   // the page the mode was left on
+    void gotoMode(int m) { gotoPage(lastPage_[m % kModes]); }   // the page the mode was left on
     static const char* pageName(Page p);
     // OP-1 style: four modes on the buttons HOME, FX, SEQ, EDIT, each with up to four pages (the same button steps through them, dots on the screen show where you are)
-    static constexpr int kModes = 4;
+    static constexpr int kModes = 5;
     static const char* modeName(int mode);        // SOUND, FX, SEQ, MIX
     static const Page* modePages(int mode);       // the pages of a mode (4, the FX mode has 7)
     static int modePageCount(int mode);
+    static const char* pageHelp(Page p);          // one plain sentence: what the page is for
     static int modeOf(Page p);
     static int pageSlot(Page p);                  // index of a page inside its mode
     int track() const { return track_; }
@@ -79,6 +80,9 @@ public:
     bool tempoLocked() const { return st_.loopSamples > 0; }
     void tempoStep(int d) { setTempo(tempo_ + d); }   // says so when the loop holds the tempo
     void clearTrackLoop(int t) { s_.clipClear(t); say("TRACK " + std::to_string(t + 1) + " TAPE CLEARED"); }
+    void toggleMute(int t) { ts_[t].mute = !ts_[t].mute; for (int i = 0; i < kTracks; i++) applyMix(i); }
+    void toggleSolo(int t) { ts_[t].solo = !ts_[t].solo; for (int i = 0; i < kTracks; i++) applyMix(i); }
+    bool anySolo() const { for (int i = 0; i < kTracks; i++) if (ts_[i].solo) return true; return false; }
     bool takeClearAsk() { const bool b = clearAsk_; clearAsk_ = false; return b; }   // the SAVE hold on the FM-1 wants the clear dialog of the phone
     void seqUndo() { s_.seqUndo(track_); say("UNDO"); }
     void seqRedo() { s_.seqRedo(track_); say("REDO"); }
@@ -140,7 +144,7 @@ public:
         float start = 0.f, end = 1.f, speed = 0.5f, pitch = 0.5f;
         int arpRate = 0, arpPatt = 0, arpOct = 0; float arpLen = 0.7f;
         
-        float vol = 0.8f, pan = 0.5f, sendR = 0.f, sendD = 0.f;
+        float vol = 0.8f, pan = 0.5f, sendR = 0.f, sendD = 0.f; bool mute = false, solo = false;   // mute / solo: only for this session
         int entry = -1;
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
@@ -183,6 +187,13 @@ public:
     static constexpr int kTakeBarsN = 6;
     int takeBars() const { static const int v[kTakeBarsN] = {0, 1, 2, 4, 8, 16}; return v[takeBars_]; }   // 0: the take ends when you press REC again
     void cycleTakeBars() { takeBars_ = (takeBars_ + 1) % kTakeBarsN; applyTempo(); say(takeBars() ? "TAKE: " + std::to_string(takeBars()) + (takeBars() == 1 ? " BAR" : " BARS") + ", ENDS BY ITSELF" : "TAKE: ENDS WHEN YOU STOP IT"); }
+    // ---- how the phone looks and is held: left-handed layout, accessibility mode (big text, high contrast), the first-run tour ----
+    bool leftHanded() const { return leftHanded_; }
+    void setLeftHanded(bool on) { leftHanded_ = on; saveSettings(); }
+    bool access() const { return access_; }
+    void setAccess(bool on) { access_ = on; saveSettings(); say(on ? "ACCESSIBILITY MODE: ON" : "ACCESSIBILITY MODE: OFF"); }
+    bool tourDone() const { return tourDone_; }
+    void setTourDone(bool on) { tourDone_ = on; saveSettings(); }
     bool audition() const { return audition_; }   // true: a sample or synth you pick in the library plays at once (off by default)
     void setAudition(bool on) { audition_ = on; saveSettings(); say(on ? "AUDITION: ON" : "AUDITION: OFF"); }
     bool phoneOut() const { return phoneOut_; }    // true: play through the phone speaker even when the FM-1 is plugged in
@@ -237,7 +248,7 @@ private:
     
     uint32_t backupAt_ = 0;
     int midiSync_ = 0; uint64_t clkLast_ = 0, clkWindowStart_ = 0; int clkCount_ = 0; uint64_t tapLast_ = 0; double tapAvg_ = 0; int tapN_ = 0; bool extPlaying_ = false;
-    bool phoneOut_ = false, audition_ = false, clearAsk_ = false;
+    bool phoneOut_ = false, audition_ = false, clearAsk_ = false, leftHanded_ = false, access_ = false, tourDone_ = false;
     int theme_ = 0; bool fullscreen_ = false; void loadSettings(); void saveSettings();
     std::string project_ = "autosave"; uint32_t autosaveAt_ = 0, loadedAt_ = 0; bool tapeDirty_ = false, loading_ = false, wantMidi_ = false, anyRec_ = false;
     int lastBounceSeen_ = 0; double lastLoopSeen_ = 0; std::string sharePath_, pendingShare_; uint32_t pendingShareAt_ = 0;
@@ -276,7 +287,7 @@ private:
     bool loopAny_ = false;
     int mic_ = 0, micTrack_ = 0;
     uint32_t saveDownAt_ = 0; bool saveHeld_ = false, saveHoldDone_ = false;
-    Page lastPage_[kModes] = {P_HOME, P_FX, P_SQ, P_MIX};   // each mode comes back to the page it was left on
+    Page lastPage_[kModes] = {P_HOME, P_FX, P_SQ, P_MIX, P_TAPEV};   // each mode comes back to the page it was left on
     uint32_t seqDownAt_ = 0; bool seqHeld_ = false, seqRecStarted_ = false;   // SEQ held = record the pattern while the keys are played
     void modeButton(int mode);
     int seqSeen_[kTracks] = {}, lastBounceDone_ = 0;
