@@ -134,18 +134,9 @@ SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
     applyFx();
     s_.setRetLevel(1, 0.7f);
     s_.setLoopSource(loopSrc_);
-    // a first session to play with: keys on 1, a drum kit on 2, bass on 3
-    auto first = [&](const char* group, int track) {
-        for (size_t i = 0; i < lib_.size(); i++) if (lib_[i].group == group) { ts_[track].entry = (int)i; if (group == std::string("Drums")) ts_[track].algo = 3; s_.loadSamplePath(lib_[i].path, lib_[i].kit, track); return; }
-    };
-    // the default project: Tape Key, Acoustic bass, Shiny, Trap Kit
-    auto byLabel = [&](const char* label, int track) {
-        for (size_t i = 0; i < lib_.size(); i++) if (lib_[i].label == label) { ts_[track].entry = (int)i; if (lib_[i].kit) ts_[track].algo = 3; s_.loadSamplePath(lib_[i].path, lib_[i].kit, track); return; }
-    };
-    byLabel("Tape Key", 0); byLabel("Acoustic", 1); byLabel("Shiny", 2); byLabel("TrapKit", 3); (void)first;
+    // a project starts empty: no sound on any track (pick one from the library, a synth, the mic or a file)
     for (int t = 0; t < kTracks; t++) { applyMix(t); applyPattern(t); }
     applyMasterFx(); applyTempo(); applyTomb(); applyMaster();
-    if (ts_[0].entry >= 0) libCursor_ = ts_[0].entry;
     defaultState_ = stateText();   // what NEW PROJECT goes back to
 }
 

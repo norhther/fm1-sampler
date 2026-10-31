@@ -184,7 +184,7 @@ static void testLibrary() {
     }
     CHECK(bad == 0 && files >= 40 && groups >= 5, "the library: %d files in %d groups all load and are not silent", files, groups);
     static const double slot[16] = {0.5, 1.0, 0.5, 0.5, 0.4, 0.4, 0.7, 0.5, 0.5, 0.5, 0.5, 0.4, 0.5, 0.4, 1.4, 0.9};
-    for (const char* kit : {"808 Kit", "Electro Kit", "Lo-Fi Kit"}) {
+    for (const char* kit : {"808 Kit", "Electro Kit", "Lo-Fi Kit", "Rusty Kit", "Boom Bap Kit"}) {
         std::vector<float> d; int sr = 0; readWav((root / "Drums" / (std::string(kit) + ".wav")).string(), d, sr);
         const auto sl = findSlices(d, (int)(d.size() / 2), sr, 16);
         int good = 0; double want = 0.01; for (size_t i = 0; i < sl.size() && i < 16; i++) { good += std::fabs(sl[i] / (double)sr - want) < 0.03; want += slot[i]; }
@@ -841,7 +841,8 @@ static void testMidiIn() {
     SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
-    run(2.5);
+    run(2.5); for (size_t i = 0; i < app.library().size(); i++) if (app.library()[i].label == "Tape Key") app.loadEntry((int)i);
+    run(1.5);
     {   // a keyboard plays the selected track
         size_t m = all.size(); const uint8_t on[3] = {0x90, 60, 100}, off[3] = {0x80, 60, 0};
         app.midiExternal(on, 3, 1000000000ull); run(0.5); app.midiExternal(off, 3, 2000000000ull); run(0.3);

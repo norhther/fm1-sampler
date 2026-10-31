@@ -26,7 +26,9 @@ int main() {
     auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
     auto play = [&](int note, double sec) { size_t m = all.size(); app.playNote(note, true); run(sec); app.playNote(note, false); run(0.3); return rmsFrom(m); };
     run(2.5);
-    CHECK(app.hasSample(0) && app.hasSample(1) && app.hasSample(2) && app.hasSample(3), "four default tracks load (%s, %s, %s, %s)", app.sampleLabel(0).c_str(), app.sampleLabel(1).c_str(), app.sampleLabel(2).c_str(), app.sampleLabel(3).c_str());
+    CHECK(!app.hasSample(0) && !app.hasSample(1) && !app.hasSample(2) && !app.hasSample(3), "a new project starts with every track empty");
+    for (size_t i = 0; i < app.library().size(); i++) if (app.library()[i].label == "Tape Key") app.loadEntry((int)i);
+    run(1.5); CHECK(app.hasSample(0), "a library sound loads on track 1");
     CHECK(!app.hasSample(4), "track 5 is empty");
     // algorithms on track 1
     for (int a = 0; a < 6; a++) { app.setAlgo(a); run(0.3); double r = play(60, 1.0); CHECK(r > 0.003, "algorithm %s sounds (rms %.4f)", SamplerApp::algoName(a), r); }
