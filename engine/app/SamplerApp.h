@@ -24,7 +24,7 @@ public:
     static constexpr int kTracks = 16;   // the most; a session starts with 8 and ADD TRACK opens the next ones
     static constexpr int kFmTracks = 8;  // the FM-1 screen and keys only show the first eight
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -89,6 +89,12 @@ public:
     void seqRedo() { s_.seqRedo(track_); say("REDO"); }
     void seqClear() { s_.seqClear(track_); say("PATTERN CLEARED"); }
     void seqBounce();                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
+    // the pattern runs on its own: PLAY starts it from the first tick (on the beat or the bar), STOP silences it, the transport goes on
+    bool seqRunning(int t) const { return st_.seqRun[t] || st_.seqPend[t]; }
+    void seqRunToggle() { s_.seqRun(track_, !seqRunning(track_)); }
+    void setKeyTrigger(int t, bool on) { ts_[t].keyTrig = on; s_.seqKeyTrigger(t, on); say(on ? "KEYS PLAY THE PATTERN, C4 = AS WRITTEN" : "KEYS PLAY THE SOUND"); }
+    void setTrigQuant(int t, int q) { ts_[t].trigQ = std::min(2, std::max(0, q)); s_.seqTrigQuant(t, ts_[t].trigQ); }
+    void seqNudge(int ticks) { s_.seqNudge(track_, ticks); say(ticks < 0 ? "PATTERN EARLIER" : "PATTERN LATER"); }
     void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
     void seqToggleAt(int tick, int note, int len = 0);   // touch: add / remove a note (length in ticks, 0 = one step)
     // live: HOLD = the tape runs down while the button is held and spins up on release; LATCH = a tap stops it, the next tap spins it up
@@ -171,6 +177,7 @@ public:
         float tfEqLow = 0.5f, tfEqMid = 0.5f, tfEqHigh = 0.5f, tfComp = 0.f, duckAmt = 0.f;   // MIX mode: track EQ and compressor, how far the sidechain pushes this track down
         float padVol[16], padPitch[16], padDecay[16]; int padGroup[16] = {}; int selPad = 0;   // per pad of a kit (PADS page)
         TrackState() { for (int i = 0; i < 16; i++) { padVol[i] = 2.f / 3.f; padPitch[i] = 0.5f; padDecay[i] = 0.5f; } }
+        int keyTrig = 0, trigQ = 1;      // the keys start the pattern (OP-1 style), and when: at once, on the beat, on the bar
         int seqState = 0, seqBars = 3;   // sequencer: OFF / PLAY / REC, pattern length - 1 (1..16 bars)
     };
     const TrackState& state(int t) const { return ts_[t]; }

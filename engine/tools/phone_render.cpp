@@ -80,6 +80,9 @@ int main(int argc, char** argv) {
     app.gotoPage(SamplerApp::P_TAPEV); ui.frame(now); dump("tracks13");
     app.gotoPage(SamplerApp::P_MIX); ui.frame(now); dump("mixer_bank2");
     app.selectTrack(0); app.gotoPage(SamplerApp::P_TAPEV); ui.frame(now); { float nx = 0, ny = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "NEW LOOP") { nx = o.f[0]; ny = o.f[1] - 4; } tapAt(nx, ny); } ui.frame(now); dump("newloop");
+    tapAt(5, 5); ui.frame(now);
+    app.selectTrack(0); app.gotoPage(SamplerApp::P_TRIG); ui.frame(now); dump("trigger");
+    app.gotoPage(SamplerApp::P_SQ); app.setKeyTrigger(0, true); ui.frame(now); { float nx = 0, ny = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "FULL SCREEN") { nx = o.f[0]; ny = o.f[1] - 4; } tapAt(nx, ny); } ui.frame(now); dump("seqfull");
     fprintf(f, "]}\n"); fclose(f);
     return 0;
 }

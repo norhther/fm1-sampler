@@ -1061,6 +1061,7 @@ int main() {
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TOMB, "SEQ again: tombola");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PADS, "SEQ again: pads");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TRIG, "SEQ again: trigger");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TAPEV, "SEQ again: on into the TAPE tab, tape view");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SEQ, "SEQ again: tape fx");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SAVE, "SEQ again: loop source");
@@ -1443,6 +1444,49 @@ int main() {
             uil.touch(0, lx, ly, 400); uil.touch(2, lx, ly, 410); uil.frame(433); CHECK(atl("START", lx, ly) && atl("SEQUENCER", lx, ly), "...it opens the sheet with TAPE / SEQUENCER and START");
             { float sx, sy; atl("START", sx, sy); uil.touch(0, sx, sy, 500); uil.touch(2, sx, sy, 510); uil.frame(533); CHECK(!atl("START", sx, sy), "...START closes it"); }
         }
+    }
+    {   // the pattern on its own: play / stop, the keys as triggers (OP-1 style), the first beat, the full screen editor
+        Session s6(sr); s6.setDataDir("/tmp/fm1sampler_t6b"); s6.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a6(s6, [](const uint8_t*, size_t) {}); a6.setTourDone(true);
+        std::vector<float> ob(512), ib(512, 0.f), heard; auto run6 = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(ob.begin(), ob.end(), 0.f); s6.process(ob.data(), ib.data(), 256); heard.insert(heard.end(), ob.begin(), ob.end()); std::this_thread::sleep_for(std::chrono::milliseconds(1)); a6.tick((uint32_t)(i + 1)); } };
+        auto level = [&](double sec) { heard.clear(); run6(sec); return rms(heard); };
+        run6(1.0); a6.seqSetBarCount(1);
+        for (int b = 0; b < 4; b++) a6.seqToggleAt(b * 96, 60, 60);
+        a6.setSeqState(1); a6.transportPlay(); run6(0.5);
+        CHECK(a6.status().playing && a6.seqRunning(0) && level(2.0) > 0.01, "the pattern plays with the transport (rms %.3f)", rms(heard));
+        a6.seqRunToggle(); run6(1.5); CHECK(!a6.seqRunning(0) && level(2.0) < 0.002, "STOP silences the pattern while the transport runs (rms %.4f)", rms(heard));
+        CHECK(a6.status().playing, "...the transport keeps going");
+        a6.seqRunToggle(); run6(0.2); CHECK(a6.seqRunning(0), "PLAY starts it again (waiting for the beat or running)"); CHECK(level(3.0) > 0.01, "...and it sounds (rms %.3f)", rms(heard));
+        // nudge: the notes slide round the pattern, one undo step
+        { Session::SeqView v[64]; a6.seqNudge(24); run6(0.3); const int n = s6.seqNotes(0, v, 64); int first = 9999, last = -1; for (int i = 0; i < n; i++) { first = std::min(first, v[i].tick); last = std::max(last, v[i].tick); }
+          CHECK(n == 4 && first == 24 && last == 24 + 3 * 96, "NUDGE slides the pattern by a step (%d notes from tick %d)", n, first);
+          a6.seqNudge(-24); run6(0.3); a6.seqNudge(-48); run6(0.3);
+          const int n2 = s6.seqNotes(0, v, 64); first = 9999; for (int i = 0; i < n2; i++) first = std::min(first, v[i].tick); CHECK(first == 48 && n2 == 4, "...and round the end (earliest tick %d)", first);
+          a6.seqNudge(48); run6(0.3); }
+        // the keys as triggers
+        a6.seqRunToggle(); run6(0.5); a6.setKeyTrigger(0, true); run6(0.3);
+        CHECK(a6.status().keyTrig[0] && !a6.seqRunning(0), "KEYS = PATTERN: the pattern waits for a key");
+        CHECK(level(1.0) < 0.002, "...and nothing sounds (rms %.4f)", rms(heard));
+        a6.playNote(64, true); run6(1.5); CHECK(a6.status().seqRun[0] && a6.status().seqTrans[0] == 4, "a key starts it, E4 = 4 semitones up (%d)", a6.status().seqTrans[0]);
+        CHECK(level(1.5) > 0.01, "...it sounds (rms %.3f)", rms(heard));
+        a6.playNote(62, true); run6(0.3); CHECK(a6.status().seqTrans[0] == 2, "another key moves it (%d)", a6.status().seqTrans[0]);
+        a6.playNote(64, false); run6(0.2); CHECK(a6.status().seqRun[0], "one key up, one still held: it goes on");
+        a6.playNote(62, false); run6(2.0); CHECK(!a6.status().seqRun[0] && level(1.5) < 0.002, "the last key up stops it (rms %.4f)", rms(heard));
+        a6.setKeyTrigger(0, false); run6(0.3); CHECK(!a6.status().keyTrig[0] && a6.seqRunning(0), "KEYS = SOUND: the pattern runs again");
+        // the TRIGGER page
+        a6.gotoPage(SamplerApp::P_TRIG); { auto k = a6.knobs(); int v = 0; for (auto& kn : k) v += kn.valid; CHECK(v == 4 && SamplerApp::modeOf(SamplerApp::P_TRIG) == 2, "the TRIGGER page: four knobs, in the SEQ tab"); }
+        // the full screen editor
+        a6.gotoPage(SamplerApp::P_SQ); SamplerUI u6(a6); u6.setSize(860, 400, 0, 0); u6.frame(100);
+        auto at6 = [&](const char* label, float& x, float& y) { x = y = -1; for (auto& o : u6.ops()) if (o.type == UiOp::TEXT && o.text == label) { x = o.f[0]; y = o.f[1] - 4; } return x >= 0; };
+        float fx, fy; CHECK(at6("FULL SCREEN", fx, fy), "the pattern page has FULL SCREEN");
+        u6.touch(0, fx, fy, 200); u6.touch(2, fx, fy, 210); u6.frame(233);
+        CHECK(at6("EXIT", fx, fy) && !at6("TAPE STOP", fx, fy) && at6("BEAT >", fx, fy), "...the editor takes the whole screen, with the first beat buttons");
+        at6("EXIT", fx, fy); u6.touch(0, fx, fy, 300); u6.touch(2, fx, fy, 310); u6.frame(333);
+        CHECK(!at6("EXIT", fx, fy) && at6("TAPE STOP", fx, fy), "...EXIT brings the screen back");
+        // TO TAPE with the keys: the pass is recorded from the loop start, transposed
+        a6.setKeyTrigger(0, true); a6.playNote(67, true); run6(0.8); a6.playNote(67, false); run6(0.5);
+        for (int i = 0; i < 9; i++) if (a6.takeBars() != 1) a6.cycleTakeBars();
+        a6.setKeyTrigger(0, false); run6(0.2); a6.seqBounce(); run6(8.0);
+        CHECK(a6.loopExists() && a6.status().bounceDone > 0, "TO TAPE puts one pass of the pattern on the tape (bounce done %d)", a6.status().bounceDone);
     }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;

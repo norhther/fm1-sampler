@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER"};   // by Page
 static_assert(sizeof(kPageTab) / sizeof(*kPageTab) == SamplerApp::kPages, "one tab label for every page");
 }  // namespace
 
@@ -108,12 +108,15 @@ void SamplerUI::frame(uint32_t now) {
     if (app_.takeClearAsk() && app_.loopExists()) askTapeClear(-1);   // the FM-1 SAVE hold asks the same question
     rrect({0, 0, W_, H_}, 0, BG);
     const float tb = 44, left = 176, right = 252, y0 = tb + MARGIN, h = H_ - tb - 2 * MARGIN;
+    if (seqFull_ && app_.page() == SamplerApp::P_SQ) { seqFullScreen(); }
+    else {
     topBar({0, 0, W_, tb});
     const bool lh = app_.leftHanded();   // left-handed: the pages on the left, the tracks on the right
     rTracks_ = lh ? Rect{W_ - left, y0, left - MARGIN, h} : Rect{MARGIN, y0, left - MARGIN, h};
     rArea_ = lh ? Rect{right + MARGIN, y0, W_ - left - right - 2 * MARGIN, h} : Rect{left + MARGIN, y0, W_ - left - right - 2 * MARGIN, h};
     rPanel_ = lh ? Rect{MARGIN, y0, right - MARGIN, h} : Rect{W_ - right, y0, right - MARGIN, h};
     trackList(rTracks_); sampleArea(rArea_); pagePanel(rPanel_);
+    }
     if (sheetOpen_) librarySheet();
     if (projOpen_) projectSheet();
     if (songOpen_) songSheet();
@@ -214,6 +217,7 @@ void SamplerUI::sampleArea(Rect r) {
     const std::string lab = app_.sampleLabel(t);
     text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - (app_.page() == SamplerApp::P_TAPEV ? 340 : 120), T_TITLE), 0, true);
     text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);
+    if (app_.page() == SamplerApp::P_SQ) button({r.x + r.w - 214, r.y, 130, 26}, "FULL SCREEN", false, [this] { seqFull_ = true; }, 10.5f);
     if (app_.page() == SamplerApp::P_PADS) button({r.x + r.w - 214, r.y, 214, 26}, "QUANTIZE: " + app_.quantText(), app_.quantDiv() > 0, [this] { app_.cycleQuant(); }, 10.5f);   // the pads snap to the beat too
     if (app_.page() == SamplerApp::P_TEMPO) { button({r.x + r.w - 210, r.y, 110, 26}, "TAP TEMPO", false, [this] { app_.tapTempo(); }, 10.5f, true); }
     if (app_.page() == SamplerApp::P_MIX) { mixerView({r.x, r.y + 28, r.w, r.h - 28}); return; }
@@ -569,10 +573,35 @@ void SamplerUI::sequencerView(Rect r) {
     int bx = 0;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + barsW + 6 + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
     b(state == 2 ? "STOP" : "REC NOTES", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
-    b(state == 0 ? "UNMUTE" : "MUTE", state == 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
+    { const bool run = app_.seqRunning(t); b(run ? (st_.seqRun[t] ? "STOP" : "WAITING") : "PLAY", run, [this] { app_.seqRunToggle(); }); }   // the pattern on its own: PLAY starts it from the first beat on the next beat or bar
     b("TO TAPE", false, [this] { app_.seqBounce(); });   // one pass of this pattern recorded on the tape (sets the loop length)
     b("DICE", false, [this] { app_.seqDice(); });
     b("CLEAR", false, [this] { app_.seqClear(); showUndo("PATTERN CLEARED"); });   // it can be undone: no question, an UNDO that stays a few seconds
+}
+
+// ---- the pattern editor on the whole screen: the roll gets all the room, the controls of the pattern and of the transport on one row ----
+void SamplerUI::seqFullScreen() {
+    const int t = app_.track(); const float m = MARGIN, h = 34, gap = 4;
+    if (app_.page() != SamplerApp::P_SQ) { seqFull_ = false; return; }
+    std::vector<std::pair<std::string, std::function<void()>>> items; std::vector<bool> on;
+    auto add = [&](const std::string& l, bool o, std::function<void()> f) { items.push_back({l, std::move(f)}); on.push_back(o); };
+    add("EXIT", false, [this] { seqFull_ = false; });
+    add("<", false, [this, t] { app_.selectTrack(std::max(0, t - 1)); });
+    add("TRACK " + std::to_string(t + 1), false, [] {});
+    add(">", false, [this, t] { app_.selectTrack(std::min(app_.trackCount() - 1, t + 1)); });
+    add(st_.playing ? "PAUSE" : "PLAY", st_.playing, [this] { app_.transportPlay(); });
+    add("METRO", app_.metronome(), [this] { app_.toggleMetro(); });
+    add(st_.keyTrig[t] ? "KEYS: PATTERN" : "KEYS: SOUND", st_.keyTrig[t], [this, t] { app_.setKeyTrigger(t, !st_.keyTrig[t]); });
+    static const char* q[] = {"AT ONCE", "BEAT", "BAR"};
+    add(std::string("START: ") + q[std::min(2, std::max(0, app_.state(t).trigQ))], false, [this, t] { app_.setTrigQuant(t, (app_.state(t).trigQ + 1) % 3); });
+    add("< BEAT", false, [this] { app_.seqNudge(-app_.stepTicks()); });
+    add("BEAT >", false, [this] { app_.seqNudge(app_.stepTicks()); });
+    const float w = (W_ - 2 * m - gap * (items.size() - 1)) / items.size();
+    for (size_t i = 0; i < items.size(); i++) button({m + i * (w + gap), m, w, h}, items[i].first, on[i], items[i].second, 9.f, i == 0);
+    const bool run = app_.seqRunning(t);
+    text(W_ - m, m + h + 12, T_CAPTION, run ? ACCENT : DIM, std::string("PATTERN ") + (run ? (st_.seqRun[t] ? "PLAYING" : "WAITING FOR THE ") + std::string(st_.seqRun[t] ? "" : "BEAT") : "STOPPED") + (st_.seqTrans[t] ? num("  %+.0f ST", st_.seqTrans[t]) : ""), 2, true);
+    text(m, m + h + 12, T_CAPTION, DIM, "< BEAT / BEAT > SLIDE THE WHOLE PATTERN: LINE UP THE FIRST BEAT WITH THE METRONOME", 0, false);
+    sequencerView({m, m + h + 22, W_ - 2 * m, H_ - 2 * m - h - 22});
 }
 
 // ---- song: banks of patterns one after the other ----

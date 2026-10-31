@@ -14,7 +14,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM", "NEAPM", "NEAPJ", "PERSN", "HUNGJ", "LYDDM", "ALTRD", "LYDAG", "DOR#4", "SPAN8", "INSEN", "IWATO", "YO", "EGYPT", "MAJBL", "PROMT", "ENIGM", "OCTWH", "LOCR2", "MAJ6P", "MIN6P"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -103,6 +103,7 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "Track effects, part 3: ring mod, auto-wah, stereo width, freeze. Only this track.",         // TFX3
     "Track effects, part 4: spring reverb, phone, punch, beat repeat. Only this track.",         // TFX4
     "TAPE STOP of the top bar: run-down time, spin-up time, depth, HOLD or LATCH.",   // TSTOP
+    "Play or stop the pattern by itself. KEYS: a key starts the pattern, the other keys move it up or down. START: on the beat or the bar. NUDGE: slide the first beat.",   // TRIG
 };
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }
@@ -110,10 +111,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX", "TAPE"}; return n[m % kModes]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
+    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
     return p[m % kModes];
 }
-int SamplerApp::modePageCount(int m) { static const int n[kModes] = {8, 8, 5, 8, 4}; return n[m % kModes]; }
+int SamplerApp::modePageCount(int m) { static const int n[kModes] = {8, 8, 6, 8, 4}; return n[m % kModes]; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -575,6 +576,17 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[2] = cont("PUNCH", &x.tfPunch, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
         k[3] = choice("BEAT REPEAT", &x.tfRepeat, {kRepeat[0], kRepeat[1], kRepeat[2], kRepeat[3], kRepeat[4]}, [=] { applyTrackFx(t); });
         break;
+    case P_TRIG: {
+        Knob run; run.name = "PATTERN"; run.valid = true; run.isChoice = true; run.value = seqRunning(t) ? (st_.seqRun[t] ? "PLAYING" : "WAITING") : "STOPPED"; run.norm = seqRunning(t) ? 1.f : 0.f;
+        run.step = [this](int) { seqRunToggle(); }; run.set = [this](float v) { s_.seqRun(track_, v > 0.5f); };
+        k[0] = run;
+        k[1] = choice("KEYS", &x.keyTrig, {"PLAY SOUND", "PLAY PATTERN"}, [=] { setKeyTrigger(t, ts_[t].keyTrig != 0); });
+        k[2] = choice("START ON", &x.trigQ, {"AT ONCE", "THE BEAT", "THE BAR"}, [=] { setTrigQuant(t, ts_[t].trigQ); });
+        Knob nu; nu.name = "FIRST BEAT"; nu.valid = true; nu.isChoice = true; nu.value = "< EARLIER  LATER >"; nu.norm = 0.5f;
+        nu.step = [this](int d) { seqNudge(d > 0 ? stepTicks() : -stepTicks()); }; nu.set = [this](float v) { if (v < 0.4f) seqNudge(-stepTicks()); else if (v > 0.6f) seqNudge(stepTicks()); };
+        k[3] = nu;
+        break;
+    }
     case P_TIMING: {
         std::vector<std::string> grids; for (int g = 0; g < kGrids; g++) grids.push_back(gridName(g));
         k[0] = quantKnob();

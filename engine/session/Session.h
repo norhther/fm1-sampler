@@ -44,6 +44,7 @@ public:
         bool metro;
         int countBeats;          // > 0 while the count-in runs: beats left
         int seqState[kTracks], seqBars[kTracks], seqCount[kTracks];   // sequencer: 0 mute 1 play 2 record 3 step entry, pattern length in bars, notes in the pattern
+        bool seqRun[kTracks], seqPend[kTracks], keyTrig[kTracks]; int seqTrans[kTracks];   // pattern play / stop, a start waiting for the beat, the keys trigger the pattern, its transposition
         int seqCursor[kTracks];  // step entry cursor, in ticks
         int globalUndoN, globalRedoN;   // the UNDO / REDO button: steps back / forward over every track
         int seqUndoN[kTracks], seqRedoN[kTracks];   // how many steps back / forward are possible
@@ -111,6 +112,10 @@ public:
     void setTakeQuant(int mode);          // 0 off (tempo follows the first take), 1 the take snaps to whole beats, 2 to whole bars (tempo kept)
 
     // ---- note sequencer (per track pattern on the beat clock, locked to the loop) ----
+    void seqRun(int track, bool run);         // play the pattern from its first tick (on the next beat or bar) / stop it, the transport keeps going
+    void seqKeyTrigger(int track, bool on);   // OP-1 style: the keys start the pattern (C4 = as written, every other key moves it by its distance), release stops it
+    void seqTrigQuant(int track, int q);      // when a key starts the pattern: 0 at once, 1 on the beat, 2 on the bar
+    void seqNudge(int track, int ticks);      // shift the whole pattern round its length (one undo step)
     void seqSetState(int track, int state);   // 0 mute, 1 play, 2 record (starts the transport; one track records at a time), 3 step entry (keys write at the cursor)
     void setLoopTempo(float bpm);             // a loop is on the tape: every clip is time-stretched to this tempo (the pitch stays; one undo step)
     void resetUndo();                         // forget every undo / redo step (a new or a loaded project)
