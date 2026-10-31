@@ -136,7 +136,7 @@ void SamplerApp::browse(int d) {
     libCursor_ = ((libCursor_ + (d > 0 ? 1 : -1)) % (int)lib_.size() + (int)lib_.size()) % (int)lib_.size();
     auditionAt_ = nowMs_ + 250;
 }
-void SamplerApp::loadEntry(int i) {
+void SamplerApp::loadEntry(int i, bool preview) {
     if (i < 0 || i >= (int)lib_.size()) return;
     libCursor_ = i; auditionAt_ = 0;
     const Entry& e = lib_[(size_t)i];
@@ -151,7 +151,7 @@ void SamplerApp::loadEntry(int i) {
         fv("a", t.a); fv("d", t.d); fv("s", t.s); fv("r", t.r); fv("tone", t.synTone); fv("body", t.synBody); fv("motion", t.synMotion); fv("grit", t.synGrit);
         iv("w1", t.edW1, 4); iv("w2", t.edW2, 4); iv("type", t.edType, 2); iv("uni", t.edUni, 3); iv("voice", t.edVoice, 3); fv("det2", t.edDet2); fv("cut", t.edCut); fv("res", t.edRes);
         int base = -1; for (size_t j = 0; j < lib_.size(); j++) if (lib_[j].group == "Synths" && lib_[j].label == kv["synth"]) base = (int)j;
-        previewAfterLoad_ = true;
+        previewAfterLoad_ = preview;
         if (base >= 0) { if (lib_[(size_t)base].kit) t.algo = 3; s_.loadSamplePath(lib_[(size_t)base].path, lib_[(size_t)base].kit, track_); }
         return;
     }
@@ -159,7 +159,7 @@ void SamplerApp::loadEntry(int i) {
         const SynthPatch& p = kSynths[std::atoi(e.path.c_str() + 6) % kSynthCount];
         t.a = clampf(std::sqrt(p.a / 3.f), 0.f, 1.f); t.d = clampf(p.d, 0.f, 1.f); t.s = p.s; t.r = clampf(std::sqrt(p.r / 5.f), 0.f, 1.f);
     }
-    previewAfterLoad_ = true;
+    previewAfterLoad_ = preview;
     s_.loadSamplePath(e.path, e.kit, track_);
 }
 std::string SamplerApp::resolvePath(int entry) const {
@@ -787,7 +787,7 @@ void SamplerApp::tick(uint32_t now) {
         seqRecStarted_ = true; gotoPage(P_SQ); ts_[track_].seqState = 2; applyPattern(track_); say("RECORDING: PLAY KEYS");
     }
     // audition: the cursor rested, load the entry on the selected track and play it
-    if (auditionAt_ && now >= auditionAt_) loadEntry(libCursor_);
+    if (auditionAt_ && now >= auditionAt_) loadEntry(libCursor_, audition_);
     if (st_.sampleVersion != lastSampleVersion_) {   // a sample landed on a track: give it this track's settings
         lastSampleVersion_ = st_.sampleVersion;
         applyAll(st_.sampleTrack);

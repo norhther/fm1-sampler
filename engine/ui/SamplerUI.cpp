@@ -699,6 +699,7 @@ void SamplerUI::librarySheet() {
     tap(box, [] {});
     text(box.x + 14, box.y + 20, T_TITLE, TEXT, "SAMPLE LIBRARY", 0, true);
     button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { sheetOpen_ = false; }, 10);
+    button({box.x + box.w - 190, box.y + 6, 112, 28}, app_.audition() ? "AUDITION: ON" : "AUDITION: OFF", app_.audition(), [this] { app_.setAudition(!app_.audition()); }, 10);
     sheetList_ = {box.x + 6, box.y + 44, box.w - 12, box.h - 52};
     const auto& lib = app_.library();
     // rows: a header per group, then its entries
@@ -723,6 +724,6 @@ void SamplerUI::librarySheet() {
         [this, rows, rh]() {
             if (sheetMoved_ > 8) return;
             const int idx = (int)((sheetLastY_ - sheetList_.y + sheetScroll_) / rh);
-            if (idx >= 0 && idx < (int)rows.size() && !rows[(size_t)idx].head) { app_.loadEntry(rows[(size_t)idx].entry); }   // the sheet stays open: browse and hear
+            if (idx >= 0 && idx < (int)rows.size() && !rows[(size_t)idx].head) { app_.loadEntry(rows[(size_t)idx].entry, app_.audition()); }   // the sheet stays open: browse and hear
         });
 }

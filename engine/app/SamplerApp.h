@@ -63,7 +63,7 @@ public:
     const std::vector<Entry>& library() const { return lib_; }
     int libraryCursor() const { return libCursor_; }
     void browse(int delta);                       // PRESETS: moves the cursor, audition after a short pause
-    void loadEntry(int index);                    // at once, on the selected track
+    void loadEntry(int index, bool preview = false);                    // at once, on the selected track
     void refreshLibrary();
     void importFile(const std::string& wavPath);  // a file picked from the disk (already copied into the data dir as a WAV)
     bool wantFile() { bool w = wantFile_; wantFile_ = false; return w; }   // the UI asked for the disk picker: Java polls this
@@ -175,6 +175,8 @@ public:
     static constexpr int kTakeBarsN = 6;
     int takeBars() const { static const int v[kTakeBarsN] = {0, 1, 2, 4, 8, 16}; return v[takeBars_]; }   // 0: the take ends when you press REC again
     void cycleTakeBars() { takeBars_ = (takeBars_ + 1) % kTakeBarsN; applyTempo(); say(takeBars() ? "TAKE: " + std::to_string(takeBars()) + (takeBars() == 1 ? " BAR" : " BARS") + ", ENDS BY ITSELF" : "TAKE: ENDS WHEN YOU STOP IT"); }
+    bool audition() const { return audition_; }   // true: a sample or synth you pick in the library plays at once (off by default)
+    void setAudition(bool on) { audition_ = on; saveSettings(); say(on ? "AUDITION: ON" : "AUDITION: OFF"); }
     bool phoneOut() const { return phoneOut_; }    // true: play through the phone speaker even when the FM-1 is plugged in
     void setPhoneOut(bool on) { phoneOut_ = on; saveSettings(); say(on ? "SOUND: PHONE SPEAKER" : "SOUND: FM-1"); }
     void tapTempo();                               // tap four times: the tempo (while there is no loop)
@@ -227,7 +229,7 @@ private:
     
     uint32_t backupAt_ = 0;
     int midiSync_ = 0; uint64_t clkLast_ = 0, clkWindowStart_ = 0; int clkCount_ = 0; uint64_t tapLast_ = 0; double tapAvg_ = 0; int tapN_ = 0; bool extPlaying_ = false;
-    bool phoneOut_ = false;
+    bool phoneOut_ = false, audition_ = false;
     int theme_ = 0; bool fullscreen_ = false; void loadSettings(); void saveSettings();
     std::string project_ = "autosave"; uint32_t autosaveAt_ = 0, loadedAt_ = 0; bool tapeDirty_ = false, loading_ = false, wantMidi_ = false, anyRec_ = false;
     int lastBounceSeen_ = 0; double lastLoopSeen_ = 0; std::string sharePath_, pendingShare_; uint32_t pendingShareAt_ = 0;

@@ -285,13 +285,13 @@ bool SamplerApp::importMidi(const std::string& path) {
 // ---- settings: the look of the app, outside of any project ----
 void SamplerApp::loadSettings() {
     const KV kv = parse(readFile(s_.dataDir() + "/settings.txt")); Io io{false, &kv, {}};
-    int th = 0, fs = 0, ms = 0, po = 0; io.i("theme", th, 0, theme::kThemes - 1); io.i("fullscreen", fs, 0, 1); io.i("midiSync", ms, 0, 2); io.i("phoneOut", po, 0, 1);
-    midiSync_ = ms; phoneOut_ = po != 0; theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_);
+    int th = 0, fs = 0, ms = 0, po = 0, au = 0; io.i("theme", th, 0, theme::kThemes - 1); io.i("fullscreen", fs, 0, 1); io.i("midiSync", ms, 0, 2); io.i("phoneOut", po, 0, 1); io.i("audition", au, 0, 1);
+    midiSync_ = ms; phoneOut_ = po != 0; audition_ = au != 0; theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_);
 }
 void SamplerApp::saveSettings() {
     if (s_.dataDir().empty()) return;
     std::error_code ec; fs::create_directories(s_.dataDir(), ec);
-    std::ofstream f(s_.dataDir() + "/settings.txt"); f << "theme=" << theme_ << "\nfullscreen=" << (fullscreen_ ? 1 : 0) << "\nmidiSync=" << midiSync_ << "\nphoneOut=" << (phoneOut_ ? 1 : 0) << "\n";
+    std::ofstream f(s_.dataDir() + "/settings.txt"); f << "theme=" << theme_ << "\nfullscreen=" << (fullscreen_ ? 1 : 0) << "\nmidiSync=" << midiSync_ << "\nphoneOut=" << (phoneOut_ ? 1 : 0) << "\naudition=" << (audition_ ? 1 : 0) << "\n";
 }
 void SamplerApp::setTheme(int id) { theme_ = std::min(theme::kThemes - 1, std::max(0, id)); theme::apply(theme_); saveSettings(); }
 
