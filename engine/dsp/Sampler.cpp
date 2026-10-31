@@ -34,14 +34,14 @@ bool Sampler::loadSynth(int idx) {
     if (idx < 0 || idx >= kSynthCount) return false;
     const SynthPatch& p = kSynths[idx];
     // loudness: play the patch once and bring its peak to a sample-like level; the same render gives the overview
-    SynthVoice sv; Adsr env; env.set(p.a, p.d, p.s, p.r, (float)sr_); env.gateOn(); const SynthMacros none;
+    SynthVoice sv; const SynthEdit noEdit; Adsr env; env.set(p.a, p.d, p.s, p.r, (float)sr_); env.gateOn(); const SynthMacros none;
     const int total = sr_ * 12 / 10, hold = sr_ * 8 / 10;
     std::vector<float> mono((size_t)total);
     float pk = 1e-4f;
     sv.start(p, 60, 1.f, (float)sr_, 1, none);
     for (int i = 0; i < total; i++) {
         if (i == hold) env.gateOff();
-        float l, r; sv.next(0.f, none, l, r); const float e = env.next();
+        float l, r; sv.next(0.f, none, noEdit, l, r); const float e = env.next();
         mono[(size_t)i] = 0.5f * (l + r) * e; pk = std::max(pk, std::fabs(mono[(size_t)i]));
     }
     synthNorm_ = clampf(0.9f / pk, 0.05f, 8.f);
@@ -50,6 +50,16 @@ bool Sampler::loadSynth(int idx) {
     allOff(); orig_.reset(); proc_.reset(); synth_ = idx; label_ = p.name;
     setEnv(p.a, p.d, p.s, p.r);
     return true;
+}
+
+std::vector<float> Sampler::overview(const SampleBuf& buf) {
+    std::vector<float> peaks(512, 0.f);
+    for (int b = 0; b < 512; b++) {
+        const long a = (long)buf.frames * b / 512, e = std::max(a + 1, (long)buf.frames * (b + 1) / 512), step = std::max(1L, (e - a) / 64);
+        float m = 0.f; for (long i = a; i < e; i += step) m = std::max(m, std::fabs(buf.d[(size_t)i * 2]));
+        peaks[(size_t)b] = m;
+    }
+    return peaks;
 }
 
 bool Sampler::load(const std::string& path) {
@@ -99,6 +109,8 @@ void Sampler::resolveWindow(Voice& v, const SampleBuf*& buf, double& ws, double&
 void Sampler::noteOn(int note, int vel) {
     if (!orig_ && synth_ < 0) return;
     int vi = -1; uint32_t oldest = 0xffffffffu;
+    const int padIdx = ((note - 60) % 16 + 16) % 16; const Pad* pad = padMode() ? &pads_[padIdx] : nullptr;
+    if (pad && pad->group > 0) for (auto& o : voices_) if (o.on && !o.fading && o.group == pad->group) fadeOut(o);   // choke: a closed hat cuts the open one
     // too many sounding voices (each Paulstretch voice costs FFTs: at most four): the oldest one fades out in a few ms instead of being cut
     int active = 0; for (auto& v : voices_) active += v.on && !v.fading;
     if (active >= (mode_ == PAUL ? 4 : 8)) {
@@ -115,9 +127,14 @@ void Sampler::noteOn(int note, int vel) {
     Voice& v = voices_[vi];
     v = Voice();
     v.on = true; v.gate = true; v.note = note; v.vel = clampf(vel / 127.f, 0.f, 1.f); v.born = ++bornCounter_;
-    v.slice = ((note - 60) % 16 + 16) % 16;
+    v.slice = padIdx;
+    if (pad) { v.group = pad->group; v.padGain = pad->vol; v.padPitch = pad->pitch; const float a = (pad->pan + 1.f) * kPi / 4.f; v.panL = std::cos(a) * 1.414f; v.panR = std::sin(a) * 1.414f; }
     if (synth_ >= 0) {
-        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_, mac_);
+        const bool legato = edit_.mono && kSynths[synth_].engine != 3;
+        if (legato) { for (auto& o : voices_) if (&o != &v && o.on && !o.fading) fadeOut(o); }   // mono: one voice at a time
+        const float gs = legato && edit_.glide > 0.f && lastNote_ >= 0 ? (float)(lastNote_ - note) : 0.f;
+        lastNote_ = note;
+        sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_, mac_, pad ? pad->pitch : 0.f, pad ? pad->decay : 1.f, gs, edit_.glide);
         v.env.set(atk_, dec_, sus_, rel_, (float)sr_);
         if (kSynths[synth_].engine == 3) v.env.set(0.001f, 0.01f, 1.f, 0.02f, (float)sr_);   // a drum hit plays itself out
         v.env.gateOn();
@@ -125,7 +142,8 @@ void Sampler::noteOn(int note, int vel) {
     }
     resolveWindow(v, v.buf, v.ws, v.we);
     v.pos = v.ws;
-    v.env.set(atk_, dec_, sus_, rel_, (float)sr_);
+    const float dscale = pad ? std::max(0.05f, pad->decay) : 1.f;
+    v.env.set(atk_, dec_ * dscale, sus_, rel_ * dscale, (float)sr_);
     if (mode_ == ONESHOT) v.env.set(0.002f, 0.01f, 1.f, 0.01f, (float)sr_);
     v.env.gateOn();
     if (mode_ == PAUL) { v.paulIdx = vi; paul_[(size_t)vi]->start(v.buf->d.data(), v.buf->frames, v.ws, v.we, 8.f); }
@@ -156,13 +174,13 @@ void Sampler::pumpPaul() {
 }
 
 void Sampler::renderSynth(Voice& v, SynthVoice& sv, float* out, int n) {
-    const float gain = 0.8f * v.vel * synthNorm_ * 0.9f;
+    const float gain = 0.8f * v.vel * synthNorm_ * 0.9f * v.padGain;
     for (int i = 0; i < n; i++) {
         const float e = v.env.next();
         if (v.env.done() && !v.gate) { v.on = false; return; }
-        float l, r; sv.next(bend_, mac_, l, r);
+        float l, r; sv.next(bend_, mac_, edit_, l, r);
         if (sv.finished()) { v.on = false; return; }
-        out[2 * i] += l * e * gain; out[2 * i + 1] += r * e * gain;
+        out[2 * i] += l * e * gain * v.panL; out[2 * i + 1] += r * e * gain * v.panR;
     }
 }
 
@@ -176,14 +194,14 @@ void Sampler::render(float* out, int n) {
 void Sampler::renderVoice(Voice& v, float* out, int n) {
     const float* d = v.buf->d.data(); const int frames = v.buf->frames;
     const double srcRate = (double)v.buf->sr / sr_;
-    const double pitch = mode_ == KIT ? 1.0 : std::pow(2.0, (v.note - root_ + bend_) / 12.0);
+    const double pitch = mode_ == KIT ? std::pow(2.0, v.padPitch / 12.0) : std::pow(2.0, (v.note - root_ + bend_ + fine_ / 100.0) / 12.0);
     const double rate = srcRate * pitch;
     auto readAt = [&](double p, float& l, float& r) {
         const int i0 = std::min(frames - 2, std::max(0, (int)p)); const float f = (float)(p - i0);
         l = d[(size_t)i0 * 2] + (d[(size_t)i0 * 2 + 2] - d[(size_t)i0 * 2]) * f;
         r = d[(size_t)i0 * 2 + 1] + (d[(size_t)i0 * 2 + 3] - d[(size_t)i0 * 2 + 1]) * f;
     };
-    const float gain = 0.8f * v.vel;
+    const float gain = 0.8f * v.vel * v.padGain * level_;
     for (int i = 0; i < n; i++) {
         float l = 0.f, r = 0.f;
         if (mode_ == PAUL && !v.paulReady) {   // a new voice is silent until its first hop is there (a few blocks at most)
@@ -233,7 +251,7 @@ void Sampler::renderVoice(Voice& v, float* out, int n) {
                 v.pos += rate;
             }
         }
-        out[2 * i] += l * e * gain; out[2 * i + 1] += r * e * gain;
+        out[2 * i] += l * e * gain * v.panL; out[2 * i + 1] += r * e * gain * v.panR;
     }
 }
 

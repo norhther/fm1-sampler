@@ -23,7 +23,7 @@ public:
     using Send = std::function<void(const uint8_t*, size_t)>;
     static constexpr int kTracks = 8;
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -80,6 +80,26 @@ public:
     void seqToggleAt(int tick, int note, int len = 0);   // touch: add / remove a note (length in ticks, 0 = one step)
     void tapeStopHold(bool on) { tapeStopHeld_ = on; applyMasterFx(); }   // live: while held the tape runs down, on release it spins up again
     bool tapeStopHeld() const { return tapeStopHeld_; }
+    std::string padName(int pad) const;                   // KICK, SNARE ... for the synth kits, the number for a sliced sample
+    bool isKit(int t) const { return ts_[t].algo == 3; }
+    void padHit(int pad, int vel, bool down) {   // a pad of the PADS page: the key 60 + pad with a velocity (records into a pattern that is recording)
+        const int note = 60 + std::min(15, std::max(0, pad));
+        if (down) { heldNote_[note] = track_; s_.noteOn(track_, note, std::min(127, std::max(1, vel))); } else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
+    }
+    void selectPad(int pad) { ts_[track_].selPad = std::min(15, std::max(0, pad)); }
+    void resampleNow();                                   // the sound you hear (bars of the loop or of the pattern) becomes a sample on this track
+    void applyEdit(int t);
+    void setSliceStarts(const std::vector<float>& pts) { s_.setSliceStarts(track_, pts); }
+    // pattern banks A..H and the song (a chain of banks played one after the other on every track)
+    int patternSlot(int t) const { return st_.seqSlot[t]; }
+    void selectPattern(int slot) { s_.seqSelectPattern(track_, slot, false); }
+    void copyPattern(int toSlot) { s_.seqCopyPattern(track_, st_.seqSlot[track_], toSlot); }
+    const std::vector<int>& songChain() const { return songChain_; }
+    bool songOn() const { return songOn_; }
+    void songAdd(int slot) { if (songChain_.size() < 64) { songChain_.push_back(std::min(7, std::max(0, slot))); applySong(); } }
+    void songPop() { if (!songChain_.empty()) { songChain_.pop_back(); applySong(); } }
+    void songClear() { songChain_.clear(); songOn_ = false; applySong(); }
+    void songSet(bool on) { songOn_ = on && !songChain_.empty(); applySong(); }
     void tombolaDrop();                                   // a ball with a random note of the scale
     void tombolaReverse() { tSpin_ = 1.f - tSpin_; applyTomb(); }
     void tombolaClear() { s_.tombolaClear(); }
@@ -90,7 +110,8 @@ public:
     int seqGridIndex() const { return seqGrid_; }
     void cycleSeqGrid() { seqGrid_ = seqGrid_ >= kGrids - 1 || seqGrid_ < 1 ? 1 : seqGrid_ + 1; applyTempo(); }   // 1/4, 1/8, 1/8T ... 1/32T (the grid of the roll and of the quantize)
     int seqBarsOf(int t) const { return ts_[t].seqBars + 1; }
-    void seqSetBarCount(int bars) { ts_[track_].seqBars = std::min(15, std::max(0, bars - 1)); applyPattern(track_); }   // add or remove bars (1..16)
+    void seqAddBarCopy() { if (ts_[track_].seqBars < 15) { ts_[track_].seqBars++; barsLocalAt_[track_] = nowMs_; s_.seqAddBar(track_, true); } }   // one more bar holding a copy of the last one
+    void seqSetBarCount(int bars) { ts_[track_].seqBars = std::min(15, std::max(0, bars - 1)); barsLocalAt_[track_] = nowMs_; applyPattern(track_); }   // add or remove bars (1..16)
     void lenAction(bool dbl);
     void loopSave();
     void loopClear();
@@ -111,16 +132,23 @@ public:
         float start = 0.f, end = 1.f, speed = 0.5f, pitch = 0.5f;
         int arpRate = 0, arpPatt = 0, arpOct = 0; float arpLen = 0.7f;
         
-        float vol = 0.8f, pan = 0.5f, sendR = 0.5f, sendD = 0.2f;
+        float vol = 0.8f, pan = 0.5f, sendR = 0.f, sendD = 0.f;
         int entry = -1;
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
+        int editOp = 0; float fineN = 0.5f, levelN = 1.f / 3.f;   // SAMPLE EDIT page: the edit to apply, fine tune (+-50 cents), sample level (0..3)
+        int edW1 = 0, edW2 = 0, edType = 0, edUni = 0, edVoice = 0; float edDet2 = 0.5f, edCut = 0.5f, edRes = 0.f;   // SYNTH pages: the patch edited (0 = as the patch)
+        float tfEqLow = 0.5f, tfEqMid = 0.5f, tfEqHigh = 0.5f, tfComp = 0.f, duckAmt = 0.f;   // MIX mode: track EQ and compressor, how far the sidechain pushes this track down
+        float padVol[16], padPitch[16], padDecay[16]; int padGroup[16] = {}; int selPad = 0;   // per pad of a kit (PADS page)
+        TrackState() { for (int i = 0; i < 16; i++) { padVol[i] = 2.f / 3.f; padPitch[i] = 0.5f; padDecay[i] = 0.5f; } }
         int seqState = 0, seqBars = 3;   // sequencer: OFF / PLAY / REC, pattern length - 1 (1..16 bars)
     };
     const TrackState& state(int t) const { return ts_[t]; }
     void setVolume(int t, float v); void setPan01(int t, float v); void setSend(int t, int which, float v);
     Session::Status status() const { return st_; }
-    bool isSynth(int t) const { const int e = ts_[t].entry; return e >= 0 && e < (int)lib_.size() && lib_[(size_t)e].path.rfind("synth:", 0) == 0; }
+    bool isSynth(int t) const { const int e = ts_[t].entry; return e >= 0 && e < (int)lib_.size() && (lib_[(size_t)e].path.rfind("synth:", 0) == 0 || lib_[(size_t)e].path.rfind("patch:", 0) == 0); }
+    std::string savePatch();                              // the synth of this track with its envelope, macros and edits as a patch in the library (group My Patches)
+    std::string resolvePath(int entry) const;             // what the session loads: a patch entry stands for its synth
     bool hasSample(int t) const { return !s_.trackLabel(t).empty(); }
     ScaleState scale() const { return scale_; }
     void setScale(int scale, int root, int octave, int mode);
@@ -139,6 +167,17 @@ public:
     void setTheme(int id);
     bool fullscreen() const { return fullscreen_; }
     void setFullscreen(bool on) { fullscreen_ = on; saveSettings(); }
+    // ---- MIDI from other gear: a keyboard plays the selected track; the clock of a sequencer sets the tempo and starts / stops the transport (SYNC: FOLLOW) ----
+    int midiSync() const { return midiSync_; }     // 0 off, 1 follow the clock that comes in, 2 send the clock out
+    void setMidiSync(int m) { midiSync_ = std::min(2, std::max(0, m)); saveSettings(); }
+    void midiExternal(const uint8_t* b, size_t n, uint64_t nowNs);
+    // ---- the tape take and the phone speaker ----
+    static constexpr int kTakeBarsN = 6;
+    int takeBars() const { static const int v[kTakeBarsN] = {0, 1, 2, 4, 8, 16}; return v[takeBars_]; }   // 0: the take ends when you press REC again
+    void cycleTakeBars() { takeBars_ = (takeBars_ + 1) % kTakeBarsN; applyTempo(); say(takeBars() ? "TAKE: " + std::to_string(takeBars()) + (takeBars() == 1 ? " BAR" : " BARS") + ", ENDS BY ITSELF" : "TAKE: ENDS WHEN YOU STOP IT"); }
+    bool phoneOut() const { return phoneOut_; }    // true: play through the phone speaker even when the FM-1 is plugged in
+    void setPhoneOut(bool on) { phoneOut_ = on; saveSettings(); say(on ? "SOUND: PHONE SPEAKER" : "SOUND: FM-1"); }
+    void tapTempo();                               // tap four times: the tempo (while there is no loop)
     // ---- projects: everything (settings, patterns, samples used, tape audio) in dataDir/projects/<name>/ ----
     std::vector<std::string> projectList() const;      // newest first
     std::string newProjectName() const;                // "Project 1", "Project 2" ...
@@ -171,7 +210,7 @@ private:
     void encoder(int i, int delta);
     // ---- parameters ----
     void applyAll(int t);
-    void applyShape(int t, bool reslice = false); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
+    void applyShape(int t, bool reslice = false); void applySynthEdit(int t); void applyPad(int t, int pad); void applyPads(int t); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
     void applyFx();
     void applyMasterFx();
     void applyTempo(); void applyTomb();
@@ -185,6 +224,10 @@ private:
     std::string projectDir(const std::string& name) const;
     std::string projectsRoot() const;
     static std::string cleanName(const std::string& n);
+    
+    uint32_t backupAt_ = 0;
+    int midiSync_ = 0; uint64_t clkLast_ = 0, clkWindowStart_ = 0; int clkCount_ = 0; uint64_t tapLast_ = 0; double tapAvg_ = 0; int tapN_ = 0; bool extPlaying_ = false;
+    bool phoneOut_ = false;
     int theme_ = 0; bool fullscreen_ = false; void loadSettings(); void saveSettings();
     std::string project_ = "autosave"; uint32_t autosaveAt_ = 0, loadedAt_ = 0; bool tapeDirty_ = false, loading_ = false, wantMidi_ = false, anyRec_ = false;
     int lastBounceSeen_ = 0; double lastLoopSeen_ = 0; std::string sharePath_, pendingShare_; uint32_t pendingShareAt_ = 0;
@@ -203,9 +246,12 @@ private:
     // master fx (FX 2, LIVE FX), tempo page, sequencer grid
     float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
     float flanger_ = 0.f, drive_ = 0.f, eqLow_ = 0.5f, eqMid_ = 0.5f, eqHigh_ = 0.5f, tremolo_ = 0.f, wah_ = 0.f, ringmod_ = 0.f, tapeStop_ = 0.f;
+    std::vector<int> songChain_; bool songOn_ = false; void applySong(); uint32_t barsLocalAt_[kTracks] = {};
+    int duckSrc_ = 0, limiter_ = 0; float duckRel_ = 0.3f;   // sidechain source (0 off, 1..8) and its release, master limiter (0 off, then ceilings)
+    void applyMaster();
     int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;
     float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f;   // OP-1 FX page
-    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, seqGrid_ = 4, liveGrid_ = 0, countIn_ = 0;
+    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, takeBars_ = 0, seqGrid_ = 0, liveGrid_ = 0, countIn_ = 0;
     float swing_ = 0.f, tSpin_ = 0.557f, tGrav_ = 0.55f, tMass_ = 0.72f, tShape_ = 0.6f;   // swing 0..1 = 50..75 %, tombola knobs   // the pattern plays on a 1/16 grid unless told otherwise
     float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;
     float exciter_ = 0.f, lofi_ = 0.f, wobble_ = 0.f, loopSpeed_ = 2.f / 3.f, micThr_ = 0.452f;   // loop speed is global

@@ -426,6 +426,9 @@ static void testProject() {
         // the autosave, written on its own
         app.autosave(true); run(0.5); while (s.busyJobs() > 0) run(0.2);
         CHECK(std::filesystem::exists("/tmp/fm1sampler_ta/projects/autosave/project.txt"), "autosave written");
+        // backups: the autosave is kept as Backup 1 (the first autosave of a session does it), the list shows them
+        app.autosave(true); run(0.3); app.autosave(true); run(0.3);
+        CHECK(std::filesystem::exists("/tmp/fm1sampler_ta/projects/Backup 1/project.txt"), "the previous autosave is kept as Backup 1");
         app.deleteProject("Test One"); CHECK(!std::filesystem::exists("/tmp/fm1sampler_ta/projects/Test One"), "a project can be deleted");
     }
     {   // the next start finds the autosave and goes back to it; a start after a failed restore skips it once
@@ -548,6 +551,345 @@ static void testLook() {
     }
 }
 
+static std::vector<long> onsetsOf(const std::vector<float>& all, int sr, float thr = 0.02f, double refractory = 0.1) {
+    std::vector<long> on; long quiet = 1 << 30; const long gap = (long)(refractory * sr);
+    for (size_t i = 0; i < all.size(); i += 2) { if (std::fabs(all[i]) > thr) { if (quiet > gap) on.push_back((long)(i / 2)); quiet = 0; } else quiet++; }
+    return on;
+}
+static void testNoteEdit() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_td; mkdir -p /tmp/fm1sampler_td");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_td"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
+    run(2.5);
+    app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.2);
+    app.gotoPage(SamplerApp::P_TIMING); { auto k = app.knobs(); k[0].set(0.f); k[1].set(4.f / 7.f); k[2].set(0.f); k[3].set(0.f); } run(0.2);
+    app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Synth Kit 808") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); { auto k = app.knobs(); k[1].set(0.f); } app.seqSetBarCount(1); run(0.3);
+    Session::SeqView v[kSeqMax]; auto notes = [&]() { return s.seqNotes(4, v, kSeqMax); };
+    // the selection edits
+    for (int i = 0; i < 4; i++) app.seqToggleAt(i * 192, 66);   // closed hats on every beat
+    run(0.3); CHECK(notes() == 4 && v[0].prob == 100 && v[0].ratchet == 1 && v[0].nudge == 0, "notes start with full chance, no ratchet, no nudge");
+    Session::SeqRef two[2] = {{0, 66}, {192, 66}};
+    s.seqApply(4, two, 2, Session::OP_TRANSPOSE, 3); run(0.2); { int n = notes(); int t3 = 0; for (int i = 0; i < n; i++) t3 += v[i].note == 69; CHECK(t3 == 2, "transpose moves the selected notes (%d moved)", t3); }
+    Session::SeqRef up[2] = {{0, 69}, {192, 69}};
+    s.seqApply(4, up, 2, Session::OP_TRANSPOSE, -3); s.seqApply(4, up, 0, Session::OP_DELETE, 0); run(0.2);
+    Session::SeqRef back[2] = {{0, 66}, {192, 66}};
+    s.seqApply(4, back, 2, Session::OP_VEL, 40); s.seqApply(4, back, 2, Session::OP_PROB, 55); s.seqApply(4, back, 2, Session::OP_RATCHET, 3); s.seqApply(4, back, 2, Session::OP_NUDGE, -7); run(0.2);
+    { int n = notes(); bool ok = false; for (int i = 0; i < n; i++) if (v[i].tick == 0) ok = v[i].vel == 40 && v[i].prob == 55 && v[i].ratchet == 3 && v[i].nudge == -7; CHECK(ok, "velocity, chance, ratchet and nudge are set and read back"); }
+    s.seqApply(4, back, 2, Session::OP_DUP, 96); run(0.2); CHECK(notes() == 6, "duplicate adds copies (%d notes)", notes());
+    s.seqApply(4, back, 2, Session::OP_SHIFT, 48); run(0.2); { int n = notes(); bool ok = false; for (int i = 0; i < n; i++) ok |= v[i].tick == 48; CHECK(ok, "shift moves them in time"); }
+    Session::SeqRef all6[6]; { int n = notes(); for (int i = 0; i < n && i < 6; i++) all6[i] = {v[i].tick, v[i].note}; s.seqApply(4, all6, std::min(n, 6), Session::OP_DELETE, 0); } run(0.2);
+    CHECK(notes() == 0, "delete removes the selection"); s.seqUndo(4); run(0.2); CHECK(notes() == 6, "...and it is one undo step (%d)", notes());
+    s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); s.seqUndo(4); run(0.2);
+    app.seqClear(); run(0.2);
+    // add a bar as a copy of the last one
+    app.seqToggleAt(10, 62); run(0.2); s.seqAddBar(4, true); run(0.2);
+    CHECK(app.status().seqBars[4] == 2 && notes() == 2 && v[1].tick == 10 + 768, "+ with a copy: the last bar is repeated in the new one (%d bars, %d notes)", app.status().seqBars[4], notes());
+    s.seqAddBar(4, false); run(0.2); CHECK(app.status().seqBars[4] == 3 && notes() == 2, "+ without a copy: the new bar is empty");
+    // playback: chance, ratchet, nudge, on a short hat so every hit is one clear onset
+    app.seqClear(); app.seqSetBarCount(1); run(0.3);
+    { auto k = app.knobs(); k[0].set(1.f / 3); } run(0.3);
+    auto stopGo = [&]() { run(4.0); if (app.status().playing) { btn(SamplerApp::PLAY); run(0.3); } run(2.0); all.clear(); btn(SamplerApp::PLAY); };
+    app.setSend(4, 0, 0.f); app.setSend(4, 1, 0.f);   // dry: no echoes to be counted as hits
+    app.seqToggleAt(0, 66, 768); run(0.2); Session::SeqRef h0[1] = {{0, 66}}; s.seqApply(4, h0, 1, Session::OP_RATCHET, 4); run(0.2);
+    stopGo(); run(2.2); { auto on = onsetsOf(all, sr); on.erase(on.begin(), on.begin() + std::min<size_t>(on.size(), 0)); const int n = (int)on.size(); long g1 = n > 1 ? on[1] - on[0] : 0; CHECK(n >= 4 && std::labs(g1 - 24000) < 300, "ratchet 4: four hits for one note (%d onsets, gap %ld samples, expect 24000)", n, g1); }
+    s.seqApply(4, h0, 1, Session::OP_RATCHET, 1); s.seqApply(4, h0, 1, Session::OP_PROB, 0); run(3.5); all.clear(); run(4.5);
+    CHECK(onsetsOf(all, sr).empty(), "chance 0: the note never plays");
+    s.seqApply(4, h0, 1, Session::OP_PROB, 50); run(0.3); all.clear(); run(2.0 * 14);
+    { const int n = (int)onsetsOf(all, sr).size(); CHECK(n >= 3 && n <= 11, "chance 50 pct: it plays about half of the passes (%d of 14)", n); }
+    app.seqClear(); run(0.2); app.seqToggleAt(0, 66); app.seqToggleAt(384, 66); run(0.3); Session::SeqRef h1[1] = {{384, 66}}; s.seqApply(4, h1, 1, Session::OP_NUDGE, 12); run(0.3);
+    all.clear(); run(2.0 * 5 + 0.5);
+    { auto on = onsetsOf(all, sr); long a = on.size() > 3 ? on[2] - on[1] : 0, b = on.size() > 3 ? on[3] - on[2] : 0; long d = std::labs(a - b);
+      CHECK(on.size() >= 5 && d > 2500 && d < 3500, "nudge +12 ticks pushes one hit back (gaps %ld / %ld, differ by %ld, expect 3000)", a, b, d); }
+    app.seqClear(); run(0.2); if (app.status().playing) btn(SamplerApp::PLAY);
+}
+
+static void testPads() {
+    const int sr = SAMPLERATE;
+    {   // the pad settings of the sampler: level, tune, decay, choke
+        auto render = [&](int pad, const Sampler::Pad& p, int idx, double sec) { Sampler sm(sr); sm.load("synth:" + std::to_string(idx)); sm.setPad(pad, p); std::vector<float> o((size_t)(sec * sr) * 2, 0.f); sm.noteOn(60 + pad, 110); for (size_t b = 0; b + 256 <= o.size() / 2; b += 256) sm.render(o.data() + b * 2, 256); return o; };
+        const int k = synthIndex("Synth Kit 808"); Sampler::Pad base, loud, quiet, tuned, shortp;
+        loud.vol = 1.5f; quiet.vol = 0.3f; tuned.pitch = 12.f; shortp.decay = 0.3f;
+        auto a = render(0, base, k, 1.0), l = render(0, loud, k, 1.0), q = render(0, quiet, k, 1.0), tn = render(0, tuned, k, 1.0), sh = render(0, shortp, k, 1.0);
+        CHECK(rms(l, 0, sr / 4) > rms(a, 0, sr / 4) * 1.3 && rms(q, 0, sr / 4) < rms(a, 0, sr / 4) * 0.5, "pad level: %.3f quiet, %.3f normal, %.3f loud", rms(q, 0, sr / 4), rms(a, 0, sr / 4), rms(l, 0, sr / 4));
+        CHECK(zcr(tn, 0, sr / 8) > zcr(a, 0, sr / 8) * 1.5, "pad tune +12: higher (%.4f vs %.4f crossings)", zcr(tn, 0, sr / 8), zcr(a, 0, sr / 8));
+        CHECK(rms(sh, sr / 2 * 2, sr) < rms(a, sr / 2 * 2, sr) * 0.5 + 1e-4, "pad decay 0.3x: gone sooner (%.4f vs %.4f)", rms(sh, sr, 2 * sr), rms(a, sr, 2 * sr));
+        // choke: the closed hat (pad 6) cuts the open hat (pad 7) when both are in group 1
+        auto choke = [&](int group) { Sampler sm(sr); sm.load("synth:" + std::to_string(k)); Sampler::Pad p; p.group = group; sm.setPad(6, p); sm.setPad(7, p);
+            std::vector<float> o((size_t)sr * 2, 0.f); sm.noteOn(67, 110); size_t b = 0; for (; b < (size_t)sr / 10; b += 256) sm.render(o.data() + b * 2, 256);
+            sm.noteOn(66, 1); for (; b + 256 <= (size_t)sr / 2; b += 256) sm.render(o.data() + b * 2, 256); return rms(o, (size_t)sr * 2 / 5, (size_t)sr); };
+        const double open = choke(0), cut = choke(1); CHECK(cut < open * 0.3, "choke: the closed hat cuts the open one (%.4f -> %.4f)", open, cut);
+    }
+    system("rm -rf /tmp/fm1sampler_te; mkdir -p /tmp/fm1sampler_te");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_te"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.5);
+    app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Synth Kit 808") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    CHECK(app.isKit(4) && app.padName(0) == "KICK" && app.padName(6) == "HAT", "a synth kit names its pads (%s, %s)", app.padName(0).c_str(), app.padName(6).c_str());
+    app.gotoPage(SamplerApp::P_PADS); CHECK(app.page() == SamplerApp::P_PADS && SamplerApp::modeOf(SamplerApp::P_PADS) == 2, "the PADS page is in the SEQ mode");
+    SamplerUI ui(app); ui.setSize(860, 400, 0, 0); ui.frame(now);
+    float px = 0, py = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "SNARE") { px = o.f[0]; py = o.f[1]; }
+    size_t m = all.size(); ui.touch(0, px, py + 20, now); run(0.4); ui.touch(2, px, py + 20, now); run(0.3);
+    CHECK(px > 0 && app.state(4).selPad == 2 && rms(all, m, all.size()) > 0.01, "tapping the SNARE pad plays it and selects it (pad %d, rms %.4f)", app.state(4).selPad + 1, rms(all, m, all.size()));
+    CHECK(std::string(app.knobs()[0].name) == "PAD 3 LEVEL", "the knobs follow the pad (%s)", app.knobs()[0].name.c_str());
+    // a hard hit (low on the pad) is louder than a soft one
+    auto hitAt = [&](float dy) { ui.frame(now); size_t m0 = all.size(); ui.touch(0, px, py + dy, now); run(0.4); ui.touch(2, px, py + dy, now); run(1.5); return rms(all, m0, m0 + (size_t)sr / 2); };
+    const double soft = hitAt(-25), hard = hitAt(25); CHECK(hard > soft * 1.4, "a hit low on the pad is harder (%.4f vs %.4f)", hard, soft);
+    // recording pads into the pattern, then the drum grid shows them
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.setSeqState(2); run(0.4); app.padHit(0, 100, true); run(0.15); app.padHit(0, 0, false); run(0.3); app.padHit(2, 100, true); run(0.15); app.padHit(2, 0, false); run(0.4); app.setSeqState(1); run(0.3);
+    CHECK(app.status().seqCount[4] == 2, "pads played while recording go into the pattern (%d notes)", app.status().seqCount[4]);
+    ui.frame(now); { float tx = 0, ty = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "DRUMS") { tx = o.f[0]; ty = o.f[1] - 3; } ui.touch(0, tx, ty, now); ui.touch(2, tx, ty, now); }
+    ui.frame(now); ui.frame(now);
+    float gx, gy, gw, gh; ui.rollGrid(gx, gy, gw, gh); CHECK(std::fabs(ui.rollRows() - 8.f) < 0.01f && ui.rollBase() == 60.f, "the roll turns into a drum grid of 8 pad rows (%.0f rows from %.0f)", ui.rollRows(), ui.rollBase());
+    bool names = false; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text.find("KICK") != std::string::npos) names = true; CHECK(names, "...with the pad names on the left");
+    const int cnt0 = app.status().seqCount[4]; const float rh = gh / 8, ty2 = gy + 7 * rh + rh / 2 /* pad 1 = the bottom row */ , tx2 = gx + 0.5f * gw * 0.6f;
+    ui.touch(0, tx2, ty2 - 3 * rh, now); ui.touch(2, tx2, ty2 - 3 * rh, now); run(0.3); CHECK(app.status().seqCount[4] == cnt0 + 1, "a tap on a pad row adds a hit (%d -> %d)", cnt0, app.status().seqCount[4]);
+    app.seqClear(); run(0.2);
+}
+
+static void testSampleEdit() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_tf; mkdir -p /tmp/fm1sampler_tf");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tf"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
+    wait(3.0);
+    auto head = [&](int t, bool first) { auto p = s.samplePeaksOf(t, 64); float a = 0; for (int i = first ? 0 : 44; i < (first ? 20 : 64); i++) a += p[(size_t)i]; return a; };
+    const int frames0 = s.sampleFramesOf(0); const float h0 = head(0, true), t0 = head(0, false);
+    CHECK(frames0 > 1000 && h0 > t0, "Tape Key decays: loud start, quiet end (%.2f vs %.2f)", h0, t0);
+    app.gotoPage(SamplerApp::P_SMPED); CHECK(app.page() == SamplerApp::P_SMPED && std::string(app.knobs()[0].name) == "EDIT", "the SAMPLE EDIT page");
+    s.editSample(0, Session::EDIT_REVERSE); wait(1.0);
+    CHECK(head(0, true) < head(0, false) && s.sampleFramesOf(0) == frames0, "REVERSE: quiet start, loud end (%.2f vs %.2f)", head(0, true), head(0, false));
+    s.undoEdit(0); wait(1.0); CHECK(head(0, true) > head(0, false), "EDIT UNDO brings the sample back");
+    s.editSample(0, Session::EDIT_NORMALIZE); wait(1.0); { auto p = s.samplePeaksOf(0, 512); float m = 0; for (float v : p) m = std::max(m, v); CHECK(m > 0.9f, "NORMALIZE: the peak is at %.2f", m); }
+    // trim to the window: start 25 %, end 50 %
+    app.gotoPage(SamplerApp::P_HOME); { auto k = app.knobs(); k[0].set(0.25f); k[1].set(0.5f); } wait(0.8);
+    s.editSample(0, Session::EDIT_TRIM); wait(1.0); const int fr = s.sampleFramesOf(0);
+    CHECK(std::fabs((double)fr / frames0 - 0.25) < 0.02, "TRIM TO WINDOW keeps a quarter (%d of %d frames)", fr, frames0);
+    s.editSample(0, Session::EDIT_FADE_IN); wait(1.0); s.editSample(0, Session::EDIT_FADE_OUT); wait(1.0); { auto p = s.samplePeaksOf(0, 512); CHECK(p[0] < 0.1f && p[511] < 0.1f, "fades: silent at both ends (%.3f, %.3f)", p[0], p[511]); }
+    // the knobs of the page
+    app.gotoPage(SamplerApp::P_SMPED); { auto k = app.knobs(); k[2].set(1.f); k[3].set(0.5f); }
+    CHECK(std::string(app.knobs()[2].value) == "+50 CENTS" && std::string(app.knobs()[3].value).find("DB") != std::string::npos, "fine tune and level knobs (%s, %s)", app.knobs()[2].value.c_str(), app.knobs()[3].value.c_str());
+    { auto k = app.knobs(); k[2].set(0.5f); k[3].set(1.f / 3.f); }
+    // hand made slices
+    app.selectTrack(3); wait(0.5); const size_t n0 = s.slicesOf(3).size();
+    s.setSliceStarts(3, {0.f, 0.25f, 0.5f, 0.75f}); wait(0.4); auto sl = s.slicesOf(3);
+    CHECK(n0 >= 2 && sl.size() == 4 && std::fabs(sl[1] - 0.25f) < 0.001f && std::fabs(sl[3] - 0.75f) < 0.001f, "slice marks placed by hand: %zu pads (was %zu)", sl.size(), n0);
+    // resample: what plays becomes a sample
+    app.selectTrack(0); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Tape Key") app.loadEntry(i); wait(1.0);
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); for (int i = 0; i < 4; i++) app.seqToggleAt(i * 192, 60 + i * 2, 96); { auto k = app.knobs(); k[0].set(1.f / 3); } s.play(true); wait(0.5);
+    const std::string before = app.sampleLabel(0); app.resampleNow(); wait(5.0);
+    CHECK(app.sampleLabel(0) != before && app.sampleLabel(0).rfind("sample", 0) == 0 && s.sampleFramesOf(0) > sr, "RESAMPLE: the track plays the new sample (%s, %d frames)", app.sampleLabel(0).c_str(), s.sampleFramesOf(0));
+}
+
+static void testMixer() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_tg; mkdir -p /tmp/fm1sampler_tg");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tg"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
+    auto load = [&](int track, const char* name) { app.selectTrack(track); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == name && app.library()[(size_t)i].group == "Synths") app.loadEntry(i); };
+    wait(2.0); load(1, "Organ"); load(0, "Synth Kit 808"); wait(2.0);
+    app.gotoPage(SamplerApp::P_TEQ); CHECK(std::string(app.knobs()[0].name) == "EQ LOW" && std::string(app.knobs()[3].name) == "COMPRESSOR" && SamplerApp::modeOf(SamplerApp::P_TEQ) == 3, "MIX mode has the track EQ page");
+    app.gotoPage(SamplerApp::P_DUCK); CHECK(std::string(app.knobs()[0].name) == "DUCK FROM" && std::string(app.knobs()[3].name) == "LIMITER", "...and the duck and limiter page");
+    // track EQ: a low boost on an organ note
+    app.selectTrack(1); app.setSend(1, 0, 0.f); app.setSend(1, 1, 0.f);
+    auto held = [&](int note, double sec) { size_t m = all.size(); app.playNote(note, true); run(sec); const double r = rms(all, all.size() - (size_t)sr / 4 * 2, all.size()); app.playNote(note, false); run(0.8); (void)m; return r; };
+    const double flat = held(36, 1.0);
+    app.gotoPage(SamplerApp::P_TEQ); { auto k = app.knobs(); k[0].set(1.f); } const double boosted = held(36, 1.0);
+    CHECK(boosted > flat * 1.25, "track EQ low +12 dB lifts a low organ note (%.3f -> %.3f)", flat, boosted);
+    { auto k = app.knobs(); k[0].set(0.5f); }
+    // sidechain: track 0 (silent itself) ducks the organ on track 2
+    app.setVolume(0, 0.f); app.gotoPage(SamplerApp::P_DUCK);
+    app.selectTrack(1); { auto k = app.knobs(); k[0].set(1.f / 8.f); k[1].set(1.f); k[2].set(0.5f); }   // from track 1, push this track fully, 0.5 s release
+    app.selectTrack(1); app.gotoPage(SamplerApp::P_DUCK); { auto k = app.knobs(); (void)k; }
+    // the source is track 1 (index 0)? the knob says DUCK FROM TRACK 1 = index 0
+    app.playNote(48, true); run(1.0);
+    const double steady = rms(all, all.size() - 4800 * 2, all.size());
+    app.selectTrack(0); app.playNote(60, true); run(0.03); const double ducked = rms(all, all.size() - 480 * 2, all.size()); app.playNote(60, false); run(1.2); const double back = rms(all, all.size() - 4800 * 2, all.size());
+    CHECK(ducked < steady * 0.5 && back > steady * 0.8, "sidechain: a hit on track 1 pushes the organ down (%.3f -> %.3f) and it comes back (%.3f)", steady, ducked, back);
+    app.playNote(48, false); app.selectTrack(1); app.playNote(48, false); run(1.0);
+    { app.selectTrack(1); auto k = app.knobs(); k[0].set(0.f); }
+    // limiter
+    s.setMasterVolume(1.5f); load(2, "Super Saw"); wait(1.0); app.selectTrack(2);
+    auto peakOf = [&]() { float pk = 0.f; for (size_t i = all.size() - (size_t)sr * 2 / 2; i < all.size(); i++) pk = std::max(pk, std::fabs(all[i])); return pk; };
+    for (int n : {48, 52, 55, 60, 64, 67}) app.playNote(n, true); run(1.0); const float unl = peakOf(); const bool clip = app.status().clip;
+    app.gotoPage(SamplerApp::P_DUCK); { auto k = app.knobs(); k[3].set(1.f); } run(1.0); const float lim = peakOf();
+    for (int n : {48, 52, 55, 60, 64, 67}) app.playNote(n, false); run(1.0);
+    CHECK(unl > 0.7f && lim < 0.5f && lim < unl, "limiter -6 dB: the peak %.2f falls to %.2f", unl, lim);
+    CHECK(clip, "the clip light comes on when the master is pushed (%d)", clip);
+    s.setMasterVolume(0.9f);
+}
+
+static void testSynthEdit() {
+    const int sr = SAMPLERATE;
+    auto play = [&](const SynthEdit& e, int idx, std::vector<int> notes, double sec, double gap = 0.0) {
+        Sampler sm(sr); sm.load("synth:" + std::to_string(idx)); sm.setSynthEdit(e); std::vector<float> o((size_t)(sec * sr) * 2, 0.f); size_t next = 0; size_t k = 0;
+        for (size_t b = 0; b + 256 <= o.size() / 2; b += 256) { if (k < notes.size() && b >= next) { sm.noteOn(notes[k++], 100); next = b + (size_t)(gap * sr); } sm.render(o.data() + b * 2, 256); }
+        return o;
+    };
+    const int sb = synthIndex("Saw Bass"), ss = synthIndex("Super Saw");
+    SynthEdit none, sine, hp, lowcut, res;
+    sine.w1 = 0; sine.w2 = 0; hp.ftype = 1; lowcut.cutOct = -2.f; res.res = 5.f;
+    auto base = play(none, sb, {48}, 0.6);
+    { auto o = play(sine, sb, {48}, 0.6); CHECK(finite(o) && diff(o, base) > 0.01 && zcr(o, 4000, 40000) < zcr(base, 4000, 40000), "WAVE sine instead of saw: smoother (%.4f vs %.4f crossings)", zcr(o, 4000, 40000), zcr(base, 4000, 40000)); }
+    { auto o = play(hp, sb, {48}, 0.6); CHECK(finite(o) && zcr(o, 4000, 40000) > zcr(base, 4000, 40000) * 1.5, "FILTER high-pass: thinner and brighter (%.4f vs %.4f)", zcr(o, 4000, 40000), zcr(base, 4000, 40000)); }
+    { auto o = play(lowcut, sb, {60}, 0.6), b2 = play(none, sb, {60}, 0.6); CHECK(finite(o) && zcr(o, 4000, 40000) < zcr(b2, 4000, 40000) * 0.8, "CUTOFF -2 octaves darkens (%.4f vs %.4f crossings)", zcr(o, 4000, 40000), zcr(b2, 4000, 40000)); }
+    { auto o = play(res, sb, {48}, 0.6); CHECK(finite(o) && diff(o, base) > 0.005, "RESONANCE changes the sound and stays finite"); }
+    { SynthEdit u1; u1.uni = 1; auto a = play(none, ss, {55}, 0.6), b = play(u1, ss, {55}, 0.6); CHECK(finite(b) && diff(a, b) > 0.01, "UNISON off thins the super saw"); }
+    {   // mono: the second key takes the first one's place; poly: both sound
+        SynthEdit mono; mono.mono = true; const int pad = synthIndex("Warm Pad");
+        auto p = play(none, pad, {48, 55}, 1.2, 0.3), m = play(mono, pad, {48, 55}, 1.2, 0.3);
+        CHECK(rms(m, (size_t)sr * 2 - 4800, (size_t)sr * 2) < rms(p, (size_t)sr * 2 - 4800, (size_t)sr * 2) * 0.85, "MONO: two keys sound as one voice (%.3f vs %.3f)", rms(m, sr * 2 - 4800, sr * 2), rms(p, sr * 2 - 4800, sr * 2));
+        SynthEdit gl; gl.mono = true; gl.glide = 0.3f; const int lead = synthIndex("Mono Lead");
+        auto g = play(gl, lead, {48, 60}, 1.0, 0.4), n = play(mono, lead, {48, 60}, 1.0, 0.4);
+        const size_t a0 = (size_t)(0.4 * sr) * 2 + 2400, a1 = a0 + 4800;   // the first 50 ms of the second note
+        CHECK(finite(g) && zcr(g, a0, a1) < zcr(n, a0, a1) * 0.85, "GLIDE: the second note slides up from the first (%.4f vs %.4f crossings)", zcr(g, a0, a1), zcr(n, a0, a1));
+    }
+    system("rm -rf /tmp/fm1sampler_th; mkdir -p /tmp/fm1sampler_th");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_th"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.5); app.selectTrack(2); app.gotoPage(SamplerApp::P_SYN1);
+    CHECK(std::string(app.knobs()[0].name) != "WAVE", "a sample track has no synth knobs");
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.gotoPage(SamplerApp::P_SYN1); CHECK(std::string(app.knobs()[0].name) == "WAVE" && std::string(app.knobs()[3].name) == "UNISON" && SamplerApp::modeOf(SamplerApp::P_SYN1) == 0, "a synth track has the OSC page");
+    app.gotoPage(SamplerApp::P_SYN2); CHECK(std::string(app.knobs()[0].name) == "CUTOFF" && std::string(app.knobs()[3].name) == "VOICES", "...and the FILTER page");
+    // patches: the edited synth saved into the library and loaded again
+    app.gotoPage(SamplerApp::P_SYN1); { auto k = app.knobs(); k[0].set(0.25f); }   // WAVE: sine
+    app.gotoPage(SamplerApp::P_SYN2); { auto k = app.knobs(); k[0].set(0.8f); k[3].set(1.f); }   // cutoff up, mono slow glide
+    app.gotoPage(SamplerApp::P_SHAPE); { auto k = app.knobs(); k[0].set(0.9f); }
+    const std::string name = app.savePatch(); CHECK(name == "Saw Bass 2", "SAVE PATCH names it after the synth (%s)", name.c_str());
+    int pe = -1; for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == name && app.library()[(size_t)i].group == "My Patches") pe = i;
+    CHECK(pe >= 0, "the patch is in the library under My Patches");
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Brass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.gotoPage(SamplerApp::P_SYN2); { auto k = app.knobs(); k[3].set(0.f); } app.gotoPage(SamplerApp::P_SYN1); { auto k = app.knobs(); k[0].set(0.f); }
+    app.loadEntry(pe); for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    CHECK(app.sampleLabel(2) == "Saw Bass" && app.isSynth(2) && app.state(2).edW1 == 1 && app.state(2).edVoice == 3 && app.state(2).synTone > 0.89f && app.state(2).edCut > 0.79f, "loading the patch brings the synth and its settings back (%s, wave %d, voices %d, tone %.2f)", app.sampleLabel(2).c_str(), app.state(2).edW1, app.state(2).edVoice, app.state(2).synTone);
+    CHECK(app.saveProject("Patch Test") , "a project with a patch on a track saves"); for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Brass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < 10; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.loadProject("Patch Test"); for (int i = 0; i < 60; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    CHECK(app.sampleLabel(2) == "Saw Bass", "...and loads with the synth on the track (%s)", app.sampleLabel(2).c_str());
+}
+
+static void testBanks() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_ti; mkdir -p /tmp/fm1sampler_ti");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_ti"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto btn = [&](int b) { uint8_t m[3] = {0x91, (uint8_t)b, 100}; app.onMidi(m, 3); m[0] = 0x81; app.onMidi(m, 3); };
+    run(2.5);
+    app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.2);
+    app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Synth Kit 808") app.loadEntry(i);
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }   // a track plays its pattern when it has a sound
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); run(0.3);
+    Session::SeqView v[kSeqMax]; auto cnt = [&]() { return s.seqNotes(4, v, kSeqMax); };
+    app.seqToggleAt(0, 60); app.seqToggleAt(192, 62); run(0.3); CHECK(cnt() == 2 && app.status().seqSlot[4] == 0, "bank A holds two notes");
+    app.selectPattern(1); run(0.3); CHECK(app.status().seqSlot[4] == 1 && cnt() == 0, "bank B is empty (slot %d, %d notes)", app.status().seqSlot[4], cnt());
+    app.seqToggleAt(96, 64); run(0.3); CHECK(cnt() == 1, "...and has its own notes");
+    app.selectPattern(0); run(0.3); CHECK(app.status().seqSlot[4] == 0 && cnt() == 2, "back to A: its two notes are still there (%d)", cnt());
+    app.copyPattern(2); run(0.3); { Session::SeqView w[kSeqMax]; int bars = 0; const int n = s.seqSlotNotes(4, 2, w, kSeqMax, &bars); CHECK(n == 2 && bars == 1, "COPY: bank C is a copy of A (%d notes, %d bars)", n, bars); }
+    app.selectPattern(2); run(0.3); CHECK(app.status().seqSlot[4] == 2 && cnt() == 2, "C plays the copy"); app.selectPattern(0); run(0.3);
+    // while it plays the next bank waits for the end of the pattern
+    { auto k = app.knobs(); k[0].set(1.f / 3); } run(0.2); if (!app.status().playing) btn(SamplerApp::PLAY);
+    run(0.5); app.selectPattern(1); run(0.1);
+    CHECK(app.status().seqSlotPending[4] == 1 && app.status().seqSlot[4] == 0, "B is queued while A plays (pending %d, now %d)", app.status().seqSlotPending[4], app.status().seqSlot[4]);
+    run(2.5);
+    CHECK(app.status().seqSlot[4] == 1 && app.status().seqSlotPending[4] == -1, "...and starts at the end of the pattern (now %d)", app.status().seqSlot[4]);
+    // the song: A, B, C, A
+    app.selectPattern(0); run(2.5);
+    app.songClear(); app.songAdd(0); app.songAdd(1); app.songAdd(2); app.songAdd(0); app.songSet(true); run(0.2);
+    CHECK(app.songChain().size() == 4 && app.songOn(), "a song of four steps");
+    bool order = true; std::vector<int> seen; int last = -1; for (int i = 0; i < 40; i++) { run(0.25); const int sp = app.status().songPos, sl = app.status().seqSlot[4]; if (app.status().songOn && sp >= 0 && sp < 4) { static const int want[4] = {0, 1, 2, 0}; if (sl != want[sp]) order = false; if (sp != last) { seen.push_back(sp); last = sp; } } }
+    bool advanced = seen.size() >= 3; for (size_t i = 1; i < seen.size(); i++) advanced &= seen[i] == (seen[i - 1] + 1) % 4;
+    CHECK(order && advanced, "the song plays its banks in order (%zu steps seen, bank follows the step: %d)", seen.size(), order);
+    // a project keeps the banks and the song
+    CHECK(app.saveProject("Bank Test"), "saved"); run(1.5);
+    app.songClear(); app.selectPattern(0); app.seqClear(); run(0.3); app.selectPattern(1); app.seqClear(); run(0.3); app.selectPattern(0);
+    app.loadProject("Bank Test"); for (int i = 0; i < 40; i++) { run(0.1); std::this_thread::sleep_for(std::chrono::milliseconds(30)); }
+    { Session::SeqView w[kSeqMax]; int bars = 0; const int a = s.seqSlotNotes(4, 0, w, kSeqMax, &bars), b = s.seqSlotNotes(4, 1, w, kSeqMax, &bars), c = s.seqSlotNotes(4, 2, w, kSeqMax, &bars);
+      CHECK(a == 2 && b == 1 && c == 2 && app.songChain().size() == 4 && app.songOn(), "loaded: banks %d / %d / %d notes, song of %zu steps", a, b, c, app.songChain().size()); }
+    app.songClear(); run(0.2); if (app.status().playing) btn(SamplerApp::PLAY);
+}
+
+static void testMidiIn() {
+    const int sr = SAMPLERATE;
+    system("rm -rf /tmp/fm1sampler_tj; mkdir -p /tmp/fm1sampler_tj");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tj"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(2.5);
+    {   // a keyboard plays the selected track
+        size_t m = all.size(); const uint8_t on[3] = {0x90, 60, 100}, off[3] = {0x80, 60, 0};
+        app.midiExternal(on, 3, 1000000000ull); run(0.5); app.midiExternal(off, 3, 2000000000ull); run(0.3);
+        CHECK(rms(all, m, all.size()) > 0.01, "a note from a MIDI keyboard sounds (rms %.4f)", rms(all, m, all.size()));
+        const uint8_t junk[5] = {0x90, 200, 100, 0xf9, 0x90}; app.midiExternal(junk, 5, 3000000000ull); app.midiExternal(junk, 2, 3000000000ull); run(0.2);
+        CHECK(finite(all), "damaged MIDI is ignored");
+    }
+    {   // the clock of another sequencer: 100 bpm = 24 pulses in 0.6 s
+        app.setMidiSync(1); const uint64_t t0 = 10000000000ull; for (int i = 0; i < 24 * 4; i++) { const uint8_t c = 0xf8; app.midiExternal(&c, 1, t0 + (uint64_t)(i * 0.6e9 / 24.0)); }
+        run(0.3); CHECK(std::fabs(app.status().bpm - 100.f) < 0.6f, "the clock sets the tempo (%.1f bpm)", app.status().bpm);
+        const uint8_t start = 0xfa, stop = 0xfc; app.midiExternal(&start, 1, t0 + 8000000000ull); run(0.4); const bool playing = app.status().playing;
+        app.midiExternal(&stop, 1, t0 + 9000000000ull); run(0.4); CHECK(playing && !app.status().playing, "START and STOP of the other gear start and stop the transport (%d then %d)", playing, app.status().playing);
+        app.setMidiSync(0); const uint8_t c2 = 0xfa; app.midiExternal(&c2, 1, 0); run(0.3); CHECK(!app.status().playing, "with SYNC off the transport messages are ignored");
+    }
+    {   // the clock going out: 24 pulses per beat while it plays
+        app.gotoPage(SamplerApp::P_TEMPO); { auto k = app.knobs(); k[0].set((120.f - 30.f) / 270.f); } run(0.3);
+        s.clockPulses(); s.clockEvents(); s.play(true); run(2.0); const int ev = s.clockEvents(), pulses = s.clockPulses(); s.play(false); run(0.3); const int ev2 = s.clockEvents();
+        CHECK((ev & 1) && std::abs(pulses - 24 * 4) <= 3 && (ev2 & 2), "clock out: %d pulses in 2 s at 120 bpm (expect 96), start and stop events (%d, %d)", pulses, ev, ev2);
+    }
+    {   // tap tempo
+        app.setMidiSync(0); uint32_t t = 100000; for (int i = 0; i < 5; i++) { now = t; app.tick(now); app.tapTempo(); t += 500; }   // every 0.5 s = 120... done at 100 bpm: 600 ms
+        t = 200000; for (int i = 0; i < 6; i++) { now = t; app.tick(now); app.tapTempo(); t += 600; } run(0.3);
+        CHECK(std::fabs(app.status().bpm - 100.f) < 1.5f, "tap tempo: six taps 600 ms apart give %.1f bpm", app.status().bpm);
+    }
+    { MidiSong a; (void)a; }
+}
+
+static void testLock() {
+    const int sr = SAMPLERATE;
+    {   // the packed note word keeps every field
+        SeqNote n; n.tick = 12287; n.len = 12288; n.note = 127; n.vel = 127; n.prob = 100; n.ratchet = 8; n.nudge = -16; n.cut = 127; SeqNote m = unpackNote(packNote(n));
+        SeqNote z; z.tick = 0; z.len = 1; z.note = 0; z.vel = 1; z.prob = 0; z.ratchet = 1; z.nudge = 15; z.cut = 0; SeqNote q = unpackNote(packNote(z));
+        CHECK(m.tick == 12287 && m.len == 12288 && m.note == 127 && m.vel == 127 && m.prob == 100 && m.ratchet == 8 && m.nudge == -16 && m.cut == 127 && q.tick == 0 && q.len == 1 && q.prob == 0 && q.nudge == 15 && q.cut == 0, "a note survives packing into one word (both extremes)");
+    }
+    system("rm -rf /tmp/fm1sampler_tk; mkdir -p /tmp/fm1sampler_tk");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tk"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {});
+    std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
+    run(2.5); app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    wait(1.0); app.setSend(4, 0, 0.f); app.setSend(4, 1, 0.f);
+    app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); app.seqToggleAt(0, 60, 192); { auto k = app.knobs(); k[0].set(1.f / 3); } s.play(true); wait(0.5);
+    auto zc = [&]() { all.clear(); run(2.6); double d = 0, a = 1e-9; for (size_t i = 2; i < all.size(); i += 2) { d += std::fabs(all[i] - all[i - 2]); a += std::fabs(all[i]); } return d / a; };   // how bright: the movement of the waveform against its size
+    const double open = zc();
+    Session::SeqRef ref[1] = {{0, 60}}; s.seqApply(4, ref, 1, Session::OP_CUT, 1); run(0.3);
+    Session::SeqView v[kSeqMax]; const int n = s.seqNotes(4, v, kSeqMax); const double locked = zc();
+    CHECK(n == 1 && v[0].cut == 1 && locked < open * 0.8, "a filter lock darkens the note (%.4f -> %.4f brightness, lock %d)", open, locked, n ? v[0].cut : -1);
+    s.seqApply(4, ref, 1, Session::OP_CUT, 0); run(0.3); const double freed = zc(); CHECK(freed > locked * 1.2, "lock 0 gives the filter back (%.4f)", freed);
+    app.seqClear(); run(0.2);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -608,6 +950,25 @@ static void testRollZoom() {
             CHECK(n3 == 1 && v3[0].tick >= 1536 && v3[0].tick < 2304 && v3[0].note == note3, "tapping in the third bar adds the note in the third bar (tick %d)", n3 ? v3[0].tick : -1);
             app.seqClear(); app.seqSetBarCount(4);
         }
+        {   // SELECT mode: pick notes, edit them together
+            app.seqClear(); run(0.2); for (int i = 0; i < 3; i++) app.seqToggleAt(i * 96, 60 + i); run(0.3);
+            SamplerUI us(app); us.setSize(860, 400, 0, 0); us.frame(now);
+            auto tapText = [&](const char* label) { us.frame(now); float tx = 0, ty = 0; for (auto& o : us.ops()) if (o.type == UiOp::TEXT && o.text == label) { tx = o.f[0]; ty = o.f[1] - 3; } us.touch(0, tx, ty, now); us.touch(2, tx, ty, now); run(0.2); return tx > 0; };
+            CHECK(tapText("SELECT"), "the SELECT button exists"); us.frame(now);
+            float gx, gy, gw, gh; us.rollGrid(gx, gy, gw, gh); const float rows = std::round(us.rollRows()), rh = gh / rows; const int pt = patternTicks(app.seqBarsOf(app.track())), vis = (int)(pt / us.rollZoom());
+            auto X = [&](double tick) { return gx + (float)((tick - us.rollScroll()) / vis * gw); }; auto Y = [&](int note) { return gy + (rows - 1 - (note - std::floor(us.rollBase()))) * rh + rh / 2; };
+            Session::SeqView v[kSeqMax];
+            us.touch(0, X(10), Y(60), now); us.touch(2, X(10), Y(60), now); us.frame(now);
+            CHECK(!us.isSelected(0, 60) == false && us.selectedCount() == 1, "a tap on a note picks it (%d picked)", us.selectedCount());
+            us.touch(0, X(106), Y(61), now); us.touch(2, X(106), Y(61), now); us.frame(now); CHECK(us.selectedCount() == 2, "a second tap adds it (%d)", us.selectedCount());
+            us.touch(0, X(106), Y(61), now); us.touch(2, X(106), Y(61), now); us.frame(now); CHECK(us.selectedCount() == 1, "a tap on a picked note drops it");
+            us.touch(0, X(1), Y(64), now); us.touch(1, X(300), Y(58), now); us.touch(1, X(300), Y(58) + 1, now); us.frame(now); us.touch(2, X(300), Y(58), now); us.frame(now);
+            CHECK(us.selectedCount() == 3, "dragging a box over empty cells picks everything inside (%d)", us.selectedCount());
+            CHECK(tapText("+12"), "..."); const int n = s.seqNotes(0, v, kSeqMax); bool up = n == 3; for (int i = 0; i < n; i++) up &= v[i].note >= 72 && v[i].note <= 74;
+            CHECK(up, "+12 moves the picked notes an octave up"); us.frame(now);
+            tapText("DEL"); CHECK(s.seqNotes(0, v, kSeqMax) == 0 && us.selectedCount() == 0, "DELETE removes them");
+            app.seqUndo(); run(0.2); CHECK(s.seqNotes(0, v, kSeqMax) == 3, "...and UNDO brings them back");
+        }
         // a long note plays for its length: the engine holds it, a short one does not
         app.seqClear(); app.seqToggleAt(0, 60, 384); run(0.1);
         app.setSeqState(1); run(0.1);
@@ -622,6 +983,14 @@ int main() {
     }
     testSynths();
     testOp1();
+    testLock();
+    testMidiIn();
+    testBanks();
+    testSynthEdit();
+    testMixer();
+    testSampleEdit();
+    testPads();
+    testNoteEdit();
     testLook();
     testSound();
     testProject();
@@ -672,6 +1041,8 @@ int main() {
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ENV, "HOME again: envelope");
         btn(SamplerApp::HOME); btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_ARP, "HOME x4: arpeggiator");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SHAPE, "HOME x5: shape (macros, root key, slices)");
+        btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SMPED, "HOME x6: sample edit");
+        btn(SamplerApp::HOME); btn(SamplerApp::HOME);
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME again: back to the sample");
         btn(SamplerApp::ENV); CHECK(app.page() == SamplerApp::P_ENV, "ENV: shortcut to the envelope");
         btn(SamplerApp::LFO); CHECK(app.page() == SamplerApp::P_LFO, "LFO: shortcut");
@@ -686,6 +1057,7 @@ int main() {
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TEMPO, "SEQ again: tempo");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TOMB, "SEQ again: tombola");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PADS, "SEQ again: pads");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ again: back to the pattern");
         app.gotoPage(SamplerApp::P_FX);
     }

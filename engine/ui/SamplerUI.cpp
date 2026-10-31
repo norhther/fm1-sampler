@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRACK", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER"};   // by Page
 }  // namespace
 
 SamplerUI::SamplerUI(SamplerApp& app) : app_(app) {}
@@ -89,6 +89,7 @@ void SamplerUI::frame(uint32_t now) {
     pagePanel({W_ - right, tb + MARGIN, right - MARGIN, H_ - tb - 2 * MARGIN});
     if (sheetOpen_) librarySheet();
     if (projOpen_) projectSheet();
+    if (songOpen_) songSheet();
 }
 
 void SamplerUI::topBar(Rect r) {
@@ -116,9 +117,14 @@ void SamplerUI::topBar(Rect r) {
     x += 62;
     button({x, 6, 56, r.h - 12}, "CLEAR", false, [this] { app_.loopClear(); }, 11);
     x += 70;
+    if (!app_.loopExists() && !st_.freeRecording && !armed) {   // how long the first take is: it ends by itself after that many bars (FREE: when you press REC again)
+        button({x, 6, 78, r.h - 12}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
+        x += 86;
+    }
     text(x, cy - 6, 12, st_.freeRecording || recOn || armed ? ACCENT : TEXT, app_.loopText(), 0, true);
     text(x, cy + 11, 9.5f, DIM, std::string("LOOP SOURCE: ") + (app_.knobs(SamplerApp::P_SAVE)[1].value), 0, false);
-    tap({x - 4, 0, 230, r.h}, [this] { auto k = app_.knobs(SamplerApp::P_SAVE); k[1].step(k[1].norm > 0.5f ? -1 : 1); });
+    tap({x - 4, 0, std::max(120.f, W_ - 410 - x), r.h}, [this] { auto k = app_.knobs(SamplerApp::P_SAVE); k[1].step(k[1].norm > 0.5f ? -1 : 1); });
+    button({W_ - 396, 6, 64, r.h - 12}, app_.phoneOut() ? "PHONE" : "FM-1", app_.phoneOut(), [this] { app_.setPhoneOut(!app_.phoneOut()); }, 10.5f);   // where the sound goes: the FM-1, or the phone's own speaker
     button({W_ - 326, 6, 104, r.h - 12}, "PROJECT", projOpen_, [this] { projOpen_ = true; projSel_ = -1; projScroll_ = 0; }, 10.5f);
     // live: hold TAPE STOP and the tape runs down, let go and it spins up
     { Rect ts{W_ - 214, 6, 104, r.h - 12}; const bool on = app_.tapeStopHeld();
@@ -129,6 +135,7 @@ void SamplerUI::topBar(Rect r) {
     const uint32_t lc = linkMidi_ && linkAudio_ ? TEXT : linkMidi_ ? ACCENT : DIM;
     circle(W_ - 22, cy, 5, lc);
     text(W_ - 34, cy - 6, 10, DIM, linkMidi_ ? "FM-1" : "NO FM-1", 2, true);
+    if (st_.clip) text(W_ - 72, cy - 6, 9.5f, ACCENT, "CLIP", 2, true);
     text(W_ - 34, cy + 9, 9, DIM, "CPU " + num("%.0f", st_.cpu_permille / 10.0) + "%", 2, false);
 }
 
@@ -158,11 +165,13 @@ void SamplerUI::sampleArea(Rect r) {
     const std::string lab = app_.sampleLabel(t);
     text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - 120, T_TITLE), 0, true);
     text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);
+    if (app_.page() == SamplerApp::P_TEMPO) { button({r.x + r.w - 210, r.y, 110, 26}, "TAP TEMPO", false, [this] { app_.tapTempo(); }, 10.5f, true); }
+    if (app_.page() == SamplerApp::P_PADS) { padsView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_TOMB) { tombolaView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_SQ) { sequencerView({r.x, r.y + 28, r.w, r.h - 28}); return; }   // the sequencer page shows the pattern instead of the waveform, with all the room there is
     // algorithm (a synth has none)
     const float cw = (r.w - 5 * 4) / 6;
-    if (app_.isSynth(t)) text(r.x, r.y + 44, T_CAPTION, DIM, "BUILT-IN SYNTH  PLAY KEYS, SHAPE IT ON THE ENV, LFO AND FX PAGES", 0, false);
+    if (app_.isSynth(t)) { text(r.x, r.y + 44, T_CAPTION, DIM, "BUILT-IN SYNTH: ENV, SHAPE, OSC, FILTER, LFO", 0, false); button({r.x + r.w - 116, r.y + 30, 116, 28}, "SAVE PATCH", false, [this] { app_.savePatch(); }, 10.5f); }
     else for (int a = 0; a < 6; a++) {
         Rect c{r.x + a * (cw + 4), r.y + 30, cw, 28};
         button(c, a == 5 ? "PAUL" : SamplerApp::algoName(a), ts.algo == a, [this, a] { app_.setAlgo(a); }, 9.5f);
@@ -214,6 +223,20 @@ void SamplerUI::sampleArea(Rect r) {
     }
     }
     after_wave:
+    if (ts.algo == 3 && !app_.isSynth(t) && app_.micState() == 0 && app_.page() != SamplerApp::P_SQ) {   // KIT: tap the waveform to cut a new pad there, tap a mark to remove it, drag a mark to move it
+        auto pts = std::make_shared<std::vector<float>>(app_.session().slicesOf(t));
+        const float wx = w.x + 2, ww = w.w - 4;
+        hit({w.x, w.y + 22, w.w, w.h - 22},
+            [this, pts, wx, ww](float x, float) { chopIdx_ = -1; chopMoved_ = false; int best = -1; float bd = 14.f; for (size_t i = 0; i < pts->size(); i++) { const float d = std::fabs(wx + (*pts)[i] * ww - x); if (d < bd) { bd = d; best = (int)i; } }
+                if (best < 0) { pts->push_back(clamp01((x - wx) / ww)); std::sort(pts->begin(), pts->end()); for (size_t i = 0; i < pts->size(); i++) if (std::fabs(wx + (*pts)[i] * ww - x) < 1.5f) best = (int)i; chopNew_ = true; } else chopNew_ = false;
+                chopIdx_ = best; },
+            [this, pts, wx, ww](float x, float) { if (chopIdx_ < 0 || chopIdx_ >= (int)pts->size()) return; chopMoved_ = true; (*pts)[(size_t)chopIdx_] = clamp01((x - wx) / ww); },
+            [this, pts, t]() {
+                if (chopIdx_ < 0) return;
+                if (!chopMoved_ && !chopNew_ && pts->size() > 2) pts->erase(pts->begin() + chopIdx_);   // a tap on a mark removes it (the last two stay)
+                else if (!chopMoved_ && !chopNew_) return;
+                app_.setSliceStarts(*pts); chopIdx_ = -1; });
+    }
     // start / end handles (not while the microphone take is shown)
     for (int h = 0; h < (app_.micState() == 1 || app_.micState() == 2 ? 0 : 2); h++) {   // (SQ page returned earlier)
         const float v = h ? ts.end : ts.start, hx = w.x + 2 + v * (w.w - 4);
@@ -258,8 +281,9 @@ void SamplerUI::sampleArea(Rect r) {
     Rect br{r.x, lr.y + lr.h + 8, r.w, 38};
     const int ms = app_.micState();
     static const char* micLab[] = {"RECORD FROM MIC", "WAITING FOR SOUND...", "STOP AND KEEP", "SAVING..."};
-    button({br.x, br.y, br.w * 0.6f - 3, br.h}, micLab[ms], ms == 2, [this] { app_.micSample(); }, 12, ms != 0);
-    button({br.x + br.w * 0.6f + 3, br.y, br.w * 0.4f - 3, br.h}, "LOAD FILE FROM DISK", false, [this] { app_.requestFile(); }, 11);
+    button({br.x, br.y, br.w * 0.4f - 3, br.h}, ms == 0 ? "RECORD FROM MIC" : micLab[ms], ms == 2, [this] { app_.micSample(); }, 11, ms != 0);
+    button({br.x + br.w * 0.4f + 3, br.y, br.w * 0.3f - 6, br.h}, "LOAD FILE", false, [this] { app_.requestFile(); }, 11);
+    button({br.x + br.w * 0.7f, br.y, br.w * 0.3f, br.h}, "RESAMPLE", false, [this] { app_.resampleNow(); }, 11);
     const std::string ts_ = app_.toast();
     if (!ts_.empty()) text(r.x, br.y + br.h + 14, 11, ACCENT, ts_, 0, true);
 }
@@ -280,23 +304,25 @@ void SamplerUI::sequencerView(Rect r) {
         rollBase_ = (lo + hi) / 2.f - rollRowsF_ / 2.f + 0.5f; }
         else { rollRowsF_ = 10.f; rollBase_ = 55.f; }
     }
-    // toolbar: undo, redo, zoom in time, zoom in pitch, fit, grid
-    const float tbh = 26, bw8 = (r.w - 7 * 4) / 8.6f;   // the last button (GRID) is a bit wider
-    int tx = 0;
-    auto tb = [&](const std::string& label, bool on, std::function<void()> f) { button({r.x + tx * (bw8 + 4), r.y, tx == 7 ? bw8 * 1.6f : bw8, tbh}, label, on, std::move(f), 9.5f); tx++; };
+    // toolbar: undo, redo, zoom in time and pitch, fit, grid, select
+    const float tbh = 26, bw9 = (r.w - 7 * 4) / 8.9f;   // the last two buttons (GRID, SELECT) are a bit wider (zooming the rows is the vertical pinch)
+    int tx = 0; float tbx = r.x;
+    auto tb = [&](const std::string& label, bool on, std::function<void()> f, float wmul = 1.f) { button({tbx, r.y, bw9 * wmul, tbh}, label, on, std::move(f), 9.5f); tbx += bw9 * wmul + 4; tx++; };
     tb("UNDO", st_.seqUndoN[t] > 0, [this] { app_.seqUndo(); });
     tb("REDO", st_.seqRedoN[t] > 0, [this] { app_.seqRedo(); });
     const float zoomMax = std::min(32.f, std::max(1.f, pt / (2.f * st)));
     tb("TIME -", false, [this] { rollZoom_ = std::max(1.f, rollZoom_ / 1.6f); });
     tb("TIME +", false, [this, zoomMax] { rollZoom_ = std::min(zoomMax, rollZoom_ * 1.6f); });
-    tb("ROWS -", false, [this] { const float mid = rollBase_ + rollRowsF_ / 2.f; rollRowsF_ = std::min(60.f, rollRowsF_ * 1.4f); rollBase_ = mid - rollRowsF_ / 2.f; });   // more rows = smaller
-    tb("ROWS +", false, [this] { const float mid = rollBase_ + rollRowsF_ / 2.f; rollRowsF_ = std::max(5.f, rollRowsF_ / 1.4f); rollBase_ = mid - rollRowsF_ / 2.f; });
     tb("FIT", false, [this] { rollFitTrack_ = -1; });
-    tb(std::string("GRID ") + gridName(app_.seqGridIndex() ? app_.seqGridIndex() : 4), false, [this] { app_.cycleSeqGrid(); });
+    tb(std::string("GRID ") + gridName(app_.seqGridIndex() ? app_.seqGridIndex() : 4), false, [this] { app_.cycleSeqGrid(); }, 1.5f);
+    tb(drumView_ == 0 ? "DRUMS" : drumView_ == 1 ? "PADS 1-8" : "PADS 9-16", drumView_ != 0, [this] { drumView_ = (drumView_ + 1) % 3;  });
+    tb("SELECT", selMode_, [this] { selMode_ = !selMode_; sel_.clear(); drag_ = {}; rbOn_ = false; }, 1.4f);
     // the roll
-    const float keyW = 34, rulerH = 14;
-    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46};
+    const float keyW = drumView_ ? 76.f : 34.f, rulerH = 14;
+    const float panelH = selMode_ ? 86.f : 0.f, slotH = 26.f;
+    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46 - panelH - slotH - 4};
     rrect(roll, R_CARD, SURFACE); stroke(roll, R_CARD, OUTLINE, 1);
+    if (drumView_) { rollRowsF_ = 8.f; rollBase_ = 60.f + 8.f * (drumView_ - 1); }   // one row per pad, eight at a time
     rollZoom_ = std::min(zoomMax, std::max(1.f, rollZoom_)); rollRowsF_ = std::min(60.f, std::max(5.f, rollRowsF_));
     const int rows = (int)std::lround(rollRowsF_), visible = std::max(2 * st, (int)(pt / rollZoom_)); const float zoom = (float)pt / visible;
     const float x0 = roll.x + 2 + keyW, y0 = roll.y + 2 + rulerH, W = roll.w - 4 - keyW, H = roll.h - 4 - rulerH, rh = H / rows;
@@ -309,12 +335,13 @@ void SamplerUI::sequencerView(Rect r) {
     clip(roll);
     for (int i = 0; i < rows; i++) {   // rows from the top: the highest note first; black keys are a little darker
         const int nn = base + rows - 1 - i, pc = nn % 12; const bool black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
-        if (black) rrect({x0, y0 + i * rh, W, rh}, 0, theme::withAlpha(BG, 110));
+        if (black && !drumView_) rrect({x0, y0 + i * rh, W, rh}, 0, theme::withAlpha(BG, 110));
         line(x0, y0 + (i + 1) * rh, x0 + W, y0 + (i + 1) * rh, pc == 0 ? OUTLINE : theme::withAlpha(OUTLINE, 70), 1);
         // the keyboard strip
         rrect({roll.x + 2, y0 + i * rh, keyW - 2, rh}, 0, black ? BG : RAISED);
         line(roll.x + 2, y0 + (i + 1) * rh, roll.x + keyW, y0 + (i + 1) * rh, OUTLINE, 1);
-        if (pc == 0 || rh >= 13) text(roll.x + 5, y0 + i * rh + rh / 2, 8.5f, pc == 0 ? ACCENT : DIM, std::string(SamplerApp::noteName(pc)) + std::to_string(nn / 12 - 1), 0, pc == 0);
+        if (drumView_) text(roll.x + 4, y0 + i * rh + rh / 2, 8.5f, TEXT, fit(std::to_string(nn - 59) + " " + app_.padName(nn - 60), keyW - 6, 8.5f), 0, false);
+        else if (pc == 0 || rh >= 13) text(roll.x + 5, y0 + i * rh + rh / 2, 8.5f, pc == 0 ? ACCENT : DIM, std::string(SamplerApp::noteName(pc)) + std::to_string(nn / 12 - 1), 0, pc == 0);
     }
     // the ruler: bar numbers, a tick for each beat
     rrect({x0, roll.y + 2, W, rulerH}, 0, RAISED);
@@ -325,13 +352,17 @@ void SamplerUI::sequencerView(Rect r) {
         if (beat && px(tick) >= x0 && px(tick) < x0 + W - 12) text(px(tick) + 3, roll.y + 2 + rulerH / 2, 8.f, bar ? ACCENT : DIM, std::to_string(tick / (4 * kPpq) + 1) + (bar ? "" : "." + std::to_string(tick % (4 * kPpq) / kPpq + 1)), 0, bar);
     }
     if (state == 3) rrect({px(st_.seqCursor[t]), y0, std::max(2.f, (float)st / visible * W), H}, 0, theme::withAlpha(ACCENT, 90));
+    if (selMode_) { std::vector<Session::SeqRef> keep; for (auto& q : sel_) for (int i = 0; i < n; i++) if (v[i].tick == q.tick && v[i].note == q.note) { keep.push_back(q); break; } sel_ = keep; }
     for (int i = 0; i < n; i++) {
         const int row = base + rows - 1 - v[i].note;
         if (row < 0 || row >= rows || v[i].tick + v[i].len < rollScroll_ || v[i].tick > rollScroll_ + visible) continue;
         const bool grabbed = drag_.on && drag_.existing && drag_.tick == v[i].tick && drag_.note == v[i].note;
         const int len = grabbed ? drag_.len : v[i].len;
         const Rect nr{px(v[i].tick), y0 + row * rh + 1.f, std::max(4.f, (float)len / visible * W), std::max(3.f, rh - 2)};
-        rrect(nr, 2, grabbed ? ACCENT : TEXT);
+        const bool picked = selMode_ && isSel(v[i].tick, v[i].note);
+        rrect(nr, 2, grabbed || picked ? ACCENT : theme::withAlpha(TEXT, 110 + (int)(145.f * v[i].vel / 127.f)));   // louder notes are brighter
+        if (v[i].prob < 100) stroke(nr, 2, DIM, 1);
+        if (v[i].ratchet > 1 && nr.w > 12) for (int k = 1; k < v[i].ratchet; k++) { const float rx = nr.x + nr.w * k / v[i].ratchet; line(rx, nr.y + 2, rx, nr.y + nr.h - 2, BG, 1); }
         if (nr.w > 14) line(nr.x + nr.w - 4, nr.y + 3, nr.x + nr.w - 4, nr.y + nr.h - 3, grabbed ? ON_ACCENT : BG, 1.5f);   // a grip at the end: drag it to stretch the note
     }
     if (drag_.on && !drag_.existing) {   // the new note under the finger
@@ -360,6 +391,31 @@ void SamplerUI::sequencerView(Rect r) {
         [this, t] { if (auditionNote_ >= 0) app_.session().noteOff(t, auditionNote_); auditionNote_ = -1; });
     // grid
     auto tickAt = [sc0, x0, W, visible](float x) { return sc0 + (x - x0) / W * visible; };
+    if (selMode_) {   // tap a note to pick or drop it, drag a box over empty cells to pick all inside; a tap on nothing drops the selection
+        hit({x0, y0, W, H},
+            [this, v, n, tickAt, y0, rh, rows, base, st](float x, float y) mutable {
+                rollTouchAt_ = now_; rbX0_ = rbX1_ = x; rbY0_ = rbY1_ = y; rbOn_ = false; rollMoved_ = false; rollDownX_ = x; rollDownY_ = y;
+                const int tick = (int)tickAt(x), note = base + rows - 1 - std::min(rows - 1, std::max(0, (int)((y - y0) / rh)));
+                selDrag_ = -1;
+                for (int i = 0; i < n; i++) if (v[i].note == note && tick >= v[i].tick && tick < v[i].tick + std::max(1, v[i].len)) { selDrag_ = i; selDragVal_ = (float)v[i].tick; break; }
+                if (selDrag_ >= 0) { const Session::SeqRef q{v[selDrag_].tick, v[selDrag_].note}; bool had = false; for (size_t k = 0; k < sel_.size(); k++) if (sel_[k].tick == q.tick && sel_[k].note == q.note) { sel_.erase(sel_.begin() + (long)k); had = true; break; } if (!had) sel_.push_back(q); }
+            },
+            [this](float x, float y) { if (selDrag_ >= 0) return; if (std::fabs(x - rollDownX_) > 8 || std::fabs(y - rollDownY_) > 8) rbOn_ = true; rbX1_ = x; rbY1_ = y; },
+            [this, v, n, sc0, x0, W, visible, y0, rh, rows, base]() mutable {
+                auto px = [&](double tick) { return x0 + (float)((tick - sc0) / visible * W); };
+                if (selDrag_ >= 0) return;
+                if (!rbOn_) { sel_.clear(); return; }
+                const float xa = std::min(rbX0_, rbX1_), xb = std::max(rbX0_, rbX1_), ya = std::min(rbY0_, rbY1_), yb = std::max(rbY0_, rbY1_);
+                for (int i = 0; i < n; i++) {
+                    const int row = base + rows - 1 - v[i].note; if (row < 0 || row >= rows) continue;
+                    const float nx0 = px(v[i].tick), nx1 = px(v[i].tick + v[i].len), ny0 = y0 + row * rh, ny1 = ny0 + rh;
+                    if (nx1 >= xa && nx0 <= xb && ny1 >= ya && ny0 <= yb && !isSel(v[i].tick, v[i].note)) sel_.push_back({v[i].tick, v[i].note});
+                }
+                rbOn_ = false;
+            });
+        if (rbOn_) { const Rect rb{std::min(rbX0_, rbX1_), std::min(rbY0_, rbY1_), std::fabs(rbX1_ - rbX0_), std::fabs(rbY1_ - rbY0_)}; rrect(rb, 0, theme::withAlpha(ACCENT, 50)); stroke(rb, 0, ACCENT, 1); }
+        selectPanel({r.x, roll.y + roll.h + 4, r.w, 82}, v, n, pt, st);
+    } else
     hit({x0, y0, W, H},
         [this, v, n, tickAt, y0, rh, rows, base, st, pt](float x, float y) mutable {
             const int tick = std::min(pt - st, std::max(0, (int)tickAt(x) / st * st)), note = base + rows - 1 - std::min(rows - 1, std::max(0, (int)((y - y0) / rh)));
@@ -384,19 +440,88 @@ void SamplerUI::sequencerView(Rect r) {
             else app_.seqToggleAt(d.tick, d.note, st);   // a tap: add a one-step note, or remove the one that was touched
         });
     // buttons: record into the pattern (same as holding SEQ on the FM-1), mute, clear
+    // pattern banks A..H: tap one to play it next (at the end of the pattern while it plays); COPY then a bank copies this pattern there; SONG chains banks
+    {
+        const float sy = roll.y + roll.h + 4 + (selMode_ ? 0.f : 0.f) + panelH;
+        const int cur = app_.patternSlot(t), pend = st_.seqSlotPending[t];
+        const float cw = 28, sw = 44, gap = 3; float cx = r.x;
+        text(cx + 2, sy + slotH / 2, 8.f, DIM, "PTN", 0, true); cx += 26;
+        for (int q = 0; q < 8; q++) {
+            Session::SeqView tmp[1]; int bb = 0; const int cnt = app_.session().seqSlotNotes(t, q, tmp, 1, &bb);
+            const Rect c{cx + q * (cw + gap), sy, cw, slotH};
+            const bool on = q == cur;
+            rrect(c, R_CONTROL, on ? ACCENT : SURFACE); stroke(c, R_CONTROL, pend == q ? ACCENT : copyArm_ ? DIM : OUTLINE, pend == q || copyArm_ ? 2 : 1);
+            text(c.x + c.w / 2, c.y + c.h / 2, 11, on ? ON_ACCENT : TEXT, std::string(1, (char)('A' + q)), 1, true);
+            if (cnt > 0) circle(c.x + c.w - 6, c.y + 6, 2.5f, on ? ON_ACCENT : ACCENT);
+            tap(c, [this, q] { if (copyArm_) { app_.copyPattern(q); copyArm_ = false; app_.say(std::string("COPIED TO ") + (char)('A' + q)); } else app_.selectPattern(q); });
+        }
+        const float ex = cx + 8 * (cw + gap) + 4;
+        button({ex, sy, sw, slotH}, copyArm_ ? "TO..." : "COPY", copyArm_, [this] { copyArm_ = !copyArm_; }, 9.5f);
+        button({ex + sw + gap, sy, sw, slotH}, st_.songOn ? "SONG*" : "SONG", st_.songOn, [this] { songOpen_ = true; }, 9.5f);
+    }
     // bars: add or remove one at the end (new bars are empty; the notes behind a removed end are dropped, UNDO brings them back)
-    const float by = r.y + r.h - 38, bwBar = 40, lblW = 78, barsW = 2 * bwBar + lblW + 2 * 4, bw = (r.w - barsW - 4 * 6) / 4;
+    const float by = r.y + r.h - 38, bwBar = 34, lblW = 64, cpW = 44, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 5 * 6) / 5;
     const int nb = app_.seqBarsOf(t);
     button({r.x, by, bwBar, 38}, "-", false, [this, nb] { app_.seqSetBarCount(nb - 1); }, 16);
     text(r.x + bwBar + 4 + lblW / 2, by + 13, 13, TEXT, std::to_string(nb) + (nb == 1 ? " BAR" : " BARS"), 1, true);
     text(r.x + bwBar + 4 + lblW / 2, by + 28, 8.5f, DIM, "PATTERN LENGTH", 1, false);
     button({r.x + bwBar + 4 + lblW + 4, by, bwBar, 38}, "+", false, [this, nb] { app_.seqSetBarCount(nb + 1); }, 16);
+    button({r.x + 2 * bwBar + 4 + lblW + 8, by, cpW, 38}, "+COPY", false, [this] { app_.seqAddBarCopy(); }, 9.f);   // a new bar with the notes of the last one
     int bx = 0;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + barsW + 6 + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
-    b(state == 2 ? "STOP REC" : "RECORD", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
-    b(state == 0 ? "MUTED" : "PLAYING", state != 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
+    b(state == 2 ? "STOP" : "REC NOTES", state == 2, [this, state] { app_.setSeqState(state == 2 ? 1 : 2); }, true);
+    b(state == 0 ? "UNMUTE" : "MUTE", state == 0, [this, state] { app_.setSeqState(state == 0 ? 1 : 0); });
+    b("TO TAPE", false, [this] { app_.seqBounce(); });   // one pass of this pattern recorded on the tape (sets the loop length)
     b("DICE", false, [this] { app_.seqDice(); });
-    b("CLEAR", false, [this] { app_.seqClear(); });
+    { const bool sure = clearAt_ && now_ - clearAt_ < 2500; b(sure ? "SURE?" : "CLEAR", sure, [this, sure] { if (sure) { app_.seqClear(); clearAt_ = 0; } else clearAt_ = now_ ? now_ : 1; }); }
+}
+
+// ---- song: banks of patterns one after the other ----
+void SamplerUI::songSheet() {
+    rrect({0, 0, W_, H_}, 0, theme::withAlpha(BG, 215));
+    tap({0, 0, W_, H_}, [this] { songOpen_ = false; });
+    const Rect box{W_ * 0.14f, 40, W_ * 0.72f, H_ - 80};
+    rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 1);
+    tap(box, [] {});
+    text(box.x + 14, box.y + 20, T_TITLE, TEXT, "SONG", 0, true);
+    text(box.x + 80, box.y + 21, T_CAPTION, DIM, "EVERY STEP PLAYS ITS PATTERN BANK ON ALL TRACKS, AS LONG AS THE LONGEST PATTERN", 0, false);
+    button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { songOpen_ = false; }, 10);
+    const auto& chain = app_.songChain();
+    // the chain: one chip per step, the playing one lit; tap a chip to take it out
+    const float cw = 40, gap = 6; const int perRow = std::max(1, (int)((box.w - 28 + gap) / (cw + gap)));
+    if (chain.empty()) text(box.x + box.w / 2, box.y + 74, T_BODY, DIM, "EMPTY: ADD BANKS BELOW", 1, false);
+    for (size_t i = 0; i < chain.size(); i++) {
+        const Rect c{box.x + 14 + (i % (size_t)perRow) * (cw + gap), box.y + 52 + (i / (size_t)perRow) * (cw + gap - 2), cw, cw - 4};
+        const bool now = st_.songOn && (int)i == st_.songPos;
+        rrect(c, R_CONTROL, now ? ACCENT : RAISED); stroke(c, R_CONTROL, OUTLINE, 1);
+        text(c.x + c.w / 2, c.y + c.h / 2 - 3, 13, now ? ON_ACCENT : TEXT, std::string(1, (char)('A' + chain[i])), 1, true);
+        text(c.x + c.w / 2, c.y + c.h - 7, 7.5f, now ? ON_ACCENT : DIM, std::to_string(i + 1), 1, false);
+    }
+    // adding
+    const float by = box.y + box.h - 112;
+    text(box.x + 14, by - 6, T_CAPTION, DIM, "ADD A STEP", 0, true);
+    for (int q = 0; q < 8; q++) button({box.x + 14 + q * (cw + gap), by, cw, 34}, std::string(1, (char)('A' + q)), false, [this, q] { app_.songAdd(q); }, 12);
+    const float bw = (box.w - 28 - 2 * 8) / 3, y2 = box.y + box.h - 66;
+    button({box.x + 14, y2, bw, 42}, st_.songOn ? "SONG: ON" : "SONG: OFF", st_.songOn, [this] { app_.songSet(!app_.songOn()); }, 12, true);
+    button({box.x + 14 + bw + 8, y2, bw, 42}, "REMOVE LAST", false, [this] { app_.songPop(); }, 11);
+    button({box.x + 14 + 2 * (bw + 8), y2, bw, 42}, "CLEAR SONG", false, [this] { app_.songClear(); }, 11);
+}
+
+// ---- pads: a 4 x 4 grid to play a kit with; the harder you hit (lower on the pad) the louder ----
+void SamplerUI::padsView(Rect r) {
+    const int t = app_.track(); const auto& ts = app_.state(t);
+    const float gap = 8, pw = (r.w - 3 * gap) / 4, ph = (r.h - 3 * gap) / 4;
+    for (int i = 0; i < 16; i++) {
+        const int row = i / 4, col = i % 4, pad = (3 - row) * 4 + col;   // pad 1 is bottom left, like on an MPC
+        const Rect b{r.x + col * (pw + gap), r.y + row * (ph + gap), pw, ph};
+        const bool sel = ts.selPad == pad, down = padDown_ == pad;
+        rrect(b, R_CARD, down ? ACCENT : sel ? RAISED : SURFACE); stroke(b, R_CARD, sel || down ? ACCENT : OUTLINE, sel ? 2 : 1);
+        text(b.x + 8, b.y + 14, 10, down ? ON_ACCENT : DIM, std::to_string(pad + 1), 0, true);
+        text(b.x + b.w / 2, b.y + b.h / 2, 13, down ? ON_ACCENT : TEXT, fit(app_.padName(pad), b.w - 10, 13), 1, true);
+        if (ts.padGroup[pad] > 0) text(b.x + b.w - 8, b.y + 14, 9, down ? ON_ACCENT : ACCENT, "CH" + std::to_string(ts.padGroup[pad]), 2, true);
+        hit(b, [this, pad, b](float, float y) { padDown_ = pad; app_.selectPad(pad); app_.padHit(pad, 40 + (int)(87.f * clamp01((y - b.y) / b.h)), true); },
+            nullptr, [this, pad] { padDown_ = -1; app_.padHit(pad, 0, false); });
+    }
 }
 
 // ---- tombola: balls in a turning polygon; drag on the drum to turn it ----
@@ -424,6 +549,53 @@ void SamplerUI::tombolaView(Rect r) {
     b("DROP A BALL", [this] { app_.tombolaDrop(); }, true);
     b("REVERSE", [this] { app_.tombolaReverse(); });
     b("EMPTY THE DRUM", [this] { app_.tombolaClear(); });
+}
+
+// the panel under the roll in SELECT mode: what to do with the picked notes, and four values to set on all of them
+void SamplerUI::selectPanel(Rect r, const Session::SeqView* v, int n, int pt, int st) {
+    const int t = app_.track(), cnt = (int)sel_.size();
+    rrect(r, R_CARD, SURFACE); stroke(r, R_CARD, OUTLINE, 1);
+    const Session::SeqView* first = nullptr;
+    for (int i = 0; i < n && !first; i++) if (isSel(v[i].tick, v[i].note)) first = &v[i];
+    text(r.x + 8, r.y + 14, 10.5f, cnt ? ACCENT : DIM, cnt ? std::to_string(cnt) + " PICKED" : "TAP NOTES OR DRAG A BOX", 0, true);
+    // actions: the first row
+    const float bw = (r.w - 16 - 8 * 4 - 96) / 8.f; float bx = r.x + 104;
+    auto act = [&](const std::string& label, std::function<void()> f) { if (cnt) button({bx, r.y + 4, bw, 22}, label, false, std::move(f), 9.f); else { rrect({bx, r.y + 4, bw, 22}, R_CONTROL, BG); text(bx + bw / 2, r.y + 15, 9.f, OUTLINE, label, 1, true); } bx += bw + 4; };
+    auto op = [this, t](int o, int arg) { app_.session().seqApply(t, sel_.data(), (int)sel_.size(), o, arg); };
+    act("DEL", [this, op] { op(Session::OP_DELETE, 0); sel_.clear(); });
+    act("COPY", [this, op, pt, st] {   // a copy of the picked notes right after them (the length of the span, to the next step), and the copies are the new selection
+        int lo = 1 << 30, hi = 0; const auto s0 = sel_; Session::SeqView vv[kSeqMax]; const int nn = app_.session().seqNotes(app_.track(), vv, kSeqMax);
+        for (int i = 0; i < nn; i++) if (isSel(vv[i].tick, vv[i].note)) { lo = std::min(lo, vv[i].tick); hi = std::max(hi, vv[i].tick + vv[i].len); }
+        const int span = std::max(st, (hi - lo + st - 1) / st * st); op(Session::OP_DUP, span);
+        sel_.clear(); for (auto& q : s0) sel_.push_back({(q.tick + span) % pt, q.note}); });
+    act("-12", [this, op] { op(Session::OP_TRANSPOSE, -12); for (auto& q : sel_) q.note = std::max(0, q.note - 12); });
+    act("-1", [this, op] { op(Session::OP_TRANSPOSE, -1); for (auto& q : sel_) q.note = std::max(0, q.note - 1); });
+    act("+1", [this, op] { op(Session::OP_TRANSPOSE, 1); for (auto& q : sel_) q.note = std::min(127, q.note + 1); });
+    act("+12", [this, op] { op(Session::OP_TRANSPOSE, 12); for (auto& q : sel_) q.note = std::min(127, q.note + 12); });
+    act("<", [this, op, pt, st] { op(Session::OP_SHIFT, -st); for (auto& q : sel_) q.tick = ((q.tick - st) % pt + pt) % pt; });
+    act(">", [this, op, pt, st] { op(Session::OP_SHIFT, st); for (auto& q : sel_) q.tick = (q.tick + st) % pt; });
+    // values: velocity, chance, ratchet, nudge: dragged along the bar, applied when the finger lifts (one undo step)
+    struct Val { const char* name; int op, lo, hi; int cur; };
+    const Val vals[5] = {{"VELOCITY", Session::OP_VEL, 1, 127, first ? first->vel : 100}, {"CHANCE", Session::OP_PROB, 0, 100, first ? first->prob : 100},
+                         {"RATCHET", Session::OP_RATCHET, 1, 8, first ? first->ratchet : 1}, {"NUDGE", Session::OP_NUDGE, -16, 15, first ? first->nudge : 0},
+                         {"FILTER LOCK", Session::OP_CUT, 0, 127, first ? first->cut : 0}};
+    const float vw = (r.w - 16 - 4 * 8) / 5.f;
+    for (int k = 0; k < 5; k++) {
+        const Rect b{r.x + 8 + k * (vw + 8), r.y + 36, vw, 40};
+        const bool live = selDrag_ == 10000 + k;
+        const float cur = live ? selDragVal_ : (float)vals[k].cur;
+        text(b.x, b.y + 5, 8.5f, DIM, vals[k].name, 0, true);
+        text(b.x + vw, b.y + 5, 10.5f, cnt ? TEXT : DIM, (vals[k].op == Session::OP_PROB ? std::to_string((int)std::lround(cur)) + "%" : vals[k].op == Session::OP_NUDGE ? (cur > 0 ? "+" : "") + std::to_string((int)std::lround(cur)) : std::to_string((int)std::lround(cur))), 2, true);
+        const Rect sl{b.x, b.y + 16, vw, 18}; rrect(sl, 0, BG); stroke(sl, 0, OUTLINE, 1);
+        const float frac = (cur - vals[k].lo) / (float)(vals[k].hi - vals[k].lo);
+        rrect({sl.x, sl.y, std::max(2.f, sl.w * clamp01(frac)), sl.h}, 0, cnt ? ACCENT : OUTLINE);
+        if (!cnt) continue;
+        const int lo = vals[k].lo, hi = vals[k].hi, o = vals[k].op;
+        hit({sl.x, sl.y - 8, sl.w, sl.h + 16},
+            [this, k, sl, lo, hi](float x, float) { selDrag_ = 10000 + k; selDragVal_ = lo + clamp01((x - sl.x) / sl.w) * (hi - lo); },
+            [this, sl, lo, hi](float x, float) { selDragVal_ = lo + clamp01((x - sl.x) / sl.w) * (hi - lo); },
+            [this, op, o]() { op(o, (int)std::lround(selDragVal_)); selDrag_ = -1; });
+    }
 }
 
 void SamplerUI::pagePanel(Rect r) {
@@ -474,7 +646,7 @@ void SamplerUI::projectSheet() {
     text(box.x + 110, box.y + 21, T_CAPTION, DIM, cur == "autosave" ? "UNSAVED SESSION (KEPT AUTOMATICALLY)" : "OPEN: " + cur, 0, false);
     button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { projOpen_ = false; }, 10);
     const float colW = 196;
-    projListRect_ = {box.x + 6, box.y + 44, box.w - colW - 18, box.h - 52 - 54};
+    projListRect_ = {box.x + 6, box.y + 44, box.w - colW - 18, box.h - 52 - 92};
     rrect(projListRect_, R_CONTROL, BG);
     const float rh = 36;
     projScroll_ = std::min(std::max(0.f, projScroll_), std::max(0.f, projList_.size() * rh - projListRect_.h));
@@ -506,10 +678,15 @@ void SamplerUI::projectSheet() {
     b("EXPORT MIX (WAV)", false, [this] { app_.exportMix(); });
     b("IMPORT MIDI FILE", false, [this] { app_.requestMidi(); });
     // view: the look of the app and the full screen
-    const float vy = box.y + box.h - 50, vh = 34; const float vw = (box.w - 12 - 4 * 5 - 4) / 5.f;
+    const float vy = box.y + box.h - 88, vh = 32; const float vw = (box.w - 12 - 4 * 5 - 4) / 5.f;
     text(box.x + 8, vy - 6, T_CAPTION, DIM, "VIEW", 0, true);
     for (int i = 0; i < theme::kThemes; i++) button({box.x + 6 + i * (vw + 4), vy, vw, vh}, theme::name(i), app_.themeId() == i, [this, i] { app_.setTheme(i); }, 10);
     button({box.x + 6 + theme::kThemes * (vw + 4), vy, vw, vh}, app_.fullscreen() ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", app_.fullscreen(), [this] { app_.setFullscreen(!app_.fullscreen()); }, 9.5f);
+    // other gear: follow its clock, or send ours
+    { const float my = box.y + box.h - 46; static const char* nm[3] = {"MIDI SYNC: OFF", "FOLLOW CLOCK IN", "SEND CLOCK OUT"};
+      text(box.x + 8, my - 6, T_CAPTION, DIM, "MIDI", 0, true);
+      const float mw = (box.w - 12 - 2 * 4) / 3.f;
+      for (int i = 0; i < 3; i++) button({box.x + 6 + i * (mw + 4), my, mw, vh}, nm[i], app_.midiSync() == i, [this, i] { app_.setMidiSync(i); }, 10); }
     const std::string t = app_.toast();
     if (!t.empty()) text(box.x + 90, vy - 6, 11, ACCENT, t, 0, true);
 }
@@ -546,6 +723,6 @@ void SamplerUI::librarySheet() {
         [this, rows, rh]() {
             if (sheetMoved_ > 8) return;
             const int idx = (int)((sheetLastY_ - sheetList_.y + sheetScroll_) / rh);
-            if (idx >= 0 && idx < (int)rows.size() && !rows[(size_t)idx].head) { app_.loadEntry(rows[(size_t)idx].entry); sheetOpen_ = false; }
+            if (idx >= 0 && idx < (int)rows.size() && !rows[(size_t)idx].head) { app_.loadEntry(rows[(size_t)idx].entry); }   // the sheet stays open: browse and hear
         });
 }

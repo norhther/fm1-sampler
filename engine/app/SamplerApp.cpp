@@ -1,6 +1,10 @@
 #include "SamplerApp.h"
 #include <Common.h>
 #include <algorithm>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <filesystem>
 #include <cstdlib>
 #include <cmath>
 #include <cstdio>
@@ -10,7 +14,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -66,10 +70,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX"}; return n[m & 3]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB}, {P_MIX, P_KEY, P_SAVE, P_LEN}};
+    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_TFX, P_FX3}, {P_SQ, P_SEQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_KEY, P_SAVE, P_LEN, P_TEQ, P_DUCK}};
     return p[m & 3];
 }
-int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 || (m & 3) == 0 ? 5 : 4; }
+int SamplerApp::modePageCount(int m) { return (m & 3) == 1 ? 8 : (m & 3) == 2 ? 6 : (m & 3) == 0 ? 8 : (m & 3) == 3 ? 6 : 4; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -99,7 +103,7 @@ SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
     };
     byLabel("Tape Key", 0); byLabel("Acoustic", 1); byLabel("Shiny", 2); byLabel("TrapKit", 3); (void)first;
     for (int t = 0; t < kTracks; t++) { applyMix(t); applyPattern(t); }
-    applyMasterFx(); applyTempo(); applyTomb();
+    applyMasterFx(); applyTempo(); applyTomb(); applyMaster();
     if (ts_[0].entry >= 0) libCursor_ = ts_[0].entry;
 }
 
@@ -113,6 +117,13 @@ void SamplerApp::refreshLibrary() {
             lib_.push_back({stem, f, dir + "/" + f + "/" + file, f == "Drums"});
         }
     for (int i = 0; i < kSynthCount; i++) lib_.push_back({kSynths[i].name, "Synths", "synth:" + std::to_string(i), kSynths[i].kit > 0});
+    { std::error_code ec; std::vector<std::string> names; for (auto& e : std::filesystem::directory_iterator(s_.dataDir() + "/patches", ec)) if (e.path().extension() == ".txt") names.push_back(e.path().stem().string());
+      std::sort(names.begin(), names.end());
+      for (auto& nm : names) {
+          std::ifstream f(s_.dataDir() + "/patches/" + nm + ".txt"); std::string line, syn; while (std::getline(f, line)) if (line.rfind("synth=", 0) == 0) syn = line.substr(6);
+          bool kit = false; for (int i = 0; i < kSynthCount; i++) if (syn == kSynths[i].name) kit = kSynths[i].kit > 0;
+          lib_.push_back({nm, "My Patches", "patch:" + nm, kit});
+      } }
     for (auto& p : s_.sampleLibrary()) {
         std::string nm = p.substr(p.find_last_of('/') + 1); nm = nm.substr(0, nm.rfind('.'));
         if (nm.rfind("sample_", 0) == 0) nm = nm.substr(7);
@@ -130,14 +141,44 @@ void SamplerApp::loadEntry(int i) {
     libCursor_ = i; auditionAt_ = 0;
     const Entry& e = lib_[(size_t)i];
     TrackState& t = ts_[track_];
-    t.entry = i; t.start = 0.f; t.end = 1.f; t.rootN = 0.5f; t.sliceCount = 3; t.sliceSens = 0.5f; t.synTone = t.synBody = t.synMotion = t.synGrit = 0.5f;
+    t.entry = i; t.start = 0.f; t.end = 1.f; t.rootN = 0.5f; t.sliceCount = 3; t.sliceSens = 0.5f; t.synTone = t.synBody = t.synMotion = t.synGrit = 0.5f; t.edW1 = t.edW2 = t.edType = t.edUni = t.edVoice = 0; t.edDet2 = t.edCut = 0.5f; t.edRes = 0.f;
     if (e.kit) t.algo = 3; else if (t.algo == 3) t.algo = 0;
+    if (e.path.rfind("patch:", 0) == 0) {   // a saved patch: the synth, then every setting that was saved with it
+        std::ifstream f(s_.dataDir() + "/patches/" + e.path.substr(6) + ".txt"); std::string txt((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        std::istringstream is(txt); std::string line; std::map<std::string, std::string> kv; while (std::getline(is, line)) { const size_t eq = line.find('='); if (eq != std::string::npos) kv[line.substr(0, eq)] = line.substr(eq + 1); }
+        auto fv = [&](const char* k, float& v) { auto it = kv.find(k); if (it != kv.end()) v = std::min(1.f, std::max(0.f, (float)std::atof(it->second.c_str()))); };
+        auto iv = [&](const char* k, int& v, int hi) { auto it = kv.find(k); if (it != kv.end()) v = std::min(hi, std::max(0, std::atoi(it->second.c_str()))); };
+        fv("a", t.a); fv("d", t.d); fv("s", t.s); fv("r", t.r); fv("tone", t.synTone); fv("body", t.synBody); fv("motion", t.synMotion); fv("grit", t.synGrit);
+        iv("w1", t.edW1, 4); iv("w2", t.edW2, 4); iv("type", t.edType, 2); iv("uni", t.edUni, 3); iv("voice", t.edVoice, 3); fv("det2", t.edDet2); fv("cut", t.edCut); fv("res", t.edRes);
+        int base = -1; for (size_t j = 0; j < lib_.size(); j++) if (lib_[j].group == "Synths" && lib_[j].label == kv["synth"]) base = (int)j;
+        previewAfterLoad_ = true;
+        if (base >= 0) { if (lib_[(size_t)base].kit) t.algo = 3; s_.loadSamplePath(lib_[(size_t)base].path, lib_[(size_t)base].kit, track_); }
+        return;
+    }
     if (e.path.rfind("synth:", 0) == 0) {   // a synth patch brings its own envelope
         const SynthPatch& p = kSynths[std::atoi(e.path.c_str() + 6) % kSynthCount];
         t.a = clampf(std::sqrt(p.a / 3.f), 0.f, 1.f); t.d = clampf(p.d, 0.f, 1.f); t.s = p.s; t.r = clampf(std::sqrt(p.r / 5.f), 0.f, 1.f);
     }
     previewAfterLoad_ = true;
     s_.loadSamplePath(e.path, e.kit, track_);
+}
+std::string SamplerApp::resolvePath(int entry) const {
+    if (entry < 0 || entry >= (int)lib_.size()) return "";
+    const Entry& e = lib_[(size_t)entry];
+    if (e.path.rfind("patch:", 0) != 0) return e.path;
+    std::ifstream f(s_.dataDir() + "/patches/" + e.path.substr(6) + ".txt"); std::string line; while (std::getline(f, line)) if (line.rfind("synth=", 0) == 0) { for (auto& l : lib_) if (l.group == "Synths" && l.label == line.substr(6)) return l.path; }
+    return "";
+}
+std::string SamplerApp::savePatch() {
+    const int e = ts_[track_].entry; if (!isSynth(track_)) return "";
+    std::string base = lib_[(size_t)e].label;
+    if (lib_[(size_t)e].group == "My Patches") { std::ifstream f(s_.dataDir() + "/patches/" + base + ".txt"); std::string line; while (std::getline(f, line)) if (line.rfind("synth=", 0) == 0) base = line.substr(6); }
+    std::error_code ec; std::filesystem::create_directories(s_.dataDir() + "/patches", ec);
+    std::string name; for (int i = 2; i < 1000; i++) { name = base + " " + std::to_string(i); if (!std::filesystem::exists(s_.dataDir() + "/patches/" + name + ".txt")) break; }
+    const TrackState& x = ts_[track_]; std::ofstream f(s_.dataDir() + "/patches/" + name + ".txt");
+    f << "synth=" << base << "\na=" << x.a << "\nd=" << x.d << "\ns=" << x.s << "\nr=" << x.r << "\ntone=" << x.synTone << "\nbody=" << x.synBody << "\nmotion=" << x.synMotion << "\ngrit=" << x.synGrit
+      << "\nw1=" << x.edW1 << "\nw2=" << x.edW2 << "\ntype=" << x.edType << "\nuni=" << x.edUni << "\nvoice=" << x.edVoice << "\ndet2=" << x.edDet2 << "\ncut=" << x.edCut << "\nres=" << x.edRes << "\n";
+    refreshLibrary(); say("PATCH SAVED: " + name); return name;
 }
 void SamplerApp::importFile(const std::string& wav) {
     refreshLibrary();
@@ -147,7 +188,7 @@ void SamplerApp::importFile(const std::string& wav) {
 
 // ---- parameters ----
 void SamplerApp::applyAll(int t) {
-    applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t);
+    applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t); applyPads(t); applyEdit(t); applySynthEdit(t);
 }
 void SamplerApp::applyShape(int t, bool reslice) {
     const TrackState& x = ts_[t];
@@ -162,6 +203,34 @@ void SamplerApp::autoTune() {
     if (g < 24.f || g > 96.f) { say("NOT A PITCHED SOUND"); return; }
     const int root = (int)std::lround(g); ts_[track_].rootN = (root - 24) / 72.f; applyShape(track_);
     say(std::string("ROOT KEY ") + noteName(root) + std::to_string(root / 12 - 1));
+}
+void SamplerApp::applyPad(int t, int pad) {
+    const TrackState& x = ts_[t];
+    s_.setPad(t, pad, x.padVol[pad] * 1.5f, (x.padPitch[pad] - 0.5f) * 24.f, 0.f, std::pow(4.f, (x.padDecay[pad] - 0.5f) * 2.f), x.padGroup[pad]);
+}
+void SamplerApp::applyPads(int t) { for (int i = 0; i < 16; i++) applyPad(t, i); }
+std::string SamplerApp::padName(int pad) const {
+    static const char* n[16] = {"KICK", "KICK 2", "SNARE", "SNARE 2", "CLAP", "RIM", "HAT", "OPEN HAT", "TOM LO", "TOM MID", "TOM HI", "COWBELL", "CLAVE", "SHAKER", "CRASH", "ZAP"};
+    const int e = ts_[track_].entry;
+    if (e >= 0 && e < (int)lib_.size() && lib_[(size_t)e].path.rfind("synth:", 0) == 0 && lib_[(size_t)e].kit) return n[pad & 15];
+    return std::to_string(pad + 1);
+}
+void SamplerApp::applyMaster() {
+    static const float ceil[7] = {0.f, -0.3f, -1.f, -2.f, -3.f, -4.5f, -6.f};
+    s_.setLimiter(limiter_ > 0, ceil[std::min(6, std::max(0, limiter_))]);
+    s_.setDuck(duckSrc_ - 1, 0.05f + duckRel_ * 0.95f);
+    for (int t = 0; t < kTracks; t++) s_.setDuckAmount(t, ts_[t].duckAmt);
+}
+void SamplerApp::applySynthEdit(int t) {
+    const TrackState& x = ts_[t]; static const int uni[4] = {-1, 1, 3, 5}; static const float gl[4] = {0.f, 0.f, 0.06f, 0.25f};
+    s_.setSynthEdit(t, x.edW1 - 1, x.edW2 - 1, (x.edDet2 - 0.5f) * 100.f, (x.edCut - 0.5f) * 6.f, x.edRes * 6.f, x.edType, uni[std::min(3, std::max(0, x.edUni))], x.edVoice > 0, gl[std::min(3, std::max(0, x.edVoice))]);
+}
+void SamplerApp::applySong() { std::vector<uint8_t> c; for (int x : songChain_) c.push_back((uint8_t)x); s_.setSong(c.data(), (int)c.size(), songOn_); }
+void SamplerApp::applyEdit(int t) { const TrackState& x = ts_[t]; s_.setSampleLevel(t, x.levelN * 3.f, (x.fineN - 0.5f) * 100.f); }
+void SamplerApp::resampleNow() {
+    if (mic_ != 0) return;
+    const int bars = st_.loopSamples > 0 ? st_.loopBars : seqBarsOf(track_);
+    mic_ = 3; micTrack_ = track_; s_.resample(bars); say("RESAMPLING " + std::to_string(bars) + (bars == 1 ? " BAR..." : " BARS..."));
 }
 void SamplerApp::applyAlgo(int t) { s_.setMode(t, ts_[t].algo); }
 void SamplerApp::applyEnv(int t) {
@@ -207,12 +276,13 @@ void SamplerApp::applyTempo() {
     s_.setQuantize(seqGrid_);
     s_.setInputQuant(liveGrid_);
     s_.setCountIn(countIn_);
+    s_.setTakeBars(takeBars());
     s_.setSwing(0.5f + 0.25f * swing_);
 }
 void SamplerApp::applyTomb() { s_.tombolaSet((tSpin_ - 0.5f) * 14.f, tGrav_, tMass_, tShape_); }
 void SamplerApp::applyTrackFx(int t) {
     const TrackState& x = ts_[t];
-    FxParams p; p.filter = x.tfDj; p.chorus = x.tfChorus; p.crush = x.tfCrush; p.gate = x.tfGate;
+    FxParams p; p.filter = x.tfDj; p.chorus = x.tfChorus; p.crush = x.tfCrush; p.gate = x.tfGate; p.eqLow = x.tfEqLow; p.eqMid = x.tfEqMid; p.eqHigh = x.tfEqHigh; p.comp = x.tfComp;
     s_.setTrackFx(t, p);
 }
 void SamplerApp::applyPattern(int t) { s_.seqSetBars(t, ts_[t].seqBars + 1); s_.seqSetState(t, ts_[t].seqState); }
@@ -430,6 +500,54 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
             k[3] = cont("SLICE SENS", &x.sliceSens, [](float v) { return fmt("%.1fX", std::pow(2.f, (v - 0.5f) * 2.f)); }, [=] { applyShape(t, true); }, 0.05f);
         }
         break;
+    case P_SYN1:   // a built-in synth: its oscillators
+        if (!isSynth(t)) break;
+        k[0] = choice("WAVE", &x.edW1, {"PATCH", "SINE", "SAW", "SQUARE", "TRIANGLE"}, [=] { applySynthEdit(t); });
+        k[1] = choice("WAVE 2", &x.edW2, {"PATCH", "SINE", "SAW", "SQUARE", "TRIANGLE"}, [=] { applySynthEdit(t); });
+        k[2] = cont("DETUNE 2", &x.edDet2, [](float v) { return fmt("%+.0f CENTS", (v - 0.5f) * 100.f); }, [=] { applySynthEdit(t); }, 0.01f);
+        k[3] = choice("UNISON", &x.edUni, {"PATCH", "OFF", "3 VOICES", "5 VOICES"}, [=] { applySynthEdit(t); });
+        break;
+    case P_SYN2:   // its filter and voice mode
+        if (!isSynth(t)) break;
+        k[0] = cont("CUTOFF", &x.edCut, [](float v) { return fmt("%+.1f OCT", (v - 0.5f) * 6.f); }, [=] { applySynthEdit(t); }, 0.01f);
+        k[1] = cont("RESONANCE", &x.edRes, [](float v) { return pct(v); }, [=] { applySynthEdit(t); });
+        k[2] = choice("FILTER", &x.edType, {"LOW-PASS", "HIGH-PASS", "BAND-PASS"}, [=] { applySynthEdit(t); });
+        k[3] = choice("VOICES", &x.edVoice, {"POLY", "MONO", "MONO GLIDE", "MONO SLOW GLIDE"}, [=] { applySynthEdit(t); });
+        break;
+    case P_TEQ:   // EQ and compressor of this track
+        k[0] = cont("EQ LOW", &x.tfEqLow, [](float v) { return std::fabs(v - 0.5f) < 0.02f ? std::string("FLAT") : fmt("%+.0f DB", (v - 0.5f) * 24.f); }, [=] { applyTrackFx(t); }, 0.02f);
+        k[1] = cont("EQ MID", &x.tfEqMid, [](float v) { return std::fabs(v - 0.5f) < 0.02f ? std::string("FLAT") : fmt("%+.0f DB", (v - 0.5f) * 24.f); }, [=] { applyTrackFx(t); }, 0.02f);
+        k[2] = cont("EQ HIGH", &x.tfEqHigh, [](float v) { return std::fabs(v - 0.5f) < 0.02f ? std::string("FLAT") : fmt("%+.0f DB", (v - 0.5f) * 24.f); }, [=] { applyTrackFx(t); }, 0.02f);
+        k[3] = cont("COMPRESSOR", &x.tfComp, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
+        break;
+    case P_DUCK:   // sidechain and the master limiter
+        k[0] = choice("DUCK FROM", &duckSrc_, {"OFF", "TRACK 1", "TRACK 2", "TRACK 3", "TRACK 4", "TRACK 5", "TRACK 6", "TRACK 7", "TRACK 8"}, [=] { applyMaster(); });
+        k[1] = cont("DUCK THIS TRACK", &x.duckAmt, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMaster(); });
+        k[2] = cont("DUCK RELEASE", &duckRel_, [](float v) { return fmt("%.2fS", 0.05f + v * 0.95f); }, [=] { applyMaster(); });
+        k[3] = choice("LIMITER", &limiter_, {"OFF", "-0.3 DB", "-1 DB", "-2 DB", "-3 DB", "-4.5 DB", "-6 DB"}, [=] { applyMaster(); });
+        break;
+    case P_SMPED:
+        if (isSynth(t)) break;   // nothing to edit in a synth
+        {
+            static const char* ops[6] = {"REVERSE", "NORMALIZE", "TRIM TO WINDOW", "FADE IN", "FADE OUT", "UNDO LAST EDIT"};
+            k[0] = choice("EDIT", &x.editOp, {ops[0], ops[1], ops[2], ops[3], ops[4], ops[5]}, [] {});
+            Knob a; a.name = "APPLY"; a.valid = true; a.isChoice = true; a.value = "TURN TO RUN"; a.norm = 0.f;
+            a.step = [=](int) { const int op = ts_[t].editOp; if (op == 5) s_.undoEdit(t); else s_.editSample(t, op); if (op == 2) { ts_[t].start = 0.f; ts_[t].end = 1.f; } say(op == 5 ? "EDIT TAKEN BACK" : std::string(ops[op]) + " DONE"); };
+            a.set = [=](float) { a.step(1); };
+            k[1] = a;
+            k[2] = cont("FINE TUNE", &x.fineN, [](float v) { return fmt("%+.0f CENTS", (v - 0.5f) * 100.f); }, [=] { applyEdit(t); }, 0.01f);
+            k[3] = cont("SAMPLE LEVEL", &x.levelN, [](float v) { return fmt("%+.1f DB", 20.f * std::log10(std::max(0.01f, v * 3.f))); }, [=] { applyEdit(t); });
+        }
+        break;
+    case P_PADS: {   // the selected pad of a kit
+        const int pd = x.selPad;
+        const std::string head = "PAD " + std::to_string(pd + 1) + " ";
+        k[0] = cont((head + "LEVEL").c_str(), &x.padVol[pd], [](float v) { return pct(v * 1.5f); }, [=] { applyPad(t, pd); });
+        k[1] = cont((head + "TUNE").c_str(), &x.padPitch[pd], [](float v) { return fmt("%+.1f ST", (v - 0.5f) * 24.f); }, [=] { applyPad(t, pd); }, 1.f / 48.f);
+        k[2] = cont((head + "DECAY").c_str(), &x.padDecay[pd], [](float v) { return fmt("%.2fX", std::pow(4.f, (v - 0.5f) * 2.f)); }, [=] { applyPad(t, pd); });
+        k[3] = choice((head + "CHOKE").c_str(), &x.padGroup[pd], {"OFF", "GROUP 1", "GROUP 2", "GROUP 3", "GROUP 4"}, [=] { applyPad(t, pd); });
+        break;
+    }
     case P_FX3:   // the OP-1 effects
         k[0] = cont("SPRING", &spring_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
         k[1] = cont("SPRING DAMP", &springDamp_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
@@ -655,6 +773,7 @@ void SamplerApp::tick(uint32_t now) {
     if (fwDirty_) { fwDirty_ = false; sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true); }
     if (repaintAt_ && now >= repaintAt_) { repaintAt_ = repaintAt_ + 2500 < now + 2500 && repaintCount_++ < 1 ? now + 2500 : 0; needClear_ = true; }
     st_ = s_.status();
+    for (int t = 0; t < kTracks; t++) if (st_.seqBars[t] > 0 && nowMs_ - barsLocalAt_[t] > 250) ts_[t].seqBars = std::min(15, st_.seqBars[t] - 1);   // the engine is the truth for the length (a bank can have another one)
     projectTick();
     loopAny_ = false;
     for (int t = 0; t < kTracks; t++) loopAny_ |= st_.track_has_clip[t];

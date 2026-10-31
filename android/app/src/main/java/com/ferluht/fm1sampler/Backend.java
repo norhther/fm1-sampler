@@ -31,6 +31,7 @@ public class Backend {
     Thread ticker;
     boolean audioStarted, micStarted, micWanted;
     int usbAudioId = 0;
+    boolean phoneOutNow = false;   // the sound plays on the phone's own speaker even with the FM-1 plugged in
     /** Set by the activity: opens the system file picker (the phone UI asked for LOAD FILE FROM DISK). */
     public volatile Runnable onFileRequest;
     /** A MIDI file was asked for (PROJECT sheet), and a file is ready for the share sheet. */
@@ -38,6 +39,11 @@ public class Backend {
     public volatile java.util.function.Consumer<String> onShare;
     /** The look changed (theme colour for the system bars, full screen on / off); also called once at the start. */
     public volatile java.util.function.BiConsumer<Integer, Boolean> onLook;
+    /** Other MIDI gear: keyboards and controllers send notes and clock in, the clock goes out to their input ports. */
+    final java.util.Set<Integer> extIds = new java.util.HashSet<>();
+    final java.util.List<MidiDevice> extDevices = new java.util.ArrayList<>();
+    final java.util.List<MidiOutputPort> extOut = new java.util.ArrayList<>();
+    final java.util.List<MidiInputPort> extIn = new java.util.ArrayList<>();
     int lastLookColor = 0; boolean lastLookFull = false, lookSent = false;
 
     public static synchronized Backend get(Context c) {
@@ -66,10 +72,11 @@ public class Backend {
         startAudio();
         if (midi != null) {
             midi.registerDeviceCallback(new MidiManager.DeviceCallback() {
-                @Override public void onDeviceAdded(MidiDeviceInfo i) { connectMidi(); }
+                @Override public void onDeviceAdded(MidiDeviceInfo i) { connectMidi(); connectOthers(); }
                 @Override public void onDeviceRemoved(MidiDeviceInfo i) { disconnectMidi(); connectMidi(); }
             }, main);
             connectMidi();
+            connectOthers();
         }
         am.registerAudioDeviceCallback(new AudioDeviceCallback() {
             @Override public void onAudioDevicesAdded(AudioDeviceInfo[] a) { restartAudioIfUsbChanged(); if (micWanted && !micStarted) startMic(); }
@@ -85,6 +92,13 @@ public class Backend {
                 if (Native.wantMidi(engine)) { Runnable r = onMidiRequest; if (r != null) main.post(r); }
                 { int col = Native.themeColor(engine); boolean full = Native.fullscreen(engine);
                   if (!lookSent || col != lastLookColor || full != lastLookFull) { java.util.function.BiConsumer<Integer, Boolean> f = onLook; if (f != null) { lookSent = true; lastLookColor = col; lastLookFull = full; main.post(() -> f.accept(col, full)); } } }
+                { int pulses = Native.clockPulses(engine), ev = Native.clockEvents(engine);
+                  if (Native.midiSyncMode(engine) == 2 && !extIn.isEmpty()) {   // the clock goes out (about as exact as this 16 ms loop)
+                      if ((ev & 1) != 0) sendExt(new byte[]{(byte) 0xfa});
+                      if (pulses > 0) { byte[] c = new byte[Math.min(pulses, 24)]; java.util.Arrays.fill(c, (byte) 0xf8); sendExt(c); }
+                      if ((ev & 2) != 0) sendExt(new byte[]{(byte) 0xfc});
+                  } }
+                { boolean ph = Native.phoneOut(engine); if (ph != phoneOutNow) { phoneOutNow = ph; startAudio(); } }
                 String share = Native.sharePath(engine);
                 if (share != null && !share.isEmpty()) { java.util.function.Consumer<String> c = onShare; if (c != null) main.post(() -> c.accept(share)); }
                 try { Thread.sleep(16); } catch (InterruptedException ignored) { }
@@ -109,7 +123,9 @@ public class Backend {
     }
     void startAudio() {
         usbAudioId = findUsbAudio();
-        int r = Native.startAudio(engine, usbAudioId);
+        int dev = usbAudioId;
+        if (phoneOutNow) for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) dev = d.getId();
+        int r = Native.startAudio(engine, dev);
         audioStarted = r == 0;
         Log.i(TAG, "audio start " + r + " usb device " + usbAudioId);
     }
@@ -149,6 +165,33 @@ public class Backend {
             }
             Log.i(TAG, "FM-1 MIDI connected");
         }, main);
+    }
+    static boolean isFm1(MidiDeviceInfo i) {
+        String n = String.valueOf(i.getProperties().getString(MidiDeviceInfo.PROPERTY_NAME)).toLowerCase();
+        return n.contains("fm") || n.contains("m-vave") || n.contains("mvave");
+    }
+    /** Every other MIDI device that is plugged in: its output feeds the engine (notes, clock), its input gets our clock. */
+    synchronized void connectOthers() {
+        if (midi == null) return;
+        for (MidiDeviceInfo info : midi.getDevices()) {
+            if (isFm1(info) || (info.getOutputPortCount() == 0 && info.getInputPortCount() == 0) || !extIds.add(info.getId())) continue;
+            midi.openDevice(info, d -> {
+                if (d == null) return;
+                synchronized (Backend.this) {
+                    extDevices.add(d);
+                    MidiOutputPort out = info.getOutputPortCount() > 0 ? d.openOutputPort(0) : null;
+                    if (out != null) { extOut.add(out); out.connect(new MidiReceiver() {
+                        @Override public void onSend(byte[] data, int off, int count, long ts) { Native.midiExt(engine, data, off, count, ts != 0 ? ts : System.nanoTime()); }
+                    }); }
+                    MidiInputPort in = info.getInputPortCount() > 0 ? d.openInputPort(0) : null;
+                    if (in != null) extIn.add(in);
+                }
+                Log.i(TAG, "MIDI device connected: " + info.getProperties().getString(MidiDeviceInfo.PROPERTY_NAME));
+            }, main);
+        }
+    }
+    void sendExt(byte[] b) {
+        synchronized (this) { for (MidiInputPort p : extIn) { try { p.send(b, 0, b.length); } catch (Exception e) { Log.w(TAG, "ext send: " + e); } } }
     }
     synchronized void disconnectMidi() {
         try { if (fromFm1 != null) fromFm1.close(); } catch (Exception ignored) { }

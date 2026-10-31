@@ -24,7 +24,9 @@ public:
         double loopSamples;      // 0 = no loop yet
         float bpm;
         int loopBars;
-        float master_peak;
+        int seqSlot[kTracks], seqSlotPending[kTracks]; bool songOn; int songPos, songLen;   // pattern banks A..H (index 0..7): the current one, the one queued for the pattern end (-1 none); the song
+        float master_peak; bool clip;   // clip: the master was pushed past full level a moment ago
+
         float track_peak[kTracks];
         bool track_has_clip[kTracks], track_clip_rec[kTracks];
         uint32_t cpu_permille;   // audio block time / block duration, smoothed
@@ -47,7 +49,9 @@ public:
         int bounce;              // 0 idle, 1 waiting for the loop start, 2 recording the pattern to tape
         int bounceDone;          // counts up when a bounce finished
     };
-    struct SeqView { int tick, len, note, vel; };
+    struct SeqView { int tick, len, note, vel, prob = 100, ratchet = 1, nudge = 0, cut = 0; };
+    struct SeqRef { int tick, note; };   // a note of a pattern is told by its start and its pitch
+    enum SeqOp { OP_DELETE, OP_TRANSPOSE, OP_SHIFT, OP_DUP, OP_VEL, OP_PROB, OP_RATCHET, OP_NUDGE, OP_CUT };
     struct Lfo { float rate = 1.f, depth = 0.f, base = 0.5f; int target = 0 /*0 pitch 1 filter 2 volume 3 pan*/, shape = 0 /*0 sine 1 tri 2 square 3 s&h*/; };
 
     explicit Session(int sampleRate = 48000);
@@ -64,8 +68,17 @@ public:
     // ---- sampler (per track) ----
     void loadSamplePath(const std::string& path, bool kit, int track);          // worker thread builds it, then it replaces the track's sampler
     void setSynthMacros(int track, float tone, float body, float motion, float grit);   // -1..1 each; only a built-in synth listens
+    void setSynthEdit(int track, int wave1, int wave2, float detune2Cents, float cutoffOctaves, float resonanceAdd, int filterType, int unison, bool mono, float glideSeconds);   // a built-in synth on top of its patch (-1 = keep the patch's)
+    void setPad(int track, int pad, float volume, float pitchSemitones, float pan, float decay, int chokeGroup);   // KIT mode and the synth drum kits, pad 0..15
+    enum EditOp { EDIT_REVERSE, EDIT_NORMALIZE, EDIT_TRIM, EDIT_FADE_IN, EDIT_FADE_OUT, EDIT_UNDO };
+    void editSample(int track, int op);                                       // REVERSE, NORMALIZE, TRIM to the play window, FADE IN / OUT (30 ms); UNDO takes the last edit back
+    void undoEdit(int track);
+    void setSliceStarts(int track, const std::vector<float>& starts);        // KIT: pad starts placed by hand (0..1 of the sample)
+    void setSampleLevel(int track, float level, float fineCents);            // level 0..3, fine tune in cents
+    void resample(int bars);                                                  // the master output of `bars` bars becomes a new sample (loaded like a microphone take)
     void setRoot(int track, int midiNote);                                     // the key that plays the sample at its own pitch (60 = the library's tuning)
     void setSlices(int track, int count, float sensitivity);                   // KIT: cut the sample into `count` pads again
+    int sampleFramesOf(int track) const;                                       // length of the track's sample in frames (0 = none)
     float rootGuessOf(int track) const;                                        // pitch of the sample as a MIDI note, 0 = not a pitched sound
     std::vector<float> slicesOf(int track) const;                              // slice starts, 0..1 of the sample
     void unloadSample(int track);                                              // the track is empty again
@@ -82,6 +95,11 @@ public:
     void setPan(int track, float p);      // -1..1
     void setSend(int track, int which /*0 reverb 1 delay*/, float level);
     void setMasterVolume(float v);
+    int clockPulses();                          // MIDI clock out: the pulses (24 per beat) since the last call
+    int clockEvents();                          // bit 0: the transport started, bit 1: it stopped, since the last call
+    void setLimiter(bool on, float ceilingDb);   // master limiter: nothing passes the ceiling (-12 .. 0 dB)
+    void setDuck(int sourceTrack, float release);   // sidechain: every note of this track (-1 = off) pushes the tracks with a duck amount down, releasing over `release` seconds
+    void setDuckAmount(int track, float amount);    // 0..1
     void setReverb(float size);           // 0..1
     void setDelay(float seconds, float feedback);
     void setRetLevel(int which, float v); // reverb / delay return gain (the effects run 100 % wet)
@@ -96,6 +114,13 @@ public:
     void seqUndo(int track);                  // takes back the last edit of the pattern (a recording pass, a step, a tap on the grid, clear, a change of the length); 16 steps
     void seqRedo(int track);
     void seqSet(int track, const SeqView* notes, int n);                      // replace the whole pattern (one undo step)
+    void seqApply(int track, const SeqRef* notes, int n, int op, int arg);    // edits a selection in one undo step: delete, transpose (semitones), shift / duplicate by `arg` ticks, set velocity / probability / ratchet / nudge
+    void seqSelectPattern(int track, int slot, bool immediate);               // pattern bank 0..7 (A..H): at once, or (while it plays) when the current pattern ends
+    void seqCopyPattern(int track, int fromSlot, int toSlot);
+    int seqSlotNotes(int track, int slot, SeqView* out, int maxNotes, int* bars) const;   // the notes of any bank
+    void seqSetSlot(int track, int slot, const SeqView* notes, int n, int bars);          // fills a bank (a project is loaded)
+    void setSong(const uint8_t* chain, int n, bool on);                       // the song: banks one after the other for every track, each as long as its longest pattern
+    void seqAddBar(int track, bool copyLast);                                 // one more bar at the end (up to 16), empty or a copy of the last one
     void seqResize(int track, int tick, int note, int len);                   // touch edit: a note gets a new length in ticks
     void seqToggle(int track, int tick, int len, int note, int vel);   // touch edit: a note under that tick is removed, else one is added
     void seqRest(int track);                  // step entry: skip one step
@@ -116,6 +141,7 @@ public:
 
     // ---- timing helpers ----
     void setInputQuant(int grid);             // live quantize: played keys sound on the nearest grid line of the beat clock (0 = off); recording snaps to it too
+    void setTakeBars(int bars);               // 0: the take ends when told to; n: it ends by itself after n bars, at the current tempo
     void setCountIn(int bars);                // 0..2 bars of clicks before a free take or a sequencer recording starts from a stopped transport
 
     // ---- effects: FX 2 inserts and LIVE FX on the master, the same set on every track ----

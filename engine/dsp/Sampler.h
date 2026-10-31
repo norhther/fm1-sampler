@@ -34,7 +34,17 @@ public:
     void setRoot(int midi) { root_ = std::min(108, std::max(12, midi)); }   // the key that plays the sample at its own pitch (60 = C4, how the library is tuned)
     const std::vector<int>& slices() const { return slices_; }
     void setSlices(std::vector<int> s) { if (s.size() >= 2) slices_ = std::move(s); }
-    void setSynthMacros(const SynthMacros& m) { mac_ = m; }   // TONE, BODY, MOTION, GRIT of a built-in synth
+    // per pad (KIT mode and the synth drum kits: pad = note - 60 mod 16): level, tuning in semitones, decay length, pan, choke group (0 = none; a pad cuts the sounding pads of its group)
+    struct Pad { float vol = 1.f, pitch = 0.f, decay = 1.f, pan = 0.f; int group = 0; };
+    void setPad(int pad, const Pad& p) { if (pad >= 0 && pad < 16) pads_[pad] = p; }
+    bool padMode() const { return mode_ == KIT || (synth_ >= 0 && kSynths[synth_].engine == 3); }
+    void setLevel(float g) { level_ = clampf(g, 0.f, 3.f); }           // sample level
+    void setFine(float cents) { fine_ = clampf(cents, -100.f, 100.f); }   // fine tuning
+    // audio thread: the sample was edited (reversed, trimmed ...): the new buffer with its overview and slices, built on the worker
+    void replaceOriginal(std::shared_ptr<const SampleBuf> b, std::vector<float> peaks, std::vector<int> slices) { allOff(); orig_ = std::move(b); proc_.reset(); peaks_ = std::move(peaks); if (slices.size() >= 2) slices_ = std::move(slices); }
+    static std::vector<float> overview(const SampleBuf& b);
+    void setSynthMacros(const SynthMacros& m) { mac_ = m; }
+    void setSynthEdit(const SynthEdit& e) { edit_ = e; }   // TONE, BODY, MOTION, GRIT of a built-in synth
     const std::string& label() const { return label_; }
     const std::vector<float>& peaks() const { return peaks_; }   // 512 bins, 0..1
     std::shared_ptr<const SampleBuf> original() const { return orig_; }
@@ -56,7 +66,7 @@ public:
 private:
     struct Grain { bool on = false; double pos = 0, inc = 0; int age = 0, len = 1; };
     struct Voice {
-        bool on = false, gate = false, fading = false, paulReady = false; int note = 0, slice = 0; float vel = 1.f; uint32_t born = 0;
+        bool on = false, gate = false, fading = false, paulReady = false; int note = 0, slice = 0, group = 0; float vel = 1.f, padGain = 1.f, panL = 1.f, panR = 1.f, padPitch = 0.f; uint32_t born = 0;
         double pos = 0, rate = 1.0, ws = 0, we = 0;   // window of the played buffer, frames
         const SampleBuf* buf = nullptr;
         Adsr env; Grain grain[12]; double spawn = 0; int paulIdx = -1;
@@ -77,6 +87,6 @@ private:
     bool loadSynth(int idx);
     static float detectPitch(const std::vector<float>& st, int frames, int sr);
     void renderSynth(Voice& v, SynthVoice& sv, float* out, int n);
-    int root_ = 60; float rootGuess_ = 0.f;
+    float level_ = 1.f, fine_ = 0.f; Pad pads_[16]; SynthEdit edit_; int lastNote_ = -1; int root_ = 60; float rootGuess_ = 0.f;
     SynthMacros mac_; int synth_ = -1; float synthNorm_ = 1.f; SynthVoice sv_[kVoices];
 };

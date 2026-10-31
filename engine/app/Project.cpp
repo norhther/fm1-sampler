@@ -68,12 +68,13 @@ std::string SamplerApp::stateText() {
         x.f("chorus", chorus_); x.f("phaser", phaser_); x.f("comp", comp_); x.f("width", width_); x.f("djFilter", djFilter_); x.f("crush", crush_);
         x.f("spring", spring_); x.f("springDamp", springDamp_); x.f("phone", phone_); x.f("punch", punch_); x.f("flanger", flanger_); x.f("drive", drive_); x.f("eqLow", eqLow_); x.f("eqMid", eqMid_); x.f("eqHigh", eqHigh_); x.f("tremolo", tremolo_); x.f("wah", wah_); x.f("ringmod", ringmod_); x.f("tapeStop", tapeStop_);
         x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
-        x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2);
+        x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2); x.i("takeBars", takeBars_, 0, kTakeBarsN - 1);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
-        x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
+        x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
         x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
     };
     common(io);
+    { std::string sg; for (size_t i = 0; i < songChain_.size(); i++) sg += (i ? "," : "") + std::to_string(songChain_[i]); io.out << "song=" << sg << '\n'; int on = songOn_; io.i("songOn", on, 0, 1); }
     for (int t = 0; t < kTracks; t++) {
         TrackState& x = ts_[t]; const std::string k = "t" + std::to_string(t) + ".";
         io.i(k + "algo", x.algo, 0, 5); io.f(k + "a", x.a); io.f(k + "d", x.d); io.f(k + "s", x.s); io.f(k + "r", x.r);
@@ -82,11 +83,20 @@ std::string SamplerApp::stateText() {
         io.i(k + "arpRate", x.arpRate, 0, 12); io.i(k + "arpPatt", x.arpPatt, 0, 6); io.i(k + "arpOct", x.arpOct, 0, 3); io.f(k + "arpLen", x.arpLen);
         io.f(k + "vol", x.vol); io.f(k + "pan", x.pan); io.f(k + "sendR", x.sendR); io.f(k + "sendD", x.sendD);
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
+        for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
+        io.f(k + "fineN", x.fineN); io.f(k + "levelN", x.levelN);
+        io.f(k + "tfEqLow", x.tfEqLow); io.f(k + "tfEqMid", x.tfEqMid); io.f(k + "tfEqHigh", x.tfEqHigh); io.f(k + "tfComp", x.tfComp); io.f(k + "duckAmt", x.duckAmt);
+        io.i(k + "edW1", x.edW1, 0, 4); io.i(k + "edW2", x.edW2, 0, 4); io.i(k + "edType", x.edType, 0, 2); io.i(k + "edUni", x.edUni, 0, 3); io.i(k + "edVoice", x.edVoice, 0, 3); io.f(k + "edDet2", x.edDet2); io.f(k + "edCut", x.edCut); io.f(k + "edRes", x.edRes);
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (x.entry >= 0 && x.entry < (int)lib_.size()) io.out << k << "sample=" << lib_[(size_t)x.entry].group << '|' << lib_[(size_t)x.entry].label << '\n';
-        Session::SeqView v[kSeqMax]; const int n = s_.seqNotes(t, v, kSeqMax);
-        if (n > 0) { io.out << k << "notes="; for (int i = 0; i < n; i++) io.out << (i ? ";" : "") << v[i].tick << ',' << v[i].len << ',' << v[i].note << ',' << v[i].vel; io.out << '\n'; }
+        io.out << k << "slot=" << st_.seqSlot[t] << '\n';
+        for (int q = 0; q < 8; q++) {   // every pattern bank of the track
+            Session::SeqView v[kSeqMax]; int bars = 1; const int n = s_.seqSlotNotes(t, q, v, kSeqMax, &bars);
+            if (n == 0 && bars <= 1) continue;
+            io.out << k << "s" << q << ".bars=" << bars << '\n';
+            if (n > 0) { io.out << k << "s" << q << ".notes="; for (int i = 0; i < n; i++) io.out << (i ? ";" : "") << v[i].tick << ',' << v[i].len << ',' << v[i].note << ',' << v[i].vel << ',' << v[i].prob << ',' << v[i].ratchet << ',' << v[i].nudge << ',' << v[i].cut; io.out << '\n'; }
+        }
     }
     return io.out.str();
 }
@@ -100,9 +110,9 @@ void SamplerApp::applyStateText(const std::string& text) {
         x.f("chorus", chorus_); x.f("phaser", phaser_); x.f("comp", comp_); x.f("width", width_); x.f("djFilter", djFilter_); x.f("crush", crush_);
         x.f("spring", spring_); x.f("springDamp", springDamp_); x.f("phone", phone_); x.f("punch", punch_); x.f("flanger", flanger_); x.f("drive", drive_); x.f("eqLow", eqLow_); x.f("eqMid", eqMid_); x.f("eqHigh", eqHigh_); x.f("tremolo", tremolo_); x.f("wah", wah_); x.f("ringmod", ringmod_); x.f("tapeStop", tapeStop_);
         x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
-        x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2);
+        x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2); x.i("takeBars", takeBars_, 0, kTakeBarsN - 1);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
-        x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
+        x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
         x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
     };
     common(io);
@@ -115,6 +125,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         io.i(k + "arpRate", x.arpRate, 0, 12); io.i(k + "arpPatt", x.arpPatt, 0, 6); io.i(k + "arpOct", x.arpOct, 0, 3); io.f(k + "arpLen", x.arpLen);
         io.f(k + "vol", x.vol); io.f(k + "pan", x.pan); io.f(k + "sendR", x.sendR); io.f(k + "sendD", x.sendD);
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
+        for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
         int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15);
         if (fmtv < 2) bars2 = std::min(3, bars2) == 0 ? 0 : (1 << std::min(3, bars2)) - 1;   // format 1 kept 0..3 for 1, 2, 4, 8 bars
@@ -127,19 +138,35 @@ void SamplerApp::applyStateText(const std::string& text) {
             const size_t bar = it->second.find('|'); const std::string group = it->second.substr(0, bar), label = bar == std::string::npos ? "" : it->second.substr(bar + 1);
             for (size_t i = 0; i < lib_.size(); i++) if (lib_[i].group == group && lib_[i].label == label) { x.entry = (int)i; break; }
         }
-        if (x.entry >= 0) s_.loadSamplePath(lib_[(size_t)x.entry].path, lib_[(size_t)x.entry].kit, t); else s_.unloadSample(t);
+        if (x.entry >= 0 && !resolvePath(x.entry).empty()) s_.loadSamplePath(resolvePath(x.entry), lib_[(size_t)x.entry].kit, t); else s_.unloadSample(t);
         applyAll(t); applyTrackFx(t); applyPattern(t);
-        std::vector<Session::SeqView> notes;
-        const auto nt = kv.find(k + "notes");
-        if (nt != kv.end()) {
-            std::istringstream ns(nt->second); std::string item;
-            while (std::getline(ns, item, ';') && (int)notes.size() < kSeqMax) {
-                int a, b, c, d; if (sscanf(item.c_str(), "%d,%d,%d,%d", &a, &b, &c, &d) == 4 && a >= 0 && a < patternTicks(8) && b > 0 && c >= 0 && c < 128) notes.push_back({a, std::min(b, 65535), c, std::min(127, std::max(1, d))});
+        auto parseNotes = [&](const std::string& text) {
+            std::vector<Session::SeqView> out; std::istringstream ns(text); std::string item;
+            while (std::getline(ns, item, ';') && (int)out.size() < kSeqMax) {
+                int a, b, c, d, pr = 100, ra = 1, nu = 0, cu = 0; const int got = sscanf(item.c_str(), "%d,%d,%d,%d,%d,%d,%d,%d", &a, &b, &c, &d, &pr, &ra, &nu, &cu);
+                if (got >= 4 && a >= 0 && a < patternTicks(16) && b > 0 && c >= 0 && c < 128) out.push_back({a, std::min(b, 65535), c, std::min(127, std::max(1, d)), std::min(100, std::max(0, pr)), std::min(8, std::max(1, ra)), std::min(15, std::max(-16, nu)), std::min(127, std::max(0, cu))});
             }
+            return out;
+        };
+        s_.seqSelectPattern(t, 0, true);
+        bool anySlot = false; for (int q = 0; q < 8; q++) anySlot |= kv.count(k + "s" + std::to_string(q) + ".bars") > 0;
+        if (anySlot) {
+            for (int q = 0; q < 8; q++) {
+                const std::string sk = k + "s" + std::to_string(q) + "."; const auto bi = kv.find(sk + "bars"), ni = kv.find(sk + "notes");
+                const int bars = bi == kv.end() ? 1 : std::min(16, std::max(1, std::atoi(bi->second.c_str())));
+                auto v = ni == kv.end() ? std::vector<Session::SeqView>() : parseNotes(ni->second);
+                s_.seqSetSlot(t, q, v.data(), (int)v.size(), bars);
+            }
+            int cur = 0; { Io io2{false, &kv, {}}; io2.i(k + "slot", cur, 0, 7); }
+            s_.seqSelectPattern(t, cur, true);
+        } else {
+            const auto nt = kv.find(k + "notes"); auto notes = nt == kv.end() ? std::vector<Session::SeqView>() : parseNotes(nt->second);
+            s_.seqSet(t, notes.data(), (int)notes.size());
         }
-        s_.seqSet(t, notes.data(), (int)notes.size());
+
     }
-    applyFx(); applyMasterFx(); applySeq(0); applyTomb(); applyTempo(); s_.setLoopSource(loopSrc_);
+    songChain_.clear(); { const auto sg = kv.find("song"); if (sg != kv.end()) { std::istringstream ss(sg->second); std::string item; while (std::getline(ss, item, ',') && songChain_.size() < 64) if (!item.empty()) songChain_.push_back(std::min(7, std::max(0, std::atoi(item.c_str())))); } int on = 0; Io io3{false, &kv, {}}; io3.i("songOn", on, 0, 1); songOn_ = on && !songChain_.empty(); applySong(); }
+    applyFx(); applyMasterFx(); applySeq(0); applyTomb(); applyTempo(); applyMaster(); s_.setLoopSource(loopSrc_);
     setScale(scale_.scale, scale_.root, scale_.octave, scale_.mode);
     track_ = track;
     (void)bars; (void)fmtv; (void)sr;
@@ -191,6 +218,12 @@ void SamplerApp::autosave(bool force) {
     autosaveAt_ = nowMs_ + 20000;
     if (anyRec_ && !force) return;
     std::error_code ec; fs::create_directories(projectDir("autosave"), ec);
+    if (nowMs_ >= backupAt_ && fs::exists(projectDir("autosave") + "/project.txt")) {   // every ten minutes the last autosave is kept as Backup 1 (older ones move down, three are kept)
+        backupAt_ = nowMs_ + 600000u;
+        for (int i = 3; i >= 2; i--) { fs::remove_all(projectDir("Backup " + std::to_string(i)), ec); if (fs::exists(projectDir("Backup " + std::to_string(i - 1)))) fs::rename(projectDir("Backup " + std::to_string(i - 1)), projectDir("Backup " + std::to_string(i)), ec); }
+        fs::remove_all(projectDir("Backup 1"), ec); fs::create_directories(projectDir("Backup 1"), ec);
+        fs::copy_file(projectDir("autosave") + "/project.txt", projectDir("Backup 1") + "/project.txt", fs::copy_options::overwrite_existing, ec);
+    }
     const std::string text = stateText();
     { std::ofstream f(projectDir("autosave") + "/project.txt.tmp"); if (!f) return; f << text; }
     fs::rename(projectDir("autosave") + "/project.txt.tmp", projectDir("autosave") + "/project.txt", ec);
@@ -252,12 +285,46 @@ bool SamplerApp::importMidi(const std::string& path) {
 // ---- settings: the look of the app, outside of any project ----
 void SamplerApp::loadSettings() {
     const KV kv = parse(readFile(s_.dataDir() + "/settings.txt")); Io io{false, &kv, {}};
-    int th = 0, fs = 0; io.i("theme", th, 0, theme::kThemes - 1); io.i("fullscreen", fs, 0, 1);
-    theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_);
+    int th = 0, fs = 0, ms = 0, po = 0; io.i("theme", th, 0, theme::kThemes - 1); io.i("fullscreen", fs, 0, 1); io.i("midiSync", ms, 0, 2); io.i("phoneOut", po, 0, 1);
+    midiSync_ = ms; phoneOut_ = po != 0; theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_);
 }
 void SamplerApp::saveSettings() {
     if (s_.dataDir().empty()) return;
     std::error_code ec; fs::create_directories(s_.dataDir(), ec);
-    std::ofstream f(s_.dataDir() + "/settings.txt"); f << "theme=" << theme_ << "\nfullscreen=" << (fullscreen_ ? 1 : 0) << "\n";
+    std::ofstream f(s_.dataDir() + "/settings.txt"); f << "theme=" << theme_ << "\nfullscreen=" << (fullscreen_ ? 1 : 0) << "\nmidiSync=" << midiSync_ << "\nphoneOut=" << (phoneOut_ ? 1 : 0) << "\n";
 }
 void SamplerApp::setTheme(int id) { theme_ = std::min(theme::kThemes - 1, std::max(0, id)); theme::apply(theme_); saveSettings(); }
+
+// ---- other gear on the MIDI bus ----
+void SamplerApp::midiExternal(const uint8_t* b, size_t n, uint64_t nowNs) {
+    for (size_t i = 0; i < n;) {
+        const uint8_t st = b[i];
+        if (st == 0xf8) {   // clock: 24 per beat; every 24 pulses give a tempo
+            i++;
+            if (midiSync_ != 1) continue;
+            if (clkCount_ == 0) clkWindowStart_ = nowNs;
+            if (++clkCount_ >= 25) {   // 24 intervals between 25 pulses = one beat
+                const double sec = (double)(nowNs - clkWindowStart_) / 1e9;
+                if (sec > 0.1 && sec < 2.1 && st_.loopSamples <= 0) { const float bpm = (float)(60.0 / sec); if (bpm >= 30.f && bpm <= 300.f && std::fabs(bpm - tempo_) > 0.4f) setTempo(std::round(bpm * 10.f) / 10.f); }
+                clkCount_ = 0;
+            }
+            continue;
+        }
+        if (st == 0xfa || st == 0xfb) { i++; if (midiSync_ == 1) { clkCount_ = 0; extPlaying_ = true; s_.play(true); } continue; }
+        if (st == 0xfc) { i++; if (midiSync_ == 1) { extPlaying_ = false; s_.play(false); } continue; }
+        if ((st & 0xf0) == 0x90 || (st & 0xf0) == 0x80) {
+            if (i + 2 >= n) break;
+            const int note = b[i + 1] & 0x7f, vel = b[i + 2] & 0x7f; i += 3;
+            const bool on = (st & 0xf0) == 0x90 && vel > 0;
+            if (on) { heldNote_[note] = track_; s_.noteOn(track_, note, vel); if (page_ == P_TOMB) s_.tombolaAdd(track_, note); } else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
+            continue;
+        }
+        i++;   // anything else is ignored (a damaged message, active sensing, controllers)
+    }
+}
+void SamplerApp::tapTempo() {
+    const uint64_t now = (uint64_t)nowMs_ * 1000000ull;
+    if (tapLast_ && now - tapLast_ < 2000000000ull) { const double d = (double)(now - tapLast_) / 1e9; tapAvg_ = tapN_ == 0 ? d : tapAvg_ * 0.6 + d * 0.4; tapN_++; if (tapN_ >= 2 && st_.loopSamples <= 0) setTempo((float)std::round(60.0 / tapAvg_ * 10.0) / 10.f); say("TAP " + std::to_string((int)std::lround(60.0 / tapAvg_)) + " BPM"); }
+    else { tapN_ = 0; tapAvg_ = 0; say("TAP AGAIN..."); }
+    tapLast_ = now;
+}

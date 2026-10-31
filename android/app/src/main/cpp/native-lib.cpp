@@ -157,6 +157,16 @@ FN(void, importMidi)(JNIEnv* env, jclass, jlong h, jstring path) {
 // the look: full screen on / off and the background colour of the theme (for the system bars)
 FN(jboolean, fullscreen)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); return e.app->fullscreen(); }
 FN(jint, themeColor)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); (void)e; return (jint)theme::BG; }
+// other MIDI gear: notes and clock coming in; the clock going out (pulses and start / stop since the last call)
+FN(void, midiExt)(JNIEnv* env, jclass, jlong h, jbyteArray a, jint off, jint n, jlong tsNanos) {
+    auto& e = *E(h); jbyte* p = env->GetByteArrayElements(a, nullptr);
+    { std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->midiExternal((const uint8_t*)p + off, (size_t)n, (uint64_t)tsNanos); }
+    env->ReleaseByteArrayElements(a, p, JNI_ABORT);
+}
+FN(jint, clockPulses)(JNIEnv*, jclass, jlong h) { return E(h)->session.clockPulses(); }
+FN(jint, clockEvents)(JNIEnv*, jclass, jlong h) { return E(h)->session.clockEvents(); }
+FN(jboolean, phoneOut)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); return e.app->phoneOut(); }
+FN(jint, midiSyncMode)(JNIEnv*, jclass, jlong h) { auto& e = *E(h); std::lock_guard<std::mutex> l(e.surfaceMtx); return e.app->midiSync(); }
 FN(void, say)(JNIEnv* env, jclass, jlong h, jstring msg) {
     auto& e = *E(h); const char* c = env->GetStringUTFChars(msg, nullptr);
     { std::lock_guard<std::mutex> l(e.surfaceMtx); e.app->say(c); }
