@@ -13,7 +13,7 @@ struct FxParams {
     float drive = 0, eqLow = 0.5f, eqMid = 0.5f, eqHigh = 0.5f;          // EQ: 0.5 flat, +-12 dB
     float tremolo = 0, wah = 0, ringmod = 0;
     float filter = 0.5f;                                                // DJ filter: below 0.5 low-pass sweeping down, above 0.5 high-pass sweeping up
-    float crush = 0, tapeStop = 0;
+    float crush = 0, tapeStop = 0, tsDown = 1.8f, tsUp = 1.8f;   // tape stop: depth, seconds to run down, seconds to spin up
     float spring = 0, springDamp = 0.5f, phone = 0, punch = 0;   // OP-1 style: spring reverb (mix, damping), phone (telephone band + grit), punch (transients + saturation)
     int repeat = 0;    // 0 off, 1..4: 1/4, 1/8, 1/16, 1/32 of a beat... (note values: 1/4 = one beat)
     int reverse = 0;   // the same slices, played backwards
@@ -323,11 +323,11 @@ private:
             if (++repK_ >= repLen_) repK_ = 0;
         }
     }
-    // ---- tape stop, as on the OP-1: the tape winds down over about two seconds (the pitch falls with it), and on release it spins up again before the live signal comes back ----
+    // ---- tape stop, as on the OP-1: the tape winds down over tsDown seconds (the pitch falls with it), and on release it spins up again before the live signal comes back ----
     void tapeStop(float* x, int n) {
         const size_t N = ts_.size() / 2;
         const float brake = p_.tapeStop;
-        const float down = 1.f / (1.8f * (float)sr_), up = 1.f / (0.9f * (float)sr_);   // speed per sample: 1 -> 0 in 1.8 s, 0 -> 1 in 0.9 s
+        const float down = 1.f / (std::max(0.05f, p_.tsDown) * (float)sr_), up = 1.f / (std::max(0.05f, p_.tsUp) * (float)sr_);   // speed per sample: 1 -> 0 in tsDown s, 0 -> 1 in tsUp s
         const int xf = 1024;                                                              // hand-over from the spun-up tape to the live signal
         if (!tsOn_ && brake >= 0.02f) { tsOn_ = true; tsPos_ = (double)tsW_; tsSpeed_ = 1.f; tsRel_ = 0; }
         const float target = brake < 0.02f ? 1.f : 1.f - brake;

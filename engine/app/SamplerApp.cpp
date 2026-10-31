@@ -14,9 +14,9 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
-const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM"};
+const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM", "NEAPM", "NEAPJ", "PERSN", "HUNGJ", "LYDDM", "ALTRD", "LYDAG", "DOR#4", "SPAN8", "INSEN", "IWATO", "YO", "EGYPT", "MAJBL", "PROMT", "ENIGM", "OCTWH", "LOCR2", "MAJ6P", "MIN6P"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
 const char* kRepeat[] = {"OFF", "1/4", "1/8", "1/16", "1/32"};
 const char* kOffOn[] = {"OFF", "ON"};
@@ -37,15 +37,19 @@ std::string fmt(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, 
 std::string pct(float v) { return fmt("%.0f%%", v * 100); }
 // Tonality. The firmware is kept on a plain chromatic keyboard (scale OFF, notes 53+key) so keys outside the scale stay playable; the app only
 // lights the keys that belong to the scale, shifts the notes by the octave and builds chords itself.
-constexpr int kScaleCount = 22, kScaleOff = 7;   // ids 0..6 are the firmware's tables, 7 = OFF (the firmware's value), 8.. only exist in the app
-const int kScaleN[kScaleCount] = {12, 7, 7, 7, 7, 7, 8, 0, 7, 7, 7, 5, 5, 6, 6, 8, 7, 7, 7, 7, 5, 7};
+constexpr int kScaleCount = 42, kScaleOff = 7;   // ids 0..6 are the firmware's tables, 7 = OFF (the firmware's value), 8.. only exist in the app
+const int kScaleN[kScaleCount] = {12, 7, 7, 7, 7, 7, 8, 0, 7, 7, 7, 5, 5, 6, 6, 8, 7, 7, 7, 7, 5, 7,
+                                 7, 7, 7, 7, 7, 7, 7, 7, 8, 5, 5, 5, 5, 6, 6, 7, 8, 7, 5, 5};
 const int kScaleStep[kScaleCount][12] = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, {0, 2, 4, 5, 7, 9, 10}, {0, 2, 4, 5, 7, 9, 11}, {0, 2, 3, 5, 7, 8, 10},
                                {0, 2, 3, 5, 7, 8, 11}, {0, 1, 3, 5, 7, 8, 10}, {0, 2, 3, 5, 7, 8, 10, 11}, {0},
                                {0, 2, 3, 5, 7, 9, 10}, {0, 2, 4, 6, 7, 9, 11}, {0, 1, 3, 5, 6, 8, 10}, {0, 2, 4, 7, 9}, {0, 3, 5, 7, 10}, {0, 3, 5, 6, 7, 10},
                                {0, 2, 4, 6, 8, 10}, {0, 1, 3, 4, 6, 7, 9, 10}, {0, 1, 4, 5, 7, 8, 10}, {0, 2, 4, 5, 7, 8, 11}, {0, 2, 3, 5, 7, 9, 11},
-                               {0, 2, 3, 6, 7, 8, 11}, {0, 2, 3, 7, 8}, {0, 1, 4, 5, 7, 8, 11}};
+                               {0, 2, 3, 6, 7, 8, 11}, {0, 2, 3, 7, 8}, {0, 1, 4, 5, 7, 8, 11},
+                               {0, 1, 3, 5, 7, 8, 11}, {0, 1, 3, 5, 7, 9, 11}, {0, 1, 4, 5, 6, 8, 11}, {0, 3, 4, 6, 7, 9, 10}, {0, 2, 4, 6, 7, 9, 10}, {0, 1, 3, 4, 6, 8, 10},
+                               {0, 2, 4, 6, 8, 9, 11}, {0, 2, 3, 6, 7, 9, 10}, {0, 1, 3, 4, 5, 6, 8, 10}, {0, 1, 5, 7, 10}, {0, 1, 5, 6, 10}, {0, 2, 5, 7, 9}, {0, 2, 5, 7, 10},
+                               {0, 2, 3, 4, 7, 9}, {0, 2, 4, 6, 9, 10}, {0, 1, 4, 6, 8, 10, 11}, {0, 2, 3, 5, 6, 8, 9, 11}, {0, 2, 3, 5, 6, 8, 10}, {0, 2, 4, 7, 9}, {0, 3, 5, 7, 9}};
 // the order of the SCALE knob: OFF last
-const int kScaleOrder[kScaleCount] = {0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 7};
+const int kScaleOrder[kScaleCount] = {0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 7};
 inline bool hasScale(int s) { return s != kScaleOff; }
 int snapToScale(int note, int scale, int root) {   // nearest note of the scale (ties go down)
     if (!hasScale(scale)) return note;
@@ -88,7 +92,7 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "Balls bounce in a drum and make notes: a random pattern maker.",                            // TOMB
     "OP-1 style effects: spring reverb, phone filter, punch.",                                   // FX3
     "Shape a sound with four macros, set its root key and slice a loop.",                        // SHAPE
-    "Drum pads of a kit: volume, pitch, pan and decay of each pad.",                             // PADS
+    "Pads to play with the fingers: the drums of a kit, or the notes of the scale (pad 1 is the root). Volume, pitch, pan and decay of each pad.",                             // PADS
     "Cut, reverse, normalize and fade the sample. Undo is at the top.",                          // SMPED
     "EQ and compressor of the selected track.",                                                  // TEQ
     "Sidechain: a track (like the kick) pushes another down. Master limiter.",                   // DUCK
@@ -98,6 +102,7 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "Track effects, part 2: drive, flanger, phaser, tremolo. Only this track.",                  // TFX2
     "Track effects, part 3: ring mod, auto-wah, stereo width, freeze. Only this track.",         // TFX3
     "Track effects, part 4: spring reverb, phone, punch, beat repeat. Only this track.",         // TFX4
+    "TAPE STOP of the top bar: run-down time, spin-up time, depth, HOLD or LATCH.",   // TSTOP
 };
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }
@@ -105,10 +110,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX", "TAPE"}; return n[m % kModes]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
+    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
     return p[m % kModes];
 }
-int SamplerApp::modePageCount(int m) { static const int n[kModes] = {8, 7, 5, 8, 4}; return n[m % kModes]; }
+int SamplerApp::modePageCount(int m) { static const int n[kModes] = {8, 8, 5, 8, 4}; return n[m % kModes]; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -140,6 +145,7 @@ SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
     for (int t = 0; t < kTracks; t++) { applyMix(t); applyPattern(t); }
     applyMasterFx(); applyTempo(); applyTomb(); applyMaster();
     if (ts_[0].entry >= 0) libCursor_ = ts_[0].entry;
+    defaultState_ = stateText();   // what NEW PROJECT goes back to
 }
 
 // ---- library ----
@@ -244,11 +250,25 @@ void SamplerApp::applyPad(int t, int pad) {
     s_.setPad(t, pad, x.padVol[pad] * 1.5f, (x.padPitch[pad] - 0.5f) * 24.f, 0.f, std::pow(4.f, (x.padDecay[pad] - 0.5f) * 2.f), x.padGroup[pad]);
 }
 void SamplerApp::applyPads(int t) { for (int i = 0; i < 16; i++) applyPad(t, i); }
+bool SamplerApp::padIsKit() const {
+    return ts_[track_].algo == 3 || synthKit();
+}
+bool SamplerApp::synthKit() const {
+    const int e = ts_[track_].entry;
+    return e >= 0 && e < (int)lib_.size() && lib_[(size_t)e].path.rfind("synth:", 0) == 0 && lib_[(size_t)e].kit;
+}
+int SamplerApp::padNote(int pad) const {
+    pad = std::min(15, std::max(0, pad));
+    int sc[12]; const int n = padIsKit() ? 0 : scaleSteps(scale_.scale, sc);
+    if (n == 0) return 60 + pad;
+    return std::min(127, std::max(0, 60 + scale_.root + 12 * scale_.octave + 12 * (pad / n) + sc[pad % n]));
+}
 std::string SamplerApp::padName(int pad) const {
     static const char* n[16] = {"KICK", "KICK 2", "SNARE", "SNARE 2", "CLAP", "RIM", "HAT", "OPEN HAT", "TOM LO", "TOM MID", "TOM HI", "COWBELL", "CLAVE", "SHAKER", "CRASH", "ZAP"};
-    const int e = ts_[track_].entry;
-    if (e >= 0 && e < (int)lib_.size() && lib_[(size_t)e].path.rfind("synth:", 0) == 0 && lib_[(size_t)e].kit) return n[pad & 15];
-    return std::to_string(pad + 1);
+    if (synthKit()) return n[pad & 15];
+    if (padIsKit()) return std::to_string(pad + 1);
+    const int note = padNote(pad);
+    return std::string(kNote[note % 12]) + std::to_string(note / 12 - 1);
 }
 void SamplerApp::applyMaster() {
     static const float ceil[7] = {0.f, -0.3f, -1.f, -2.f, -3.f, -4.5f, -6.f};
@@ -303,7 +323,7 @@ void SamplerApp::applyFx() {
 }
 void SamplerApp::applyMasterFx() {
     FxParams p; p.chorus = chorus_; p.flanger = flanger_; p.phaser = phaser_; p.comp = comp_; p.width = width_; p.filter = djFilter_; p.crush = crush_; p.repeat = repeat_; p.gate = gate_;
-    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStopHeld_ ? 1.f : tapeStop_; p.spring = spring_; p.springDamp = springDamp_; p.phone = phone_; p.punch = punch_; p.reverse = reverse_; p.freeze = freeze_;
+    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStopHeld_ ? tsDepth_ : tapeStop_; p.tsDown = 0.3f * std::pow(20.f, tsDown_); p.tsUp = 0.1f * std::pow(40.f, tsUp_); p.spring = spring_; p.springDamp = springDamp_; p.phone = phone_; p.punch = punch_; p.reverse = reverse_; p.freeze = freeze_;
     s_.setMasterFx(p);
 }
 void SamplerApp::applyTempo() {
@@ -334,7 +354,7 @@ void SamplerApp::setScale(int scale, int root, int octave, int mode) {
     sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true);
 }
 void SamplerApp::selectTrack(int t) {
-    t = std::min(kTracks - 1, std::max(0, t));
+    t = std::min(trackCount_ - 1, std::max(0, t));
     if (t == track_) return;
     if (st_.track_clip_rec[track_]) s_.clipRecord(track_, false);   // an overdub belongs to the track it was started on
     track_ = t;
@@ -462,7 +482,7 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
     }
     case P_LEN: {
         const double sec = st_.loopSamples > 0 ? st_.loopSamples / (double)SAMPLERATE : 0.0;
-        const float cur = st_.loopSamples > 0 ? cl((float)(std::log2(std::max(1.0, (double)st_.loopBars)) / 5.0)) : 0.f;
+        const float cur = st_.loopSamples > 0 ? cl((float)(std::log2(std::max(1.0, (double)st_.loopBars)) / 6.0)) : 0.f;
         Knob len; len.name = "LENGTH"; len.valid = true; len.isChoice = true;
         len.value = st_.loopSamples > 0 ? fmt("%.1fS", sec) : "NO LOOP"; len.norm = cur;
         len.step = [this](int d) { lenAction(d > 0); };
@@ -542,6 +562,12 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[1] = cont("AUTO WAH", &x.tfWah, [](float v) { return pct(v); }, [=] { applyTrackFx(t); });
         k[2] = cont("WIDTH", &x.tfWidth, [](float v) { return v < 0.01f ? std::string("MONO") : pct(v * 2.f); }, [=] { applyTrackFx(t); });
         k[3] = choice("FREEZE", &x.tfFreeze, {kOffOn[0], kOffOn[1]}, [=] { applyTrackFx(t); });
+        break;
+    case P_TSTOP:
+        k[0] = cont("STOP TIME", &tsDown_, [](float v) { return fmt("%.1f S", 0.3 * std::pow(20.0, v)); }, [=] { applyMasterFx(); });
+        k[1] = cont("SPIN-UP TIME", &tsUp_, [](float v) { return fmt("%.1f S", 0.1 * std::pow(40.0, v)); }, [=] { applyMasterFx(); });
+        k[2] = cont("DEPTH", &tsDepth_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
+        k[3] = choice("BUTTON", &tsLatch_, {"HOLD", "LATCH"}, [=] { tapeStopHeld_ = false; applyMasterFx(); });
         break;
     case P_TFX4:
         k[0] = cont("SPRING", &x.tfSpring, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
@@ -676,6 +702,20 @@ void SamplerApp::loopRecord() {
     if (!st_.playing) s_.play(true);
     s_.clipRecord(track_, !st_.track_clip_rec[track_]);
     say(st_.track_clip_rec[track_] ? "OVERDUB OFF" : "OVERDUB");
+}
+void SamplerApp::newLoop(int bars, bool sequencer) {
+    if (sequencer) {
+        const int b = std::min(16, std::max(1, bars));
+        seqSetBarCount(b); s_.seqClear(track_);
+        ts_[track_].seqState = 2; applyPattern(track_);
+        if (!st_.playing) s_.play(true);
+        gotoPage(P_SQ);
+        say(bars > 16 ? "A PATTERN HOLDS 16 BARS: PLAY KEYS" : "SEQUENCER LOOP, " + std::to_string(b) + (b == 1 ? " BAR: PLAY KEYS" : " BARS: PLAY KEYS"));
+        return;
+    }
+    if (loopAny_) { say("THE TAPE HAS A LOOP: CLEAR IT FIRST"); return; }
+    for (int i = 0; i < kTakeBarsN; i++) { takeBars_ = i; if (takeBars() == bars) break; }
+    applyTempo(); gotoPage(P_TAPEV); loopRecord();
 }
 void SamplerApp::seqBounce() {
     if (!st_.seqCount[track_]) { say("PATTERN IS EMPTY"); return; }
@@ -992,7 +1032,7 @@ void SamplerApp::draw(uint32_t now) {
     char b[96];
     const Knobs k = knobs();
     // track tags: the selected one is amber, a track with a sample is white, an empty one grey; the dot under it is the loop
-    for (int i = 0; i < kTracks; i++) {
+    for (int i = 0; i < kFmTracks; i++) {
         const bool sel = i == track_, used = hasSample(i);
         snprintf(b, sizeof b, "%d", i + 1);
         drawText(i, i * 30 + 9, 2, 2, sel ? BLACK : used ? PAPER : DIM, sel ? ACCENT : BLACK, b, 1);
@@ -1085,7 +1125,7 @@ void SamplerApp::hero(uint32_t now, const Knobs& k) {
         }
         column(56, x0 + 224, 4, (int)((0.5f + 0.5f * st_.lfoValue[track_]) * H), ACCENT, true);
     } else if (page_ == P_MIX) {   // eight strips: level (bar) and the track
-        for (int i = 0; i < kTracks; i++) column(i, x0 + i * 29, 24, (int)(std::min(1.f, st_.track_peak[i] * 1.5f) * H), i == track_ ? ACCENT : PAPER, true);
+        for (int i = 0; i < kFmTracks; i++) column(i, x0 + i * 29, 24, (int)(std::min(1.f, st_.track_peak[i] * 1.5f) * H), i == track_ ? ACCENT : PAPER, true);
     } else if (page_ == P_KEY) {   // the tonality in big letters
         char b[32]; snprintf(b, sizeof b, "%s %s", kNote[scale_.root], kScaleName[scale_.scale]);
         drawText(100, x0, y0 + 6, 4, ACCENT, BLACK, b, 9);

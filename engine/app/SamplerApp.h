@@ -21,9 +21,10 @@ struct SurfaceCell { std::string text; uint16_t fg = 0, bg = 0; bool known = fal
 class SamplerApp {
 public:
     using Send = std::function<void(const uint8_t*, size_t)>;
-    static constexpr int kTracks = 8;
+    static constexpr int kTracks = 16;   // the most; a session starts with 8 and ADD TRACK opens the next ones
+    static constexpr int kFmTracks = 8;  // the FM-1 screen and keys only show the first eight
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -74,8 +75,8 @@ public:
     void loopRecord();                            // REC: arm / end the first take, or toggle overdub once a loop exists
     // sequencer (also used by the phone's piano roll)
     // ---- the global strip: undo / redo over every track, the tempo, the tape ----
-    void globalUndo() { s_.globalUndo(); say("UNDO"); }
-    void globalRedo() { s_.globalRedo(); say("REDO"); }
+    void globalUndo() { if (st_.globalUndoN <= 0) { say("NOTHING TO UNDO"); return; } s_.globalUndo(); say("UNDO"); }
+    void globalRedo() { if (st_.globalRedoN <= 0) { say("NOTHING TO REDO"); return; } s_.globalRedo(); say("REDO"); }
     float tempoNow() const { return tempoPending_ > 0 ? tempoPending_ : st_.loopSamples > 0 ? (float)st_.bpm : tempo_; }
     bool tempoLocked() const { return st_.loopSamples > 0; }   // a loop is on the tape: a new tempo stretches it (about a second, one UNDO step)
     void tempoStep(int d);                                     // free tempo, or with a loop: after a short rest the loops are stretched to it
@@ -90,12 +91,21 @@ public:
     void seqBounce();                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
     void setSeqState(int s) { ts_[track_].seqState = s; applyPattern(track_); }   // 0 mute, 1 play, 2 rec, 3 step
     void seqToggleAt(int tick, int note, int len = 0);   // touch: add / remove a note (length in ticks, 0 = one step)
-    void tapeStopHold(bool on) { tapeStopHeld_ = on; applyMasterFx(); }   // live: while held the tape runs down, on release it spins up again
+    // live: HOLD = the tape runs down while the button is held and spins up on release; LATCH = a tap stops it, the next tap spins it up
+    void tapeStopHold(bool on) { if (tsLatch_ && !on) return; tapeStopHeld_ = tsLatch_ ? !tapeStopHeld_ : on; applyMasterFx(); }
+    bool tapeStopLatch() const { return tsLatch_ != 0; }
+    int trackCount() const { return trackCount_; }
+    bool addTrack() { if (trackCount_ >= kTracks) { say("ALL " + std::to_string(kTracks) + " TRACKS ARE OPEN"); return false; } trackCount_++; selectTrack(trackCount_ - 1); say("TRACK " + std::to_string(trackCount_) + " ADDED"); return true; }
+    bool metronome() const { return metro_ != 0; }
+    void toggleMetro() { metro_ = metro_ ? 0 : 1; applyTempo(); say(metro_ ? "METRONOME ON" : "METRONOME OFF"); }
     bool tapeStopHeld() const { return tapeStopHeld_; }
+    bool synthKit() const;
+    bool padIsKit() const;                                // a kit plays chromatic hits, any other sound plays the notes of the scale
+    int padNote(int pad) const;                           // the key of a pad: 60 + pad on a kit, else the pad-th note of the scale (pad 1 = the root), up from the octave
     std::string padName(int pad) const;                   // KICK, SNARE ... for the synth kits, the number for a sliced sample
     bool isKit(int t) const { return ts_[t].algo == 3; }
     void padHit(int pad, int vel, bool down) {   // a pad of the PADS page: the key 60 + pad with a velocity (records into a pattern that is recording)
-        const int note = 60 + std::min(15, std::max(0, pad));
+        const int note = padNote(pad);
         if (down) { heldNote_[note] = track_; s_.noteOn(track_, note, std::min(127, std::max(1, vel))); } else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
     }
     void selectPad(int pad) { ts_[track_].selPad = std::min(15, std::max(0, pad)); }
@@ -192,8 +202,8 @@ public:
     void setMidiSync(int m) { midiSync_ = std::min(2, std::max(0, m)); saveSettings(); }
     void midiExternal(const uint8_t* b, size_t n, uint64_t nowNs);
     // ---- the tape take and the phone speaker ----
-    static constexpr int kTakeBarsN = 6;
-    int takeBars() const { static const int v[kTakeBarsN] = {0, 1, 2, 4, 8, 16}; return v[takeBars_]; }   // 0: the take ends when you press REC again
+    static constexpr int kTakeBarsN = 8;
+    int takeBars() const { static const int v[kTakeBarsN] = {0, 1, 2, 4, 8, 16, 32, 64}; return v[takeBars_]; }   // 0: the take ends when you press REC again
     void cycleTakeBars() { takeBars_ = (takeBars_ + 1) % kTakeBarsN; applyTempo(); say(takeBars() ? "TAKE: " + std::to_string(takeBars()) + (takeBars() == 1 ? " BAR" : " BARS") + ", ENDS BY ITSELF" : "TAKE: ENDS WHEN YOU STOP IT"); }
     // ---- how the phone looks and is held: left-handed layout, accessibility mode (big text, high contrast), the first-run tour ----
     bool leftHanded() const { return leftHanded_; }
@@ -209,6 +219,10 @@ public:
     void tapTempo();                               // tap four times: the tempo (while there is no loop)
     // ---- projects: everything (settings, patterns, samples used, tape audio) in dataDir/projects/<name>/ ----
     std::vector<std::string> projectList() const;      // newest first
+    // NEW LOOP, OP-1 style: the first take of the tape ends by itself after that many bars (`sequencer` false), or a pattern of that many bars (at most 16) starts to record
+    // the keys you play and loops, to be edited on the SEQ page (REC on the tape then puts a pass of it on the tape)
+    void newLoop(int bars, bool sequencer);
+    bool newProject();                                 // keeps the current work (saved), then starts from the app's own defaults
     std::string newProjectName() const;                // "Project 1", "Project 2" ...
     bool saveProject(const std::string& name);         // the tape audio is written in the background
     bool loadProject(const std::string& name);
@@ -276,12 +290,14 @@ private:
     int loopSrc_ = 1;
     // master fx (FX 2, LIVE FX), tempo page, sequencer grid
     float chorus_ = 0.f, phaser_ = 0.f, comp_ = 0.f, width_ = 0.5f, djFilter_ = 0.5f, crush_ = 0.f;
+    float tsDown_ = 0.6f, tsUp_ = 0.78f, tsDepth_ = 1.f; int tsLatch_ = 0;   // 1.8 s down, 1.8 s up by default;   // tape stop: run-down time, spin-up time (0..1 -> seconds), how far it slows, hold or latch
     float flanger_ = 0.f, drive_ = 0.f, eqLow_ = 0.5f, eqMid_ = 0.5f, eqHigh_ = 0.5f, tremolo_ = 0.f, wah_ = 0.f, ringmod_ = 0.f, tapeStop_ = 0.f;
     std::vector<int> songChain_; bool songOn_ = false; void applySong(); uint32_t barsLocalAt_[kTracks] = {};
     int duckSrc_ = 0, limiter_ = 0; float duckRel_ = 0.3f;   // sidechain source (0 off, 1..8) and its release, master limiter (0 off, then ceilings)
     void applyMaster();
     int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;
     float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f;   // OP-1 FX page
+    int trackCount_ = kFmTracks; std::string defaultState_;
     int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, takeBars_ = 0, seqGrid_ = 0, liveGrid_ = 0, countIn_ = 0;
     float swing_ = 0.f, tSpin_ = 0.557f, tGrav_ = 0.55f, tMass_ = 0.72f, tShape_ = 0.6f;   // swing 0..1 = 50..75 %, tombola knobs   // the pattern plays on a 1/16 grid unless told otherwise
     float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;

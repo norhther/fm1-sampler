@@ -86,6 +86,7 @@ private:
     int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
     int clearAsk_ = 0; float tempoDragX_ = 0;   // the tape clear dialog: 0 closed, 1 the whole tape, 2 + n track n
     void tapeView(Rect r);
+    void newLoopSheet(); bool newLoopOpen_ = false, nlSeq_ = false; int nlBars_ = 2;   // NEW LOOP: tape or sequencer, how many bars
     // one dialog for what cannot be undone, the menu, the first-run tour, the mixer, the long-press menu of a track
     struct Confirm { std::string title, body, yes; std::function<void()> go; } confirm_;
     bool confirmOpen_ = false;

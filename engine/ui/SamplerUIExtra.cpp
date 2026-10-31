@@ -34,6 +34,33 @@ void SamplerUI::confirmSheet() {
     tap(y, [this] { auto go = confirm_.go; confirmOpen_ = false; if (go) go(); });
 }
 
+// ---- NEW LOOP: a take on the tape, OP-1 style, or a pattern that records and loops, as a sequencer ----
+void SamplerUI::newLoopSheet() {
+    rrect({0, 0, W_, H_}, 0, withAlpha(BG, 225));
+    tap({0, 0, W_, H_}, [this] { newLoopOpen_ = false; });
+    const Rect box{W_ * 0.16f, H_ * 0.12f, W_ * 0.68f, H_ * 0.76f};
+    rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 2);
+    tap(box, [] {});
+    text(box.x + 14, box.y + 22, T_TITLE, TEXT, "NEW LOOP ON TRACK " + std::to_string(app_.track() + 1), 0, true);
+    const float cw = (box.w - 36) / 2; float y = box.y + 44;
+    button({box.x + 12, y, cw, 40}, "TAPE (OP-1 STYLE)", !nlSeq_, [this] { nlSeq_ = false; }, 11);
+    button({box.x + 24 + cw, y, cw, 40}, "SEQUENCER", nlSeq_, [this] { nlSeq_ = true; }, 11);
+    y += 48;
+    text(box.x + 14, y + 8, T_CAPTION, DIM, fit(nlSeq_ ? "A PATTERN THAT RECORDS THE KEYS YOU PLAY AND LOOPS. EDIT IT ON THE SEQ PAGE." : "THE FIRST TAKE ON THE TAPE: PLAY, AND IT ENDS BY ITSELF. THEN OVERDUB WITH REC.", box.w - 28, T_CAPTION), 0, false);
+    y += 28;
+    static const int bars[7] = {1, 2, 4, 8, 16, 32, 64};
+    const float bw = (box.w - 24 - 6 * 4) / 7;
+    for (int i = 0; i < 7; i++) {
+        const bool off = nlSeq_ && bars[i] > 16;   // a pattern holds 16 bars
+        button({box.x + 12 + i * (bw + 4), y, bw, 40}, std::to_string(bars[i]) + (i == 0 ? " BAR" : ""), nlBars_ == i && !off, [this, i, off] { if (!off) nlBars_ = i; }, 10.5f);
+    }
+    y += 48;
+    text(box.x + 14, y + 8, T_CAPTION, DIM, fit(nlSeq_ ? "UP TO 16 BARS. IT STARTS RECORDING AT ONCE." : app_.loopExists() ? "THE TAPE ALREADY HAS A LOOP: CLEAR IT FIRST." : "UP TO 64 BARS, AT THE CURRENT TEMPO. REC STARTS IT.", box.w - 28, T_CAPTION), 0, false);
+    const float by = box.y + box.h - 58;
+    button({box.x + 12, by, cw, 46}, "CANCEL", false, [this] { newLoopOpen_ = false; }, 12);
+    button({box.x + 24 + cw, by, cw, 46}, "START", false, [this] { newLoopOpen_ = false; app_.newLoop(std::min(nlSeq_ ? 16 : 64, bars[nlBars_]), nlSeq_); }, 12, true);
+}
+
 // ---- a few seconds of UNDO after something that can be undone ----
 void SamplerUI::undoToast() {
     if (!undoMsgAt_) return;
@@ -62,8 +89,8 @@ void SamplerUI::menuSheet() {
         y += bh + 8;
     };
     row("SOUND GOES TO", {{"THE FM-1", !app_.phoneOut()}, {"PHONE SPEAKER", app_.phoneOut()}}, [this](int i) { app_.setPhoneOut(i == 1); });
-    row("SOUNDS", {{app_.audition() ? "AUDITION: ON" : "AUDITION: OFF", app_.audition()}, {"SAVE LOOP TO LIBRARY", false}, {"PROJECTS", false}},
-        [this](int i) { if (i == 0) app_.setAudition(!app_.audition()); else if (i == 1) { app_.loopSave(); } else { menuOpen_ = false; projOpen_ = true; projSel_ = -1; projScroll_ = 0; } });
+    row("SOUNDS", {{app_.audition() ? "AUDITION: ON" : "AUDITION: OFF", app_.audition()}, {"SAVE LOOP TO LIBRARY", false}, {"PROJECTS", false}, {"NEW PROJECT", false}},
+        [this](int i) { if (i == 0) app_.setAudition(!app_.audition()); else if (i == 1) { app_.loopSave(); } else if (i == 3) { if (app_.newProject()) menuOpen_ = false; } else { menuOpen_ = false; projOpen_ = true; projSel_ = -1; projScroll_ = 0; } });
     row("TIMING", {{"TAP TEMPO", false}, {"TAKE: " + (app_.takeBars() ? std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("FREE")), app_.takeBars() > 0}, {"QUANTIZE: " + app_.quantText(), app_.quantDiv() > 0}},
         [this](int i) { if (i == 0) app_.tapTempo(); else if (i == 1) app_.cycleTakeBars(); else app_.cycleQuant(); });
     row("OTHER GEAR", {{"MIDI SYNC: OFF", app_.midiSync() == 0}, {"FOLLOW CLOCK IN", app_.midiSync() == 1}, {"SEND CLOCK OUT", app_.midiSync() == 2}}, [this](int i) { app_.setMidiSync(i); });
@@ -112,12 +139,13 @@ void SamplerUI::flowStrip(Rect r) {
     }
 }
 
-// ---- the mixer: eight strips, tap = this track, drag the fader or the pan ----
+// ---- the mixer: eight strips (the next eight when the selected track is 9..16), tap = this track, drag the fader or the pan ----
 void SamplerUI::mixerView(Rect r) {
     flowStrip({r.x, r.y, r.w, 24});
     const float top = r.y + 30, h = r.h - 30, sw = (r.w - 7 * 4) / 8.f;
-    for (int t = 0; t < SamplerApp::kTracks; t++) {
-        const Rect c{r.x + t * (sw + 4), top, sw, h};
+    const int bank = app_.track() / 8;   // eight strips at a time: the bank of the selected track
+    for (int t = bank * 8; t < std::min(app_.trackCount(), bank * 8 + 8); t++) {
+        const Rect c{r.x + (t - bank * 8) * (sw + 4), top, sw, h};
         const auto& x = app_.state(t); const bool sel = t == app_.track();
         const bool audible = !x.mute && (!app_.anySolo() || x.solo);
         rrect(c, R_CARD, sel ? RAISED : SURFACE); stroke(c, R_CARD, sel ? ACCENT : OUTLINE, sel ? 2 : 1);

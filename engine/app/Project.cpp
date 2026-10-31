@@ -13,7 +13,7 @@
 
 namespace fs = std::filesystem;
 namespace {
-constexpr int kFormat = 2, kScaleCount = 22;   // (the number of scales in SamplerApp.cpp)
+constexpr int kFormat = 2, kScaleCount = 42;   // (the number of scales in SamplerApp.cpp)
 using KV = std::map<std::string, std::string>;
 
 // one description of the state serves both directions: saving writes the key, loading reads it (and clamps what it read)
@@ -62,12 +62,12 @@ std::string SamplerApp::stateText() {
     Io io{true, nullptr, {}}; int fmtv = kFormat, sr = s_.sampleRate();
     io.i("format", fmtv, 0, 99); io.i("rate", sr, 8000, 192000);
     float tempo = st_.loopSamples > 0 ? st_.bpm : tempo_; int bars = st_.loopSamples > 0 ? st_.loopBars : 0, track = track_;
-    io.f("tempo", tempo, 30, 300); io.i("loopBars", bars, 0, 32); io.i("track", track, 0, kTracks - 1);
+    io.f("tempo", tempo, 30, 300); io.i("loopBars", bars, 0, 64); io.i("track", track, 0, kTracks - 1); int tc = trackCount_; io.i("trackCount", tc, 8, kTracks);
     auto common = [&](Io& x) {
         x.f("reverbSize", reverbSize_); x.f("reverbDw", reverbDw_); x.f("delayTime", delayTime_); x.f("delayFb", delayFb_); x.i("loopSrc", loopSrc_, 0, 1);
         x.f("chorus", chorus_); x.f("phaser", phaser_); x.f("comp", comp_); x.f("width", width_); x.f("djFilter", djFilter_); x.f("crush", crush_);
         x.f("spring", spring_); x.f("springDamp", springDamp_); x.f("phone", phone_); x.f("punch", punch_); x.f("flanger", flanger_); x.f("drive", drive_); x.f("eqLow", eqLow_); x.f("eqMid", eqMid_); x.f("eqHigh", eqHigh_); x.f("tremolo", tremolo_); x.f("wah", wah_); x.f("ringmod", ringmod_); x.f("tapeStop", tapeStop_);
-        x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
+        x.f("tsDown", tsDown_); x.f("tsUp", tsUp_); x.f("tsDepth", tsDepth_); x.i("tsLatch", tsLatch_, 0, 1); x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
         x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2); x.i("takeBars", takeBars_, 0, kTakeBarsN - 1);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
         x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
@@ -106,12 +106,12 @@ std::string SamplerApp::stateText() {
 void SamplerApp::applyStateText(const std::string& text) {
     const KV kv = parse(text); Io io{false, &kv, {}};
     int fmtv = 0, sr = 0, bars = 0, track = 0; float tempo = tempo_;
-    io.i("format", fmtv, 0, 99); io.i("rate", sr, 8000, 192000); io.f("tempo", tempo, 30, 300); io.i("loopBars", bars, 0, 32); io.i("track", track, 0, kTracks - 1);
+    io.i("format", fmtv, 0, 99); io.i("rate", sr, 8000, 192000); io.f("tempo", tempo, 30, 300); io.i("loopBars", bars, 0, 64); io.i("track", track, 0, kTracks - 1); int tc = 8; io.i("trackCount", tc, 8, kTracks); trackCount_ = tc;
     auto common = [&](Io& x) {
         x.f("reverbSize", reverbSize_); x.f("reverbDw", reverbDw_); x.f("delayTime", delayTime_); x.f("delayFb", delayFb_); x.i("loopSrc", loopSrc_, 0, 1);
         x.f("chorus", chorus_); x.f("phaser", phaser_); x.f("comp", comp_); x.f("width", width_); x.f("djFilter", djFilter_); x.f("crush", crush_);
         x.f("spring", spring_); x.f("springDamp", springDamp_); x.f("phone", phone_); x.f("punch", punch_); x.f("flanger", flanger_); x.f("drive", drive_); x.f("eqLow", eqLow_); x.f("eqMid", eqMid_); x.f("eqHigh", eqHigh_); x.f("tremolo", tremolo_); x.f("wah", wah_); x.f("ringmod", ringmod_); x.f("tapeStop", tapeStop_);
-        x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
+        x.f("tsDown", tsDown_); x.f("tsUp", tsUp_); x.f("tsDepth", tsDepth_); x.i("tsLatch", tsLatch_, 0, 1); x.i("reverse", reverse_, 0, 1); x.i("freeze", freeze_, 0, 1); x.i("repeat", repeat_, 0, 8); x.i("gate", gate_, 0, 8);
         x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2); x.i("takeBars", takeBars_, 0, kTakeBarsN - 1);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
         x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
@@ -198,10 +198,26 @@ bool SamplerApp::loadProject(const std::string& rawName) {
     loading_ = true; loadedAt_ = nowMs_;
     applyStateText(text);
     float tempo = tempo_; int bars = 0;
-    { Io io{false, &kv, {}}; io.f("tempo", tempo, 30, 300); io.i("loopBars", bars, 0, 32); }
+    { Io io{false, &kv, {}}; io.f("tempo", tempo, 30, 300); io.i("loopBars", bars, 0, 64); }
     s_.loadTape(projectDir(name), bars > 0 ? bars : 4, tempo);
+    s_.resetUndo();   // nothing from before the load can be undone
     if (name != "autosave") project_ = name;
     tapeDirty_ = false;
+    return true;
+}
+// NEW: what is there is kept (a named project under its name, an unnamed session under a fresh one), then everything is back to how the app starts
+bool SamplerApp::newProject() {
+    if (loading_ || defaultState_.empty()) { say("WAIT, LOADING"); return false; }
+    bool used = st_.loopSamples > 0; for (int t = 0; t < kTracks; t++) used |= st_.seqCount[t] > 0;
+    std::string kept;
+    if (project_ != "autosave" && !project_.empty()) { kept = project_; saveProject(kept); }
+    else if (used) { kept = newProjectName(); saveProject(kept); }
+    s_.play(false);
+    applyStateText(defaultState_);
+    s_.clipClearAll(); s_.resetUndo();
+    project_ = "autosave"; tapeDirty_ = true; loading_ = true; loadedAt_ = nowMs_;   // the samples of the default sounds are loading again
+    track_ = 0; gotoPage(P_HOME);
+    say(kept.empty() ? "NEW PROJECT" : "NEW PROJECT, THE OLD ONE IS SAVED AS " + kept);
     return true;
 }
 void SamplerApp::deleteProject(const std::string& rawName) {

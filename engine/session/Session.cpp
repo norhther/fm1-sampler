@@ -44,7 +44,7 @@ struct Session::Impl {
         float speed = 1.f, semis = 0.f, rangeA = 0.f, rangeB = 1.f; uint32_t gen = 0;
         // the audio loop of this track
         std::vector<float> clip;     // interleaved stereo, loopSamples frames
-        bool clipHas = false, clipRec = false;
+        bool clipHas = false, clipRec = false, recWrote = false;   // recWrote: something but silence landed on the tape since the overdub began
         bool recPrevOk = false; double recPrevCp = 0; float recPrevL = 0, recPrevR = 0;   // tape-speed recording: previous write position and input
         std::atomic<float> peak{0.f};
         // note sequencer pattern (audio thread owns it)
@@ -270,7 +270,22 @@ struct Session::Impl {
     static constexpr int kGLog = 64;
     GEntry glog[kGLog], gredo[kGLog]; int glogN = 0, gredoN = 0; std::atomic<int> a_gUndoN{0}, a_gRedoN{0};
     static void gPush(GEntry* a, int& n, GEntry e) { if (n == kGLog) { std::move(a + 1, a + kGLog, a); n--; } a[n++] = e; }
-    void gPublish() { a_gUndoN = glogN; a_gRedoN = gredoN; }
+    // what the UNDO / REDO buttons show: only the steps that can really be taken (the tape keeps the last few snapshots, a sample edit needs its old sample)
+    int gValid(const GEntry* a, int n, size_t tapeSteps) const {
+        int c = 0;
+        for (int i = n - 1; i >= 0; i--) {
+            if (a[i].kind == 2) { if (tapeSteps == 0) continue; tapeSteps--; }
+            else if (a[i].kind == 1 && !tracks[(size_t)a[i].track]->prevOrig) continue;
+            c++;
+        }
+        return c;
+    }
+    void gPublish() { a_gUndoN = gValid(glog, glogN, tapeHist.size()); a_gRedoN = gValid(gredo, gredoN, tapeRedo.size()); }
+    void gReset() {   // a new or a loaded project: nothing before it can be undone
+        glogN = gredoN = 0; tapeHist.clear(); tapeRedo.clear();
+        for (auto& t : tracks) { t->histN = 0; t->redoN = 0; t->prevOrig.reset(); }
+        gPublish();
+    }
     void gRecord(int track, int kind) { gPush(glog, glogN, {track, kind}); gredoN = 0; tapeRedo.clear(); gPublish(); }
     // tape undo: the clips (and the loop length) as they were before a first take, an overdub, a pattern bounce or a change of the tempo
     struct TapeSnap { int track = -1; int32_t loop = 0; int bars = 1; float bpm = 120.f; std::vector<float> clip[kTracks]; };   // track -1: every clip and the loop length
@@ -283,11 +298,14 @@ struct Session::Impl {
     }
     void tapeApply(const TapeSnap& s) {
         for (int i = 0; i < kTracks; i++) if (s.track < 0 || s.track == i) { Track& t = *tracks[(size_t)i]; t.clipRec = false; t.recPrevOk = false; t.clip = s.clip[i]; t.clipHas = !t.clip.empty(); }
-        if (s.track < 0) { if (loopSamples != s.loop) { pos = 0; tapePos = 0; } loopSamples = s.loop; a_loop = s.loop; loopBars = s.bars; a_bars = s.bars; bpm = s.bpm; a_bpm = s.bpm; }
+        if (s.track < 0 || (loopSamples == 0 && s.loop > 0)) { if (loopSamples != s.loop) { pos = 0; tapePos = 0; } loopSamples = s.loop; a_loop = s.loop; loopBars = s.bars; a_bars = s.bars; bpm = s.bpm; a_bpm = s.bpm; }
         clearIfEmpty();
     }
     void tapePush(TapeSnap s) { const int tr = s.track; tapeHist.push_back(std::move(s)); if ((int)tapeHist.size() > kTapeHist) tapeHist.pop_front(); gRecord(tr, 2); }
     void tapeCheckpoint(int track) { tapePush(tapeSnapOf(track)); }
+    void dropTapeCheckpoint(int track) {   // an overdub that recorded only silence leaves no undo step
+        if (glogN > 0 && glog[glogN - 1].kind == 2 && glog[glogN - 1].track == track && !tapeHist.empty() && tapeHist.back().track == track) { glogN--; tapeHist.pop_back(); gPublish(); }
+    }
     void tapeCheckpointEmpty() { TapeSnap s; s.bpm = bpm; tapePush(std::move(s)); }   // a first take: before it there was no tape
     bool tapeUndoStep() {
         if (tapeHist.empty()) return false;
@@ -418,7 +436,7 @@ struct Session::Impl {
             tapeCheckpointEmpty();
             const double spb = samplesPerBeat();
             loopSamples = (int32_t)std::lround(t.seqBars * 4 * spb); a_loop = loopSamples;
-            loopBars = std::min(32, t.seqBars); a_bars = loopBars;
+            loopBars = std::min(64, t.seqBars); a_bars = loopBars;
             t.clip.assign((size_t)loopSamples * 2, 0.f); t.clipHas = true; t.clipRec = true;
             pos = 0; tapePos = 0; playing = true; bounceLeft = loopSamples; a_bounce = 2;
         } else { bounceArmed = true; playing = true; a_bounce = 1; }   // recording starts when the loop comes round
@@ -543,20 +561,21 @@ struct Session::Impl {
         tapeCheckpointEmpty();   // UNDO of a take: the tape is empty again
         if (takeBars > 0) {   // the user said how many bars: the tempo stays and the loop is exactly that long
             const double spb = samplesPerBeat();
-            loopSamples = (int32_t)std::lround(std::min(takeBars * 4 * spb, 180.0 * sr)); a_loop = loopSamples;
-            loopBars = takeBars; a_bars = takeBars;
+            const int fit = std::max(1, (int)(180.0 * sr / (4 * spb)));   // the tape holds 3 minutes: at a slow tempo fewer bars fit
+            loopBars = std::min(takeBars, fit); a_bars = loopBars;
+            loopSamples = (int32_t)std::lround(loopBars * 4 * spb); a_loop = loopSamples;
         } else if (takeQuant > 0) {   // the tempo stays: the take is cut or padded to whole beats / bars
             const double spb = samplesPerBeat(), unit = takeQuant == 1 ? spb : 4 * spb;
             const double units = std::max(1.0, std::round(len / unit));
             loopSamples = (int32_t)std::lround(std::min(units * unit, 180.0 * sr)); a_loop = loopSamples;
-            loopBars = std::min(32, std::max(1, (int)std::lround(loopSamples / (4 * spb)))); a_bars = loopBars;
+            loopBars = std::min(64, std::max(1, (int)std::lround(loopSamples / (4 * spb)))); a_bars = loopBars;
         } else {
             // bars and tempo that fit the take (shown to the user; the loop length is exactly the take)
             const double barSec = 240.0 / bpm;
-            int n = std::min(32, std::max(1, (int)std::lround(len / sr / barSec)));
+            int n = std::min(64, std::max(1, (int)std::lround(len / sr / barSec)));
             float nb = (float)(n * 240.0 * sr / len);
             while (nb > 300.f && n > 1) { n--; nb = (float)(n * 240.0 * sr / len); }
-            while (nb < 30.f && n < 32) { n++; nb = (float)(n * 240.0 * sr / len); }
+            while (nb < 30.f && n < 64) { n++; nb = (float)(n * 240.0 * sr / len); }
             bpm = std::min(300.f, std::max(30.f, nb)); a_bpm = bpm; loopBars = n; a_bars = n;
             loopSamples = (int32_t)std::lround(len); a_loop = loopSamples;
         }
@@ -791,6 +810,7 @@ struct Session::Impl {
                             c[2 * k1] += il * w * fr; c[2 * k1 + 1] += ir * w * fr;
                             t.recPrevOk = false;
                         }
+                        if (il != 0.f || ir != 0.f) t.recWrote = true;
                         t.clipHas = true;
                         if (bounceTrack == ti && bounceLeft > 0 && --bounceLeft == 0) bounceFinish();
                     } else t.recPrevOk = false;
@@ -941,7 +961,7 @@ void Session::setRetLevel(int w, float v) { d->post([=] { d->ret[w & 1] = clampf
 // ---- tempo, metronome, sequencer, master fx ----
 void Session::setTempo(float b) { d->post([=] { if (d->loopSamples == 0 && !d->freeRec) { d->bpm = clampf(b, 30.f, 300.f); d->a_bpm = d->bpm; } }); }
 void Session::setMetronome(bool on, float vol) { d->post([=] { d->metroOn = on; d->metroVol = clampf(vol, 0.f, 1.f); d->a_metro = on; }); }
-void Session::setTakeBars(int b) { d->post([=] { d->takeBars = std::min(32, std::max(0, b)); }); }
+void Session::setTakeBars(int b) { d->post([=] { d->takeBars = std::min(64, std::max(0, b)); }); }
 void Session::setTakeQuant(int m) { d->post([=] { d->takeQuant = std::min(2, std::max(0, m)); }); }
 void Session::seqSetState(int t, int s) { if (t >= 0 && t < kTracks) d->post([=] { d->seqState(t, s); }); }
 void Session::seqSetBars(int t, int b) { if (t >= 0 && t < kTracks) d->post([=] { d->seqBarsSet(t, b); }); }
@@ -973,6 +993,7 @@ void Session::setLoopTempo(float newBpm) {
         });
     });
 }
+void Session::resetUndo() { d->post([this] { d->gReset(); }); }
 void Session::globalUndo() {
     d->post([this] {
         while (d->glogN > 0) {
@@ -1067,12 +1088,12 @@ void Session::setMasterFx(const FxParams& p) { d->post([=] { d->mfx.set(p); }); 
 
 // ---- looper ----
 void Session::freeRecord(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { if (on) d->freeStart(t); else d->freeStop(); }); }
-void Session::clipRecord(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; if (on && !tr.clipRec) d->tapeCheckpoint(t); tr.clipRec = on; }); }
+void Session::clipRecord(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; if (on && !tr.clipRec) { d->tapeCheckpoint(t); tr.recWrote = false; } else if (!on && tr.clipRec && !tr.recWrote) d->dropTapeCheckpoint(t); tr.clipRec = on; }); }
 void Session::clipClear(int t) {
-    if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; tr.clipRec = false; tr.clip.clear(); tr.clipHas = false; d->clearIfEmpty(); });
+    if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; if (tr.clipHas) d->tapeCheckpoint(t); tr.clipRec = false; tr.clip.clear(); tr.clipHas = false; d->clearIfEmpty(); });
 }
 void Session::clipClearAll() {
-    d->post([this] { for (auto& t : d->tracks) { t->clipRec = false; t->clip.clear(); t->clipHas = false; } d->clearIfEmpty(); });
+    d->post([this] { bool any = false; for (auto& t : d->tracks) any |= t->clipHas; if (any) d->tapeCheckpoint(-1); for (auto& t : d->tracks) { t->clipRec = false; t->clip.clear(); t->clipHas = false; } d->clearIfEmpty(); });
 }
 void Session::loopDouble() {
     d->post([this] {
@@ -1083,7 +1104,7 @@ void Session::loopDouble() {
             else { t->clip.clear(); t->clipHas = false; }
         }
         d->loopSamples = L * 2; d->a_loop = d->loopSamples;
-        d->loopBars = std::min(32, d->loopBars * 2); d->a_bars = d->loopBars;
+        d->loopBars = std::min(64, d->loopBars * 2); d->a_bars = d->loopBars;
     });
 }
 void Session::loopHalve() {
@@ -1149,7 +1170,7 @@ void Session::loadTape(const std::string& dir, int bars, float bpm) {
             for (auto& t : d->tracks) { t->clipRec = false; t->clip.clear(); t->clipHas = false; }
             if (clips.empty() || frames == 0) { d->clearIfEmpty(); if (bpm > 0.f && d->loopSamples == 0) { d->bpm = std::min(300.f, std::max(30.f, bpm)); d->a_bpm = d->bpm; } d->busy--; return; }
             for (auto& c : clips) { c.second.resize(frames * 2, 0.f); d->tracks[(size_t)c.first]->clip = std::move(c.second); d->tracks[(size_t)c.first]->clipHas = true; }
-            d->loopSamples = (int32_t)frames; d->a_loop = d->loopSamples; d->loopBars = std::min(32, std::max(1, bars)); d->a_bars = d->loopBars;
+            d->loopSamples = (int32_t)frames; d->a_loop = d->loopSamples; d->loopBars = std::min(64, std::max(1, bars)); d->a_bars = d->loopBars;
             d->bpm = std::min(300.f, std::max(30.f, bpm)); d->a_bpm = d->bpm;
             d->pos = 0; d->tapePos = 0;
             d->busy--;

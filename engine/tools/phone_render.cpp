@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
     FILE* f = fopen(argc > 1 ? argv[1] : "ui_ops.json", "w");
     fprintf(f, "{\"W\":%g,\"H\":%g,\"screens\":[", W, H);
     int count = 0;
-    auto dump = [&](const char* name) {
+    auto dump = [&](const char* name) { fprintf(stderr, "dump %s\n", name);
         run(0.2); ui.frame(now);
         fprintf(f, "%s{\"name\":\"%s\",\"ops\":[", count++ ? "," : "", name);
         bool first = true;
@@ -74,6 +74,12 @@ int main(int argc, char** argv) {
     app.gotoPage(SamplerApp::P_PADS); ui.frame(now); dump("pads");
     app.gotoPage(SamplerApp::P_TAPEV);
     ui.frame(now); dump("tape_view2");
+    app.selectTrack(0); app.setScale(2, 0, 0, 0); app.gotoPage(SamplerApp::P_PADS); ui.frame(now); dump("pads_scale");
+    app.gotoPage(SamplerApp::P_TSTOP); ui.frame(now); dump("tapestop");
+    for (int i = 0; i < 5; i++) app.addTrack();
+    app.gotoPage(SamplerApp::P_TAPEV); ui.frame(now); dump("tracks13");
+    app.gotoPage(SamplerApp::P_MIX); ui.frame(now); dump("mixer_bank2");
+    app.selectTrack(0); app.gotoPage(SamplerApp::P_TAPEV); ui.frame(now); { float nx = 0, ny = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "NEW LOOP") { nx = o.f[0]; ny = o.f[1] - 4; } tapAt(nx, ny); } ui.frame(now); dump("newloop");
     fprintf(f, "]}\n"); fclose(f);
     return 0;
 }

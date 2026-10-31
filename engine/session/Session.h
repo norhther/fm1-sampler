@@ -14,7 +14,7 @@
 
 class Session {
 public:
-    static constexpr int kTracks = 8;
+    static constexpr int kTracks = 16;
     static constexpr int kVoiceMax = 32;
     static constexpr int kLoopBins = 400;
 
@@ -113,6 +113,7 @@ public:
     // ---- note sequencer (per track pattern on the beat clock, locked to the loop) ----
     void seqSetState(int track, int state);   // 0 mute, 1 play, 2 record (starts the transport; one track records at a time), 3 step entry (keys write at the cursor)
     void setLoopTempo(float bpm);             // a loop is on the tape: every clip is time-stretched to this tempo (the pitch stays; one undo step)
+    void resetUndo();                         // forget every undo / redo step (a new or a loaded project)
     void globalUndo();                        // takes back the last edit on any track (pattern or sample edit)
     void globalRedo();
     void seqUndo(int track);                  // takes back the last edit of the pattern (a recording pass, a step, a tap on the grid, clear, a change of the length); 16 steps

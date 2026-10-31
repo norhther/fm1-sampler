@@ -1033,6 +1033,7 @@ int main() {
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE, "FX again: live fx");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE2, "FX again: live fx 2");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX3, "FX again: the OP-1 effects");
+    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TSTOP, "FX again: the tape stop settings");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX again: back to sends");
     // the four modes: every page belongs to exactly one, the same button steps through its pages, a mode comes back to the page it was left on
     {
@@ -1082,9 +1083,9 @@ int main() {
         CHECK(SamplerApp::snapNote(61, 11, 0) == 60 && SamplerApp::snapNote(61, 7, 0) == 61, "snap: pentatonic moves, scale OFF keeps (%d, %d)", SamplerApp::snapNote(61, 11, 0), SamplerApp::snapNote(61, 7, 0));
         app.gotoPage(SamplerApp::P_KEY);
         CHECK(app.page() == SamplerApp::P_KEY, "GLO: key page");
-        auto k = app.knobs(); for (int i = 0; i < 30; i++) k = app.knobs(), k[0].step(1);
-        CHECK(app.scale().scale == 7 && std::string(app.knobs()[0].value) == "OFF", "the SCALE knob walks all 22 and OFF is last (%s)", app.knobs()[0].value.c_str());
-        k = app.knobs(); for (int i = 0; i < 40; i++) k = app.knobs(), k[0].step(-1);
+        auto k = app.knobs(); for (int i = 0; i < 60; i++) k = app.knobs(), k[0].step(1);
+        CHECK(app.scale().scale == 7 && std::string(app.knobs()[0].value) == "OFF", "the SCALE knob walks all 42 and OFF is last (%s)", app.knobs()[0].value.c_str());
+        k = app.knobs(); for (int i = 0; i < 60; i++) k = app.knobs(), k[0].step(-1);
         CHECK(app.scale().scale == 0, "...and back to CHROM"); app.setScale(2, 0, 0, 2);
         CHECK(app.scale().mode == 2 && std::string(app.knobs()[3].value) == "SNAP", "mode SNAP exists (%s)", app.knobs()[3].value.c_str());
         uint8_t sd[12] = {0xf0, 0x7d, 'D', 'A', 'W', 1, 0x41, 7, 0, 3, 0, 0xf7}; app.onSysex(sd, sizeof sd);
@@ -1378,6 +1379,70 @@ int main() {
         u.touch(0, x, y, 2100); u.touch(2, x, y, 2100); CHECK(a2.state(7).mute, "MUTE on a strip mutes its track (the last strip was hit)");
         a2.toggleMute(7);
         CHECK(std::string(SamplerApp::pageHelp(SamplerApp::P_TAPEV)).size() > 10 && std::string(SamplerApp::modeName(4)) == "TAPE", "every page has a sentence, the fifth tab is TAPE");
+    }
+    {   // scales, scale pads, METRO, tape stop settings, more tracks, 64-bar takes, a take without its instrument
+        for (int i = 0; i < 42; i++) {
+            int st[12]; const int n = SamplerApp::scaleSteps(i, st); bool ok = i == 7 ? n == 0 : n > 0 && st[0] == 0;
+            for (int k = 1; k < n; k++) ok &= st[k] > st[k - 1] && st[k] < 12;
+            if (!ok) CHECK(false, "scale %d (%s) has sane steps (%d notes)", i, SamplerApp::scaleName(i), n);
+        }
+        CHECK(std::string(SamplerApp::scaleName(41)) == "MIN6P" && std::string(SamplerApp::scaleName(22)) == "NEAPM", "42 scales, 20 of them new");
+        Session s5(sr); s5.setDataDir("/tmp/fm1sampler_t5"); s5.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples"); SamplerApp a5(s5, [](const uint8_t*, size_t) {}); a5.setTourDone(true);
+        std::vector<float> ob(512), ib(512, 0.f), heard; auto run5 = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(ob.begin(), ob.end(), 0.f); s5.process(ob.data(), ib.data(), 256); heard.insert(heard.end(), ob.begin(), ob.end()); std::this_thread::sleep_for(std::chrono::milliseconds(1)); a5.tick((uint32_t)(i + 1)); } };
+        run5(0.5);
+        a5.setScale(2, 0, 0, 0); CHECK(a5.padNote(0) == 60 && a5.padNote(1) == 62 && a5.padNote(6) == 71 && a5.padNote(7) == 72 && a5.padName(2) == "E4", "the pads play the major scale (%d %d %d %d, pad 3 = %s)", a5.padNote(0), a5.padNote(1), a5.padNote(6), a5.padNote(7), a5.padName(2).c_str());
+        a5.setScale(2, 2, 0, 0); CHECK(a5.padNote(0) == 62 && a5.padName(0) == "D4", "...from the root (%s)", a5.padName(0).c_str());
+        a5.setScale(7, 0, 0, 0); CHECK(a5.padNote(5) == 65, "scale OFF: chromatic pads");
+        a5.setScale(2, 0, 0, 0); a5.selectTrack(3); CHECK(a5.isKit(3) && a5.padNote(5) == 65, "a kit keeps its chromatic pads (%d)", a5.padNote(5)); a5.selectTrack(0);
+        CHECK(!a5.metronome(), "the metronome starts off"); a5.toggleMetro(); CHECK(a5.metronome(), "METRO turns it on from anywhere"); a5.toggleMetro();
+        for (int i = 0; i < 9; i++) if (a5.takeBars() != 64) a5.cycleTakeBars(); CHECK(a5.takeBars() == 64, "a take can be 64 bars");
+        a5.cycleTakeBars(); CHECK(a5.takeBars() == 0, "...and then FREE again");
+        CHECK(a5.trackCount() == 8, "eight tracks to start with"); CHECK(a5.addTrack() && a5.trackCount() == 9 && a5.track() == 8, "ADD TRACK opens the ninth and selects it");
+        for (int i = 0; i < 20; i++) a5.addTrack(); CHECK(a5.trackCount() == 16 && !a5.addTrack(), "...up to 16");
+        a5.selectTrack(15); CHECK(a5.track() == 15, "the last track can be selected"); a5.selectTrack(0);
+        { SamplerUI ui(a5); ui.setSize(860, 400, 0, 0); ui.frame(100); a5.gotoPage(SamplerApp::P_TAPEV); ui.frame(200); bool lane16 = false; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "16") lane16 = true; CHECK(lane16, "the tape view has a lane for the 16th track"); }
+        a5.gotoPage(SamplerApp::P_TSTOP); { auto k = a5.knobs(); int v = 0; for (auto& kn : k) v += kn.valid; CHECK(v == 4, "the TAPE STOP page has four knobs"); }
+        CHECK(!a5.tapeStopLatch(), "tape stop holds by default"); a5.tapeStopHold(true); CHECK(a5.tapeStopHeld(), "...down: it stops"); a5.tapeStopHold(false); CHECK(!a5.tapeStopHeld(), "...up: it spins up again");
+        { auto k = a5.knobs(); k[3].step(1); } CHECK(a5.tapeStopLatch(), "BUTTON = LATCH");
+        a5.tapeStopHold(true); a5.tapeStopHold(false); CHECK(a5.tapeStopHeld(), "latch: a tap stops it and releasing does not undo it"); a5.tapeStopHold(true); a5.tapeStopHold(false); CHECK(!a5.tapeStopHeld(), "...the next tap spins it up");
+        {   // the same sound dropped to 10 percent speed: a slower spin-up takes longer to come back
+            auto spin = [&](float upT) { MasterFx fx(sr); FxParams p; p.tsDown = 0.2f; p.tsUp = upT; p.tapeStop = 1.f; std::vector<float> x(2 * 256); long n = 0; double level = 0;
+                for (long b = 0; b < sr / 256 * 8; b++) { for (int i = 0; i < 256; i++) x[2 * i] = x[2 * i + 1] = 0.5f * std::sin(2 * M_PI * 220 * (n + i) / sr); n += 256; if (b == sr / 256 * 2) { p.tapeStop = 0.f; } fx.set(p); fx.process(x.data(), 256, 0.0, 0.0);
+                    if (b == sr / 256 * 2 + 60) { level = rms(x); } }
+                return level; };
+            CHECK(spin(0.2f) > spin(4.f) * 1.3, "a long spin-up is still quiet when a short one is already back (%.3f vs %.3f)", spin(0.2f), spin(4.f));
+        }
+        // the tape does not need the instrument: a one bar take, then the track is emptied
+        a5.selectTrack(0); run5(0.2);
+        for (int i = 0; i < 9; i++) if (a5.takeBars() != 1) a5.cycleTakeBars();
+        a5.loopRecord(); run5(0.2); a5.playNote(60, true); run5(0.5); a5.playNote(60, false); run5(3.0);
+        CHECK(a5.loopExists(), "a one bar take is on the tape");
+        s5.unloadSample(0); run5(0.3); heard.clear(); run5(1.8);
+        CHECK(a5.loopExists() && rms(heard) > 0.003, "the take plays on after the instrument is taken off the track (rms %.4f)", rms(heard));
+        {   // undo: only real steps, the clear of a track is one, and a new project forgets them
+            run5(0.3); const int n0 = a5.status().globalUndoN;
+            a5.loopRecord(); run5(0.5); a5.loopRecord(); run5(0.5);
+            CHECK(a5.status().globalUndoN == n0, "an overdub that recorded only silence leaves no undo step (%d -> %d)", n0, a5.status().globalUndoN);
+            a5.clearTrackLoop(0); run5(0.5); CHECK(!a5.loopExists(), "the track tape is cleared");
+            CHECK(a5.status().globalUndoN == n0 + 1, "...and that is one undo step (%d)", a5.status().globalUndoN);
+            a5.globalUndo(); run5(0.5); CHECK(a5.loopExists(), "UNDO brings the cleared tape back");
+            a5.globalRedo(); run5(0.5); CHECK(!a5.loopExists(), "REDO clears it again");
+            a5.globalUndo(); run5(0.5); CHECK(a5.loopExists(), "UNDO again: the tape is back (loop %d, undo %d)", (int)a5.status().loopSamples, a5.status().globalUndoN);
+            CHECK(a5.newProject(), "NEW PROJECT starts"); run5(1.0);
+            CHECK(!a5.loopExists() && a5.trackCount() == 8 && a5.status().globalUndoN == 0 && a5.status().globalRedoN == 0, "...the tape is empty, 8 tracks, nothing to undo (%d)", a5.status().globalUndoN);
+            CHECK(a5.currentProject() == "autosave", "...an unnamed session");
+            bool saved = false; for (auto& nme : a5.projectList()) saved |= nme.rfind("Project ", 0) == 0; CHECK(saved, "...and the old work was saved first");
+            a5.globalUndo(); run5(0.2); CHECK(!a5.loopExists(), "UNDO right after NEW changes nothing (%s)", a5.toast().c_str());
+            run5(2.0); a5.newLoop(2, false); run5(0.3); CHECK(a5.takeBars() == 2 && a5.status().freeArmed, "NEW LOOP, tape: a 2 bar take is armed");
+            a5.loopRecord(); run5(0.3); CHECK(!a5.status().freeArmed, "...and can be cancelled");
+            a5.newLoop(4, true); run5(0.5); CHECK(a5.state(a5.track()).seqState == 2 && a5.seqBarsOf(a5.track()) == 4 && a5.page() == SamplerApp::P_SQ, "NEW LOOP, sequencer: a 4 bar pattern records (state %d, %d bars)", a5.state(a5.track()).seqState, a5.seqBarsOf(a5.track()));
+            a5.newLoop(64, true); run5(0.3); CHECK(a5.seqBarsOf(a5.track()) == 16, "...a pattern holds 16 bars at most");
+            SamplerUI uil(a5); uil.setSize(860, 400, 0, 0); a5.gotoPage(SamplerApp::P_TAPEV); uil.frame(300);
+            auto atl = [&](const char* label, float& x, float& y) { x = y = -1; for (auto& o : uil.ops()) if (o.type == UiOp::TEXT && o.text == label) { x = o.f[0]; y = o.f[1] - 4; } return x >= 0; };
+            float lx, ly; CHECK(atl("NEW LOOP", lx, ly), "the tape view has a NEW LOOP button");
+            uil.touch(0, lx, ly, 400); uil.touch(2, lx, ly, 410); uil.frame(433); CHECK(atl("START", lx, ly) && atl("SEQUENCER", lx, ly), "...it opens the sheet with TAPE / SEQUENCER and START");
+            { float sx, sy; atl("START", sx, sy); uil.touch(0, sx, sy, 500); uil.touch(2, sx, sy, 510); uil.frame(533); CHECK(!atl("START", sx, sy), "...START closes it"); }
+        }
     }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;
