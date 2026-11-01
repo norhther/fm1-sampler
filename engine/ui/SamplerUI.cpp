@@ -287,13 +287,13 @@ void SamplerUI::sampleArea(Rect r) {
     const int t = app_.track();
     const auto ts = app_.state(t);
     const std::string lab = app_.sampleLabel(t);
-    text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - (app_.page() == SamplerApp::P_TAPEV ? 340 : 120), T_TITLE), 0, true);
-    text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);
+    text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - (app_.page() == SamplerApp::P_TAPEV ? 150 : 120), T_TITLE), 0, true);
+    if (app_.page() != SamplerApp::P_TAPEV) text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);   // (the tape page has its own lanes and a NEW LOOP button in that corner)
     if (app_.page() == SamplerApp::P_SQ) button({r.x + r.w - 214, r.y, 130, 26}, "FULL SCREEN", false, [this] { seqFull_ = true; }, 10.5f);
     if (app_.page() == SamplerApp::P_PADS) button({r.x + r.w - 214, r.y, 214, 26}, "QUANTIZE: " + app_.quantText(), app_.quantDiv() > 0, [this] { app_.cycleQuant(); }, 10.5f);   // the pads snap to the beat too
     if (app_.page() == SamplerApp::P_TEMPO) { button({r.x + r.w - 210, r.y, 110, 26}, "TAP TEMPO", false, [this] { app_.tapTempo(); }, 10.5f, true); }
     if (app_.page() == SamplerApp::P_MIX) { mixerView({r.x, r.y + 28, r.w, r.h - 28}); return; }
-    if (app_.page() == SamplerApp::P_TAPEV) { button({r.x + r.w - 214, r.y, 130, 26}, "NEW LOOP", false, [this] { newLoopOpen_ = true; }, 10.5f, true); tapeView({r.x, r.y + 28, r.w, r.h - 28}); return; }
+    if (app_.page() == SamplerApp::P_TAPEV) { button({r.x + r.w - 130, r.y, 130, 26}, "NEW LOOP", false, [this] { newLoopOpen_ = true; }, 10.5f, true); tapeView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_PADS) { padsView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_TOMB) { tombolaView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_SQ) { sequencerView({r.x, r.y + 28, r.w, r.h - 28}); return; }   // the sequencer page shows the pattern instead of the waveform, with all the room there is
@@ -408,11 +408,11 @@ void SamplerUI::tapeView(Rect r) {   // like the OP-1 tape: two reels and the he
     text(r.x + 108, cy - 4, 15, rec ? ACCENT : TEXT, num("%d:", m) + (sec < 10 ? "0" : "") + num("%.1f", sec), 0, true);
     text(r.x + 108, cy + 14, T_CAPTION, DIM, has ? std::to_string(bars) + (bars == 1 ? " BAR  " : " BARS  ") + num("%.0f BPM  ", st_.bpm) + num("%.1f S", lenS) : rec ? "RECORDING THE FIRST TAKE" : "THE TAPE IS EMPTY: PRESS REC", 0, true);
     { float bx = r.x + r.w - 104;   // right to left: CLEAR TAPE, SAVE LOOP, and before the first take how many bars it lasts
-      dangerButton({bx, r.y - 2, 104, 26}, "CLEAR TAPE", [this, has] { if (has) askTapeClear(-1); else app_.say("THE TAPE IS ALREADY EMPTY"); }, 9.5f); bx -= 76;
-      button({bx, r.y - 2, 72, 26}, "SAVE LOOP", false, [this] { app_.loopSave(); }, 9.f); bx -= 80;
-      if (!has && !rec && !st_.freeArmed) button({bx, r.y - 2, 76, 26}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
-      else if (has) button({bx, r.y - 2, 76, 26}, "UNDO TAKE", st_.globalUndoN > 0, [this] { app_.globalUndo(); }, 9.5f); }
-    const float labW = 34, ruler = 12, top = r.y + 48 + ruler, laneH = (r.y + r.h - top) / app_.trackCount(), wx = r.x + labW + 4, ww = r.w - labW - 4;
+      dangerButton({bx, r.y + 2, 104, 26}, "CLEAR TAPE", [this, has] { if (has) askTapeClear(-1); else app_.say("THE TAPE IS ALREADY EMPTY"); }, 9.5f); bx -= 76;
+      button({bx, r.y + 2, 72, 26}, "SAVE LOOP", false, [this] { app_.loopSave(); }, 9.f); bx -= 80;
+      if (!has && !rec && !st_.freeArmed) button({bx, r.y + 2, 76, 26}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
+      else if (has) button({bx, r.y + 2, 76, 26}, "UNDO TAKE", st_.globalUndoN > 0, [this] { app_.globalUndo(); }, 9.5f); }
+    const float labW = 34, ruler = 12, top = r.y + 48 + ruler, laneH = (r.y + r.h - top) / app_.trackCount(), xW = 38, wx = r.x + labW + 4, ww = r.w - labW - 4 - xW;   // xW: a gutter on the right for each lane's X, so it never covers the waveform
     if (has) for (int b = 0; b < bars; b += std::max(1, bars / 16)) text(wx + ww * b / bars + 3, top - ruler / 2 - 1, 8, DIM, std::to_string(b + 1), 0, false);   // the ruler: where each bar starts
     for (int t = 0; t < app_.trackCount(); t++) {
         const Rect lane{r.x, top + t * laneH, r.w, laneH - 2};
@@ -427,7 +427,7 @@ void SamplerUI::tapeView(Rect r) {   // like the OP-1 tape: two reels and the he
             for (int i = 0; i < n; i++) { const float v = std::min(1.f, pk[i] / mx); if (v > 0.02f) rrect({wx + i * bw, lcy - v * half, std::max(1.f, bw), std::max(1.f, 2 * v * half)}, 0, col); }
         } else text(wx + 4, lane.y + lane.h / 2, 9, DIM, "EMPTY", 0, false);
         hit(lane, [this, t](float, float) { app_.selectTrack(t); });   // tap a lane: that track
-        if (clip) button({lane.x + lane.w - 36, lane.y + 1, 34, std::min(lane.h - 2, 18.f)}, "X", false, [this, t] { askTapeClear(t); }, 9);
+        if (clip) button({lane.x + lane.w - xW + 2, lane.y + 1, xW - 4, std::min(lane.h - 2, 18.f)}, "X", false, [this, t] { askTapeClear(t); }, 9);
     }
     if (has) {   // bar lines and the playhead over all lanes
         for (int b = 0; b < bars; b++) line(wx + ww * b / bars, top, wx + ww * b / bars, top + laneH * app_.trackCount() - 2, OUTLINE, 1);
