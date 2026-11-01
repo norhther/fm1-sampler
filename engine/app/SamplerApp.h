@@ -236,6 +236,11 @@ public:
     void setScale(int scale, int root, int octave, int mode);
     static const char* scaleName(int i);
     static const char* noteName(int r);
+    std::vector<int> keyNotesOf(int raw) const { std::vector<int> v; if (raw >= 0 && raw < 128) for (int j = 0; j < keyCount_[raw]; j++) v.push_back(keyNotes_[raw][j]); return v; }   // the notes a held key is playing
+    int progOf() const;                                      // the progression the scale mode plays (0..5), -1 none
+    int chordDegree() const;                                 // the degree of the chord the progression plays now (scale mode 3..8)
+    int chordSnap(int note) const;
+    uint32_t progSeed_ = 7;
     static int scaleSteps(int scale, int* out12);              // semitone steps of a scale (0 for OFF), returns their count
     static int snapNote(int note, int scale, int root);        // nearest note of the scale (ties down)
     void playNote(int note, bool down);

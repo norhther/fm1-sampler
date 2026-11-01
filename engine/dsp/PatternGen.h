@@ -7,10 +7,11 @@
 #include <cmath>
 #include <cstdint>
 #include <vector>
+#include "Harmony.h"
 namespace patgen {
 struct Note { int tick, len, note, vel; };
-enum { TURING, EUCLID, MARKOV, MORPH, AWAKE, POLY, BOUNCE, ACID, COUNT };
-inline const char* name(int k) { static const char* n[COUNT] = {"TURING", "EUCLID", "MARKOV", "MORPH", "AWAKE", "POLY", "BOUNCE", "ACID"}; return n[((k % COUNT) + COUNT) % COUNT]; }
+enum { TURING, EUCLID, MARKOV, MORPH, AWAKE, POLY, BOUNCE, ACID, CHORDS, COUNT };
+inline const char* name(int k) { static const char* n[COUNT] = {"TURING", "EUCLID", "MARKOV", "MORPH", "AWAKE", "POLY", "BOUNCE", "ACID", "CHORDS"}; return n[((k % COUNT) + COUNT) % COUNT]; }
 
 struct Rng {
     uint32_t s;
@@ -92,6 +93,14 @@ inline std::vector<Note> generate(int kind, int steps, int st, const int* sc, in
                 const int o = r.chance(20) ? -1 : r.chance(25) ? 1 : 0, d = r.below(n);
                 const bool acc = r.chance(26), slide = r.chance(20);
                 put(i, d + o * n, acc ? 120 : 78, slide ? st + st / 4 : len);
+            }
+        } break;
+        case CHORDS: {   // a progression in the scale, a chord a bar: the triad held, with a stab on the offbeat of the second half
+            const int prog = r.below(harmony::COUNT), spb = std::max(1, 4 * 192 / st), seventh = r.chance(30); const bool stab = r.chance(60);
+            for (int i = 0; i < steps; i += spb) {
+                const int d = harmony::degreeAt(prog, i / spb, seed); int pc[4]; const int c = harmony::tones(sc, n, d, seventh, pc);
+                for (int k = 0; k < c; k++) { const int deg = d + 2 * k; if ((int)out.size() < 256) out.push_back({i * st, spb * st * 7 / 8, pitch(deg, sc, n, root, 48), 78 + k * 4}); }
+                if (stab && spb >= 8 && (int)out.size() < 250) for (int k = 0; k < std::min(c, 3); k++) out.push_back({(i + spb * 3 / 4) * st, st, pitch(d + 2 * k, sc, n, root, 60), 70});
             }
         } break;
     }

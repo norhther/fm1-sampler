@@ -71,7 +71,7 @@ std::string SamplerApp::stateText() {
         x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2); x.i("takeBars", takeBars_, 0, kTakeBarsN - 1);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
         x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
-        x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
+        x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 23);
     };
     common(io);
     { std::string sg; for (size_t i = 0; i < songChain_.size(); i++) sg += (i ? "," : "") + std::to_string(songChain_[i]); io.out << "song=" << sg << '\n'; int on = songOn_; io.i("songOn", on, 0, 1); }
@@ -115,7 +115,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         x.i("metro", metro_, 0, 1); x.i("takeQuant", takeQuant_, 0, 2); x.i("seqGrid", seqGrid_, 0, kGrids - 1); x.i("liveGrid", liveGrid_, 0, kGrids - 1); x.i("countIn", countIn_, 0, 2); x.i("takeBars", takeBars_, 0, kTakeBarsN - 1);
         x.f("swing", swing_); x.f("tSpin", tSpin_); x.f("tGrav", tGrav_); x.f("tMass", tMass_); x.f("tShape", tShape_); x.f("metroVol", metroVol_);
         x.i("duckSrc", duckSrc_, 0, 8); x.f("duckRel", duckRel_); x.i("limiter", limiter_, 0, 6); x.f("exciter", exciter_); x.f("lofi", lofi_); x.f("wobble", wobble_); x.f("loopSpeed", loopSpeed_);
-        x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 2);
+        x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 23);
     };
     common(io);
     tempo_ = tempo;

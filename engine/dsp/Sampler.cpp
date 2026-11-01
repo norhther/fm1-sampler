@@ -44,6 +44,10 @@ bool Sampler::loadSynth(int idx) {
         float l, r; sv.next(0.f, none, noEdit, l, r); const float e = env.next();
         mono[(size_t)i] = 0.5f * (l + r) * e; pk = std::max(pk, std::fabs(mono[(size_t)i]));
     }
+    for (int note : {36, 84}) {   // the same level at the bottom and the top of the keys: a patch whose low notes are much louder than C4 would clip there
+        SynthVoice lo; lo.start(p, note, 1.f, (float)sr_, 1, none); Adsr e2; e2.set(p.a, p.d, p.s, p.r, (float)sr_); e2.gateOn();
+        for (int i = 0; i < hold; i++) { float l, r; lo.next(0.f, none, noEdit, l, r); pk = std::max(pk, std::fabs(0.5f * (l + r) * e2.next())); }
+    }
     synthNorm_ = clampf(0.9f / pk, 0.05f, 8.f);
     peaks_.assign(512, 0.f);
     for (int b = 0; b < 512; b++) { const int a = (int)((long)total * b / 512), e = std::max(a + 1, (int)((long)total * (b + 1) / 512)); float m = 0.f; for (int i = a; i < e; i++) m = std::max(m, std::fabs(mono[(size_t)i])); peaks_[(size_t)b] = clampf(m * synthNorm_, 0.f, 1.f); }

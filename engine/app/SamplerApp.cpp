@@ -1,5 +1,6 @@
 #include "PatternGen.h"
 #include "SynthCategory.h"
+#include "Harmony.h"
 #include "SamplerApp.h"
 #include "../ui/Theme.h"
 #include <Common.h>
@@ -21,7 +22,11 @@ uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT
 const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5", "CHOP", "PRINT FX", "FX 5", "TRACK FX 6", "FX 6", "TRACK FX 7"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM", "NEAPM", "NEAPJ", "PERSN", "HUNGJ", "LYDDM", "ALTRD", "LYDAG", "DOR#4", "SPAN8", "INSEN", "IWATO", "YO", "EGYPT", "MAJBL", "PROMT", "ENIGM", "OCTWH", "LOCR2", "MAJ6P", "MIN6P"};
-const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
+// 0 KEY, 1 CHORD (the triad of the scale on the key), 2 SNAP, 3..8 the keys snap to the chord of that progression playing now (QNT CHRD),
+// 9 CHORD7, 10 OPEN (the triad spread 1-5-3), 11..17 a chord shape on the key whatever the scale, 18..23 a key plays the whole chord of that progression's bar
+const char* kModeName[] = {"KEY", "CHORD", "SNAP", "POP", "50S", "2-5-1", "CIRCLE", "TWO", "WALK", "CHORD7", "OPEN", "MAJ", "MIN", "DOM7", "MAJ7", "MIN7", "SUS4", "POW",
+                           "POP CH", "50S CH", "2-5-1 CH", "CIRC CH", "TWO CH", "WALK CH"};
+constexpr int kModeCount = 24;
 const char* kRepeat[] = {"OFF", "1/4", "1/8", "1/16", "1/32"};
 const char* kOffOn[] = {"OFF", "ON"};
 const char* kGate[] = {"OFF", "1/8", "1/16", "1/32"};
@@ -365,7 +370,7 @@ void SamplerApp::setVolume(int t, float v) { ts_[t].vol = cl(v); applyMix(t); }
 void SamplerApp::setPan01(int t, float v) { ts_[t].pan = cl(v); applyMix(t); }
 void SamplerApp::setSend(int t, int w, float v) { (w ? ts_[t].sendD : ts_[t].sendR) = cl(v); applyMix(t); }
 void SamplerApp::setScale(int scale, int root, int octave, int mode) {
-    scale_ = {std::min(kScaleCount - 1, std::max(0, scale)), ((root % 12) + 12) % 12, std::min(3, std::max(-3, octave)), std::min(2, std::max(0, mode))};
+    scale_ = {std::min(kScaleCount - 1, std::max(0, scale)), ((root % 12) + 12) % 12, std::min(3, std::max(-3, octave)), std::min(kModeCount - 1, std::max(0, mode))};
     sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true);
 }
 void SamplerApp::selectTrack(int t) {
@@ -497,7 +502,7 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[0] = mk("SCALE", names, pos, [=](int v) { setScale(kScaleOrder[v], sc.root, sc.octave, sc.mode); });
         k[1] = mk("ROOT", std::vector<std::string>(kNote, kNote + 12), sc.root, [=](int v) { setScale(sc.scale, v, sc.octave, sc.mode); });
         k[2] = mk("OCTAVE", {"-3", "-2", "-1", "0", "+1", "+2", "+3"}, sc.octave + 3, [=](int v) { setScale(sc.scale, sc.root, v - 3, sc.mode); });
-        k[3] = mk("MODE", {"KEY", "CHORD", "SNAP"}, sc.mode, [=](int v) { setScale(sc.scale, sc.root, sc.octave, v); });
+        k[3] = mk("MODE", std::vector<std::string>(kModeName, kModeName + kModeCount), sc.mode, [=](int v) { setScale(sc.scale, sc.root, sc.octave, v); });
         break;
     }
     case P_SAVE: {
@@ -909,6 +914,13 @@ std::string SamplerApp::loopText() const {
     if (!loopAny_) return "LOOP EMPTY";
     return fmt("LOOP %.0fBPM ", st_.bpm) + std::to_string(st_.loopBars) + (st_.loopBars == 1 ? " BAR" : " BARS");
 }
+int SamplerApp::progOf() const { return scale_.mode >= 3 && scale_.mode <= 8 ? scale_.mode - 3 : scale_.mode >= 18 ? scale_.mode - 18 : -1; }
+int SamplerApp::chordDegree() const { return harmony::degreeAt(std::max(0, progOf()), (int)std::floor(st_.beatPos / 4.0), progSeed_); }
+int SamplerApp::chordSnap(int note) const {   // QNT CHRD: the nearest tone of the chord of this bar (a bar is four beats)
+    int sc[12]; const int n = scaleSteps(scale_.scale, sc); if (n < 1) return note;
+    int pcs[4]; const int c = harmony::tones(sc, n, chordDegree(), false, pcs);
+    return harmony::snapToChord(note, pcs, c, scale_.root);
+}
 void SamplerApp::keyEvent(int raw, bool down) {   // a key of the FM-1 (chromatic note 53+key): octave shift, chords in CHORD mode
     if (raw < 0 || raw > 127) return;
     if (down && keyGesture(raw)) return;
@@ -916,10 +928,22 @@ void SamplerApp::keyEvent(int raw, bool down) {   // a key of the FM-1 (chromati
         if (keyCount_[raw]) keyEvent(raw, false);
         const bool kit = ts_[track_].algo == 3;   // KIT: every key is a pad (note 60 + key), whatever the tonality or octave
         const int base = kit ? 60 + (raw - 53) : raw + 12 * scale_.octave;
-        int cnt = 0; keyNotes_[raw][cnt++] = kit || scale_.mode != 2 ? base : snapToScale(base, scale_.scale, scale_.root);
-        if (!kit && hasScale(scale_.scale) && scale_.mode == 1) {
-            const int rel = base - scale_.root, o = rel >= 0 ? rel / 12 : -((-rel + 11) / 12), i = scaleIndex(rel - 12 * o, scale_.scale);
-            if (i >= 0) { const int d = o * kScaleN[scale_.scale] + i; keyNotes_[raw][cnt++] = scale_.root + degreeNote(d + 2, scale_.scale, 0); keyNotes_[raw][cnt++] = scale_.root + degreeNote(d + 4, scale_.scale, 0); }
+        int cnt = 0; const int md = kit ? 0 : scale_.mode, sc = hasScale(scale_.scale) ? scale_.scale : -1;
+        keyNotes_[raw][cnt++] = md == 0 || md == 1 || md == 9 || md == 10 || (md >= 11 && md <= 17) ? base : (md == 2 || sc < 0) ? snapToScale(base, scale_.scale, scale_.root) : chordSnap(base);
+        auto add = [&](int n) { if (cnt < 8 && n >= 0 && n <= 127) keyNotes_[raw][cnt++] = n; };
+        if (md == 1 || md == 9 || md == 10) {   // the scale's triad (CHORD), its seventh chord (CHORD7) or the triad spread 1-5-3 (OPEN) on the key; a key outside the scale takes the scale note below it
+            const int sb = sc >= 0 ? snapToScale(base, scale_.scale, scale_.root) : base; keyNotes_[raw][0] = sb;
+            const int rel = sb - scale_.root, o = rel >= 0 ? rel / 12 : -((-rel + 11) / 12), i = sc >= 0 ? scaleIndex(rel - 12 * o, scale_.scale) : -1;
+            if (i >= 0) {
+                const int d = o * kScaleN[scale_.scale] + i, third = scale_.root + degreeNote(d + 2, scale_.scale, 0), fifth = scale_.root + degreeNote(d + 4, scale_.scale, 0);
+                if (md == 10) { keyNotes_[raw][0] = sb; add(fifth); add(third + 12); } else { add(third); add(fifth); if (md == 9) add(scale_.root + degreeNote(d + 6, scale_.scale, 0)); }
+            }
+        } else if (md >= 11 && md <= 17) {   // a shape on the key, whatever the scale
+            static const int shape[7][4] = {{0, 4, 7, -1}, {0, 3, 7, -1}, {0, 4, 7, 10}, {0, 4, 7, 11}, {0, 3, 7, 10}, {0, 5, 7, -1}, {0, 7, 12, -1}};
+            for (int k = 1; k < 4 && shape[md - 11][k] >= 0; k++) add(base + shape[md - 11][k]);
+        } else if (md >= 18 && sc >= 0) {   // the whole chord of this bar, the key's note its lowest: neighbouring keys play inversions of the same chord, and some chords repeat
+            int ss[12]; const int n = scaleSteps(scale_.scale, ss); int pcs[4]; const int c = harmony::tones(ss, n, chordDegree(), false, pcs);
+            int got = 1; for (int step = 1; step <= 12 && got < c; step++) { const int pc = (((keyNotes_[raw][0] + step - scale_.root) % 12) + 12) % 12; for (int k = 0; k < c; k++) if (pcs[k] == pc) { add(keyNotes_[raw][0] + step); got++; break; } }
         }
         keyCount_[raw] = cnt;
         for (int j = 0; j < cnt; j++) playNote(keyNotes_[raw][j], true);
@@ -1458,7 +1482,7 @@ void SamplerApp::hero(uint32_t now, const Knobs& k) {
     } else if (page_ == P_KEY) {   // the tonality in big letters
         char b[32]; snprintf(b, sizeof b, "%s %s", kNote[scale_.root], kScaleName[scale_.scale]);
         drawText(100, x0, y0 + 6, 4, ACCENT, BLACK, b, 9);
-        snprintf(b, sizeof b, "OCT %+d  %s", scale_.octave, kModeName[scale_.mode]);
+        if (scale_.mode >= 3) snprintf(b, sizeof b, "%s %s", kModeName[scale_.mode], harmony::numeral(chordDegree())); else snprintf(b, sizeof b, "OCT %+d  %s", scale_.octave, kModeName[scale_.mode]);
         drawText(101, x0, y0 + 42, 2, PAPER, BLACK, b, 18);
     } else if (page_ == P_SQ) {   // the pattern: one column per slice, height = pitch, the playhead in amber
         Session::SeqView v[kSeqMax]; const int cnt = s_.seqNotes(track_, v, kSeqMax);

@@ -12,6 +12,7 @@
 #include <Arp.h>
 #include <PatternGen.h>
 #include <SynthCategory.h>
+#include <Harmony.h>
 #include <Tombola.h>
 #include <Midi.h>
 #include <Theme.h>
@@ -224,6 +225,46 @@ static void testPatternGen() {
     }
     int acc = 0, slides = 0; for (uint32_t seed = 1; seed <= 20; seed++) for (const auto& g : patgen::generate(patgen::ACID, steps, st, sc, 7, 0, seed)) { acc += g.vel >= 120; slides += g.len > st; }
     CHECK(acc > 20 && slides > 20, "ACID writes accents and slides (%d, %d)", acc, slides);
+}
+// harmony: progressions in the scale, and keys that snap to the chord playing now (any key sounds right)
+static void testHarmony() {
+    const int major[7] = {0, 2, 4, 5, 7, 9, 11};
+    int pc[4]; harmony::tones(major, 7, harmony::degreeAt(harmony::POP, 0, 1), false, pc);
+    CHECK(pc[0] == 0 && pc[1] == 4 && pc[2] == 7, "POP bar 1 is C major (%d %d %d)", pc[0], pc[1], pc[2]);
+    harmony::tones(major, 7, harmony::degreeAt(harmony::POP, 1, 1), false, pc);
+    CHECK(pc[0] == 7 && pc[1] == 11 && pc[2] == 2, "POP bar 2 is G major (%d %d %d)", pc[0], pc[1], pc[2]);
+    harmony::tones(major, 7, harmony::degreeAt(harmony::POP, 2, 1), false, pc);
+    CHECK(pc[0] == 9 && pc[1] == 0 && pc[2] == 4, "POP bar 3 is A minor (%d %d %d)", pc[0], pc[1], pc[2]);
+    int off = 0;
+    for (int bar = 0; bar < 8; bar++) for (int prog = 0; prog < harmony::COUNT; prog++) {
+        const int d = harmony::degreeAt(prog, bar, 5); int t[4]; const int c = harmony::tones(major, 7, d, true, t);
+        for (int note = 36; note < 96; note++) { const int s = harmony::snapToChord(note, t, c, 2); const int rel = ((s - 2) % 12 + 12) % 12; bool in = false; for (int k = 0; k < c; k++) in |= t[k] == rel; if (!in || std::abs(s - note) > 3) off++; }
+    }
+    CHECK(off == 0, "every key snaps to a tone of the chord within a third (%d off)", off);
+    Session sess(SAMPLERATE); SamplerApp a(sess, [](const uint8_t*, size_t) {});
+    a.setScale(2, 0, 0, 3);   // C major, POP
+    std::vector<int> heard; a.selectTrack(0);
+    int bad = 0; for (int raw = 53; raw < 53 + 24; raw++) { a.keyEvent(raw, true); const int n = a.chordSnap(raw); const int d = a.chordDegree(); int t[4]; const int c = harmony::tones(major, 7, d, false, t); bool in = false; for (int k = 0; k < c; k++) in |= t[k] == n % 12; if (!in) bad++; a.keyEvent(raw, false); }
+    CHECK(bad == 0, "QNT CHRD: the keys land on the chord of the bar (%d off)", bad);
+    a.setScale(2, 0, 0, 1);   // C major, CHORD: a key plays the triad of the scale on it, a key outside the scale the triad of the note below
+    auto notes = [&](int raw) { a.keyEvent(raw, true); auto v = a.keyNotesOf(raw); std::sort(v.begin(), v.end()); return v; };
+    const auto c4 = notes(60), d4 = notes(62), b4 = notes(71), cs = notes(61);
+    CHECK(c4 == std::vector<int>({60, 64, 67}) && d4 == std::vector<int>({62, 65, 69}) && b4 == std::vector<int>({71, 74, 77}), "CHORD mode: C, D and B play C major, D minor and B diminished (%zu notes)", c4.size());
+    CHECK(cs == std::vector<int>({60, 64, 67}), "CHORD mode: a key outside the scale (C#) plays the chord of the note below (%zu notes)", cs.size());
+    for (int raw : {60, 62, 71, 61}) a.keyEvent(raw, false);
+    CHECK(a.keyNotesOf(60).empty() && a.keyNotesOf(61).empty(), "CHORD mode: letting go of a key releases the whole chord");
+    a.setScale(2, 0, 0, 9);   // CHORD7: C major seventh on C
+    CHECK(notes(60) == std::vector<int>({60, 64, 67, 71}), "CHORD7: C plays Cmaj7"); a.keyEvent(60, false);
+    a.setScale(2, 0, 0, 10);  // OPEN: 1-5-3
+    CHECK(notes(60) == std::vector<int>({60, 67, 76}), "OPEN: C plays C G E (spread)"); a.keyEvent(60, false);
+    const int want[7][4] = {{60, 64, 67, 0}, {60, 63, 67, 0}, {60, 64, 67, 70}, {60, 64, 67, 71}, {60, 63, 67, 70}, {60, 65, 67, 0}, {60, 67, 72, 0}};
+    int shapeBad = 0; for (int m = 11; m <= 17; m++) { a.setScale(2, 0, 0, m); const auto v = notes(60); const int c = want[m - 11][3] ? 4 : 3; if ((int)v.size() != c || !std::equal(v.begin(), v.end(), want[m - 11])) shapeBad++; a.keyEvent(60, false); }
+    CHECK(shapeBad == 0, "chord shapes MAJ MIN DOM7 MAJ7 MIN7 SUS4 POW on a key (%d wrong)", shapeBad);
+    a.setScale(2, 0, 0, 18);  // POP CH: the chord of bar 1 (C major), every key plays it with its own note lowest
+    int prog = 0, inChord = 0; for (int raw = 53; raw < 53 + 24; raw++) { a.keyEvent(raw, true); const auto v = a.keyNotesOf(raw); prog++; bool ok = v.size() == 3; for (int n : v) ok &= (n % 12 == 0 || n % 12 == 4 || n % 12 == 7); inChord += ok; a.keyEvent(raw, false); }
+    CHECK(inChord == prog, "POP CH: every key plays the chord of the bar (%d of %d)", inChord, prog);
+    a.setScale(2, 0, 0, 0);
+    CHECK(notes(60).size() == 1, "KEY mode plays one note"); a.keyEvent(60, false);
 }
 // a pad's pitch and decay change the hit on every kit engine (it did nothing on the X0X and DRUM-X kits)
 static void testPadPitch() {
@@ -1106,6 +1147,7 @@ int main() {
     testPatternGen();
     testSynthCategories();
     testPadPitch();
+    testHarmony();
     testOp1();
     testLock();
     testMidiIn();
