@@ -12,8 +12,9 @@
 #include "AnimalSynth.h"
 #include "Fm6Voice.h"
 #include "FelVoice.h"
+#include "DrumXVoice.h"
 
-inline bool isKitEngine(int e) { return e == 3 || e == 8 || e == 10 || e == 11; }   // 16 pads, note 60 + pad
+inline bool isKitEngine(int e) { return e == 3 || e == 8 || e == 10 || e == 11 || e == 18; }   // 16 pads, note 60 + pad
 struct SynthPatch {
     const char* name;
     int w1; float l1;                       // oscillator 1: wave (0 sine 1 saw 2 square 3 triangle), level
@@ -77,6 +78,10 @@ static inline SynthPatch felPatch(const char* name, int engine, const float (&k)
 static inline SynthPatch x0xKitPatch(const char* name, int engine, float gain = 1.f) {   // X0X's circuit-modelled kits: engine 10 = TR-808, 16 pads (note 60 + pad)
     SynthPatch p = dungeonOsc(name, 0, gain, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.001f, 0.01f, 1.f, 0.03f);
     p.engine = engine; p.kit = 20; return p;
+}
+static inline SynthPatch drumxKitPatch(const char* name, int kit) {   // JIANT's DRUM-X kits: engine 18, pads 0..7 its eight sounds (patch A), 8..15 the same on patch B
+    SynthPatch p = dungeonOsc(name, 0, 0.9f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.001f, 0.01f, 1.f, 0.03f);
+    p.engine = 18; p.kit = kit; return p;
 }
 static inline SynthPatch sloopKitPatch(const char* name, int kit) {   // SLOOP's synthesised kits: engine 8, 16 pads like the other kits (note 60 + pad)
     SynthPatch p = dungeonOsc(name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.001f, 0.01f, 1.f, 0.03f);
@@ -318,6 +323,16 @@ static const SynthPatch kSynths[] = {
     felPatch("Noise Rain", 17, {1, 30, 88, 80, 64, 105, 40, 0}, {10, 90, 127, 70}),
     felPatch("Noise Arcade", 17, {2, 0, 127, 0, 127, 112, 0, 84}, {0, 80, 0, 50}),
     felPatch("Noise Metal", 17, {3, 0, 100, 40, 100, 32, 0, 0}, {0, 75, 40, 60}),
+    // ---- JIANT's DRUM-X: nine synthesised kits (16 pads: the eight sounds on patch A, then on patch B) ----
+    drumxKitPatch("DX Drum-X Kit", 1),
+    drumxKitPatch("DX 909 Club Kit", 2),
+    drumxKitPatch("DX 808 Boom Kit", 3),
+    drumxKitPatch("DX Lofi Dust Kit", 4),
+    drumxKitPatch("DX Industrial Kit", 5),
+    drumxKitPatch("DX Acoustic Kit", 6),
+    drumxKitPatch("DX Dub Roots Kit", 7),
+    drumxKitPatch("DX Techno Raw Kit", 8),
+    drumxKitPatch("DX Breaks Kit", 9),
 };
 constexpr int kSynthCount = (int)(sizeof(kSynths) / sizeof(kSynths[0]));
 
@@ -360,6 +375,7 @@ public:
         for (int k = 0; k < 5; k++) ph_[k] = rnd();   // free-running phases: a stack does not sound like one thick oscillator
         if (p.engine == 8) { pad_ = ((note - 60) % 16 + 16) % 16; if (p.kit >= 1 && p.kit <= kSloopKitCount) dk_.start(kSloopKits[p.kit - 1].s[pad_], kSloopKits[p.kit - 1].crush, vel, sr, padPitch, seed); else done_ = true; return; }
         if (p.engine == 3) { pad_ = ((note - 60) % 16 + 16) % 16; padPitch_ = padPitch; padDecay_ = padDecay; return; }
+        if (p.engine == 18) { pad_ = ((note - 60) % 16 + 16) % 16; dx_.start(p.kit, pad_ & 7, pad_ >= 8 ? 1.f : 0.f, 0.f, sr, seed); return; }
         if (p.engine >= 14 && p.engine <= 17) { fl_.start(p.engine - 14, p.x, sr, seed); return; }
         if (p.engine == 13) { fm_.start((int)p.x[0], (int)note_, vel, sr); return; }
         if (p.engine == 12) { an_.start(p.x, vel, sr, seed); return; }
@@ -390,6 +406,7 @@ public:
         t_ += dt1;
         float oL = 0.f, oR = 0.f;
         if (p.engine == 3) drum(m, oL, oR);
+        else if (p.engine == 18) { oL = oR = dx_.next() * p.l1; if (!dx_.alive() && t_ > 0.02f) done_ = true; }
         else if (p.engine >= 14 && p.engine <= 17) { oL = oR = fl_.next(freq(bend), m.tone, m.motion) * p.l1; }
         else if (p.engine == 13) { oL = oR = fm_.next(bend) * p.l1; if (t_ > 0.1f && fm_.done()) done_ = true; }
         else if (p.engine == 12) { oL = oR = an_.next(freq(bend), m.tone) * p.l1; }
@@ -567,7 +584,7 @@ private:
     }
     const SynthPatch* p_ = nullptr;
     float sr_ = 44100.f, note_ = 60.f, vel_ = 1.f, t_ = 0.f, ph_[5] = {}, ph2_ = 0.f, phs_ = 0.f, phm_ = 0.f;
-    dungeon::Voice dv_; SloopDrumVoice dk_; Acid303 ac_; Drum808Voice d8_; Tr909Voice d9_; animal::Voice an_; fm6::Voice fm_; fel::Voice fl_;
+    dungeon::Voice dv_; SloopDrumVoice dk_; Acid303 ac_; Drum808Voice d8_; Tr909Voice d9_; animal::Voice an_; fm6::Voice fm_; fel::Voice fl_; DrumXVoice dx_;
     Lowpass lp_; int coefCount_ = 0; uint32_t rng_ = 1; bool done_ = false;
     float dl_[kDl] = {}; int plW_ = 0; float plN_ = 100.f, plDec_ = 0.99f, plZ_ = 0.f;
     float mph_[6] = {}, mAmp_[6] = {}, mf_ = 261.6f;                            // modal

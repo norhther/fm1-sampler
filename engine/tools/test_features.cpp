@@ -255,7 +255,7 @@ static void testSynths() {
     {   // SLOOP's synthesised kits: every pad of every kit sounds, stays finite and under the ceiling, and ends by itself
         int dead = 0, hot = 0, bad3 = 0, hang = 0, total = 0; float maxPk = 0.f;
         for (int i = 0; i < kSynthCount; i++) {
-            if (kSynths[i].engine != 8 && kSynths[i].engine != 10 && kSynths[i].engine != 11) continue;   // SLOOP's kits and X0X's 808
+            if (kSynths[i].engine != 8 && kSynths[i].engine != 10 && kSynths[i].engine != 11 && kSynths[i].engine != 18) continue;   // SLOOP's kits, X0X's 808 and 909, JIANT's DRUM-X
             for (int pad = 0; pad < 16; pad++) {
                 Sampler sm(sr); sm.load("synth:" + std::to_string(i)); std::vector<float> o((size_t)sr * 3 * 2, 0.f); sm.noteOn(60 + pad, 100);
                 for (int b = 0; b < sr * 3 / 256; b++) sm.render(o.data() + (size_t)b * 512, 256);
@@ -263,8 +263,8 @@ static void testSynths() {
                 total++; if (!finite(o)) bad3++; if (pk < 0.02f) dead++; if (pk > 1.2f) hot++; if (tail > 0.01f) hang++; maxPk = std::max(maxPk, pk);
             }
         }
-        CHECK(total == 34 * 16, "SLOOP kits and the X0X 808: %d pads", total);
-        CHECK(bad3 == 0 && dead == 0 && hot == 0 && hang == 0, "every SLOOP / X0X pad sounds, is finite, under the ceiling and ends (bad %d, silent %d, loud %d, hanging %d, peak %.2f)", bad3, dead, hot, hang, maxPk);
+        CHECK(total == 43 * 16, "SLOOP, X0X and DRUM-X kits: %d pads", total);
+        CHECK(bad3 == 0 && dead == 0 && hot == 0 && hang == 0, "every SLOOP / X0X / DRUM-X pad sounds, is finite, under the ceiling and ends (bad %d, silent %d, loud %d, hanging %d, peak %.2f)", bad3, dead, hot, hang, maxPk);
     }
     {   // GHOULBOX engines: the organ and the voice follow the note, the gurdy's drone does not, the voice has its vowel's formants
         auto idxOf = [&](const char* nm) { for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == nm) return i; return -1; };
