@@ -256,7 +256,7 @@ void SamplerUI::chopDelete() {
     chopS_ = s; chopE_ = e; chopHold_ = 8; chopSel_ = std::min(sel, (int)s.size() - 1);
     app_.setSliceStarts(s, e);
 }
-// KIT: every chop has its own START and END handle; drag one and nothing else moves. Tap a handle to select its chop, tap empty wave to cut a new chop
+// KIT: every chop has its own START and END handle; drag one and nothing else moves. The chop to edit is picked with the numbered buttons, never from the wave. Tap empty wave to cut a new chop
 void SamplerUI::chopEdit(Rect w) {
     const float wx = w.x + 2, ww = w.w - 4;
     hit({w.x, w.y + 22, w.w, w.h - 22},
@@ -279,7 +279,6 @@ void SamplerUI::chopEdit(Rect w) {
             if (chopEndH_) chopE_[(size_t)chopIdx_] = std::max(v, chopS_[(size_t)chopIdx_] + 0.002f); else chopS_[(size_t)chopIdx_] = std::min(v, chopE_[(size_t)chopIdx_] - 0.002f); },
         [this]() {
             if (chopIdx_ < 0) return;
-            chopSel_ = chopIdx_;
             if (chopMoved_ || chopNew_) { chopHold_ = 8; app_.setSliceStarts(chopS_, chopE_); }
             chopIdx_ = -1; });
 }
@@ -668,7 +667,7 @@ void SamplerUI::chopFullScreen() {
     const float w0 = (W_ - 2 * m - gap * (items.size() - 1)) / items.size();
     for (size_t i = 0; i < items.size(); i++) button({m + i * (w0 + gap), m, w0, h}, items[i].first, on[i], items[i].second, 9.5f, i == 0);
     const auto sl = app_.session().slicesOf(t); const int n = std::min<int>(16, (int)sl.size());
-    text(m, m + h + 12, T_CAPTION, DIM, "DRAG A START OR END FLAG: ONLY THAT EDGE MOVES. TAP A FLAG: SELECT. TAP THE WAVE: NEW CHOP. THE NUMBERS BELOW PLAY EACH CHOP.", 0, false);
+    text(m, m + h + 12, T_CAPTION, DIM, "DRAG A START OR END FLAG: ONLY THAT EDGE MOVES. TAP THE WAVE: NEW CHOP. THE NUMBERS BELOW PLAY AND SELECT EACH CHOP.", 0, false);
     text(W_ - m, m + h + 12, T_CAPTION, ACCENT, ts.chopFull ? "A KEY PLAYS THE WHOLE CHOP" : "THE CHOP SOUNDS WHILE THE KEY IS HELD", 2, true);
     const float padH = 44, wy = m + h + 22;
     const Rect w{m, wy, W_ - 2 * m, H_ - m - padH - 8 - wy};

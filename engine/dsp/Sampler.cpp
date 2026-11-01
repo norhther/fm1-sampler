@@ -146,6 +146,7 @@ void Sampler::noteOn(int note, int vel) {
     const float dscale = pad ? std::max(0.05f, pad->decay) : 1.f;
     v.env.set(atk_, dec_ * dscale, sus_, rel_ * dscale, (float)sr_);
     if (mode_ == ONESHOT) v.env.set(0.002f, 0.01f, 1.f, 0.01f, (float)sr_);
+    if (mode_ == KIT && synth_ < 0) v.env.set(0.001f, 0.01f, 1.f, 0.02f, (float)sr_);   // a chop is a hit: no soft attack, and it stops 20 ms after the key goes up (the pad envelope is for melodic sounds)
     v.env.gateOn();
     if (mode_ == PAUL) { v.paulIdx = vi; paul_[(size_t)vi]->start(v.buf->d.data(), v.buf->frames, v.ws, v.we, 8.f); }
 }
