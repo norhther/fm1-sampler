@@ -19,6 +19,7 @@ struct FxParams {
     float spring = 0, springDamp = 0.5f, phone = 0, punch = 0;   // OP-1 style: spring reverb (mix, damping), phone (telephone band + grit), punch (transients + saturation)
     float fold = 0, autopan = 0, vinyl = 0, vowel = 0;   // FX 4: wave folder, auto pan (one turn every two beats), vinyl (crackle, hiss, dull top), vowel (a formant filter that walks A E I O U)
     float comb = 0, combTune = 0.5f, octave = 0.5f, fshift = 0.5f;   // FX 5: comb filter (amount, the note it rings at), octaver (centre off, left an octave down, right an octave up), frequency shifter (centre off)
+    float scratch = 0, scratchNoise = 0.5f; int scratchRate = 2, scratchStyle = 0;   // FX 6: a turntable scratch: how hard (0 = off), how loud the needle is, the cycle (2 beats .. 1/8 beat), the style (baby, scribble, run-back, transformer)
     int repeat = 0;    // 0 off, 1..4: 1/4, 1/8, 1/16, 1/32 of a beat... (note values: 1/4 = one beat)
     int reverse = 0;   // the same slices, played backwards
     int gate = 0;      // 0 off, 1..3: 1/8, 1/16, 1/32
@@ -27,7 +28,7 @@ struct FxParams {
 
 class MasterFx {
 public:
-    explicit MasterFx(int sr, float ringSeconds = 2.f) : sr_(sr), rep_((size_t)(sr * ringSeconds) * 2, 0.f), ts_((size_t)(sr * ringSeconds) * 2, 0.f) {
+    explicit MasterFx(int sr, float ringSeconds = 2.f) : sr_(sr), rep_((size_t)(sr * ringSeconds) * 2, 0.f), ts_((size_t)(sr * ringSeconds) * 2, 0.f), sc_((size_t)(sr * 0.8f) * 2, 0.f) {
         for (auto& b : cho_) b.assign(4096, 0.f);
         for (auto& b : fla_) b.assign(2048, 0.f);
     }
@@ -43,7 +44,7 @@ public:
             || p_.drive > 0.004f || eqOn() || p_.tremolo > 0.004f || p_.wah > 0.004f || p_.ringmod > 0.004f
             || std::fabs(p_.filter - 0.5f) >= 0.02f || p_.crush >= 0.005f || p_.tapeStop > 0.02f || tsOn_ || p_.spring > 0.004f || p_.phone > 0.004f || p_.punch > 0.004f
             || p_.fold > 0.004f || p_.autopan > 0.004f || p_.vinyl > 0.004f || p_.vowel > 0.004f
-            || p_.comb > 0.004f || std::fabs(p_.octave - 0.5f) >= 0.02f || std::fabs(p_.fshift - 0.5f) >= 0.02f
+            || p_.scratch > 0.004f || p_.comb > 0.004f || std::fabs(p_.octave - 0.5f) >= 0.02f || std::fabs(p_.fshift - 0.5f) >= 0.02f
             || p_.repeat > 0 || p_.reverse > 0 || p_.gate > 0 || p_.freeze > 0;
     }
     void feedOnly(const float* x, int n) {
@@ -55,6 +56,7 @@ public:
             rep_[2 * repW_] = x[2 * i]; rep_[2 * repW_ + 1] = x[2 * i + 1]; if (++repW_ >= N) repW_ = 0;
             ts_[2 * tsW_] = x[2 * i]; ts_[2 * tsW_ + 1] = x[2 * i + 1]; if (++tsW_ >= N) tsW_ = 0;
         }
+        scFeed(x, n);
     }
 
     // x: interleaved stereo, in place. beat0: the beat position at the first sample, beatsPerSample: the tempo.
@@ -82,6 +84,7 @@ public:
         gate(x, n, beat0, beatsPerSample);
         slicer(x, n, beatsPerSample > 0 ? 1.0 / beatsPerSample : sr_ * 0.5);
         spring(x, n);
+        scratch(x, n, beat0, beatsPerSample);
         tapeStop(x, n);
         comp(x, n);
     }
@@ -169,6 +172,44 @@ private:
                 const float w = aD * co + b * si;
                 x[2 * i + c] = v + (w - v) * mix;
             }
+        }
+    }
+    // ---- scratch: a turntable. The last 0.8 s of sound sit on a record; the platter is pushed and pulled in time with the beat and the sound is read from where
+    // the needle is: forward and back like a DJ's hand. Styles: baby (a smooth push and pull), scribble (a fast, small shake), run-back (a quick rewind, a slow catch-up), transformer (the
+    // fader chops the sound in eighths while the record hardly moves). The record always catches up with the live sound by the end of each cycle, so nothing drifts.
+    void scFeed(const float* x, int n) {
+        const size_t N = sc_.size() / 2;
+        for (int i = 0; i < n; i++) { sc_[2 * scW_] = x[2 * i]; sc_[2 * scW_ + 1] = x[2 * i + 1]; if (++scW_ >= N) scW_ = 0; }
+    }
+    void scratch(float* x, int n, double beat0, double bps) {
+        if (p_.scratch < 0.004f || bps <= 0.0) { scOn_ = false; scFeed(x, n); return; }
+        if (!scOn_) { scOn_ = true; scD_ = 0.f; scG_ = 1.f; }
+        const size_t N = sc_.size() / 2;
+        static const float cyc[5] = {2.f, 1.f, 0.5f, 0.25f, 0.125f};
+        const int style = std::min(3, std::max(0, p_.scratchStyle));
+        const float cycBeats = cyc[std::min(4, std::max(0, p_.scratchRate))], depth = clampf(p_.scratch, 0.f, 1.f), s = 0.4f + 2.6f * depth, mix = std::min(1.f, depth * 4.f);
+        const double T = (double)cycBeats / bps;                        // samples in one cycle
+        const float maxD = (float)N - 4.f, needle = clampf(p_.scratchNoise, 0.f, 1.f) * 0.08f, gA = 1.f - std::exp(-1.f / (0.0015f * (float)sr_));
+        for (int i = 0; i < n; i++) {
+            const float dl = x[2 * i], dr = x[2 * i + 1];
+            sc_[2 * scW_] = dl; sc_[2 * scW_ + 1] = dr; const size_t newest = scW_; if (++scW_ >= N) scW_ = 0;
+            const double cyclePos = (beat0 + i * bps) / (double)cycBeats; const float u = (float)(cyclePos - std::floor(cyclePos));
+            float d = 0.f, gate = 1.f;
+            if (style == 0) d = std::min(maxD * 0.5f, s * (float)T / (2.f * kPi)) * (1.f - std::cos(2.f * kPi * u));                       // baby
+            else if (style == 1) { const float u4 = u * 4.f - std::floor(u * 4.f); d = std::min(maxD * 0.5f, 0.6f * s * (float)T / (8.f * kPi)) * (1.f - std::cos(2.f * kPi * u4)); }   // scribble
+            else if (style == 2) { const float f1 = 0.22f, P = std::min(maxD, (1.f + 0.7f * s) * f1 * (float)T); d = u < f1 ? u / f1 * P : P * (1.f - (u - f1) / (1.f - f1)); }   // run-back
+            else {   // transformer: the record sways a little, the fader opens and shuts eight times a cycle
+                d = std::min(maxD * 0.5f, 0.12f * s * (float)T / (2.f * kPi)) * (1.f - std::cos(2.f * kPi * u));
+                const float u8 = u * 8.f - std::floor(u * 8.f); gate = u8 < 0.8f - 0.55f * depth ? 1.f : 0.f;
+            }
+            d = clampf(d, 0.f, maxD);
+            float rp = (float)newest - d; while (rp < 0.f) rp += (float)N;
+            const size_t i0 = (size_t)rp % N, i1 = (i0 + 1) % N; const float fr = rp - std::floor(rp);
+            const float nu = 1.f - (d - scD_); scD_ = d;                  // how fast the record runs against the needle now (1 = normal, 0 = stopped, negative = backwards)
+            scG_ += gA * (gate - scG_);
+            scRng_ = scRng_ * 1664525u + 1013904223u; const float nz = ((scRng_ >> 8) / 16777216.f - 0.5f) * 2.f * needle * std::min(1.f, std::fabs(nu - 1.f) * 0.5f);
+            const float wl = (sc_[2 * i0] * (1.f - fr) + sc_[2 * i1] * fr) * scG_ + nz, wr = (sc_[2 * i0 + 1] * (1.f - fr) + sc_[2 * i1 + 1] * fr) * scG_ + nz;
+            x[2 * i] = dl + (wl - dl) * mix; x[2 * i + 1] = dr + (wr - dr) * mix;
         }
     }
     // ---- vinyl: the top is dulled, a little hiss, and pops and crackle at random (more of them as the knob goes up) ----
@@ -484,6 +525,7 @@ private:
     float cmpEnv_ = 0;
     float puF_ = 0, puS_ = 0;                                                   // punch: fast and slow level
     float phHp_[2] = {0, 0}, phHp2_[2] = {0, 0}, phLp1_[2] = {0, 0}, phLp2_[2] = {0, 0}, phHold_[2] = {0, 0}; int phCnt_ = 0; uint32_t phRng_ = 5;   // phone
+    std::vector<float> sc_; size_t scW_ = 0; float scD_ = 0.f, scG_ = 1.f; bool scOn_ = false; uint32_t scRng_ = 5;   // scratch: the record and the platter
     static constexpr int kCombLen = 2048, kOctLen = 8192;
     std::array<float, kCombLen> cb_[2]; int cbW_ = 0; float cbZ_[2] = {0, 0}; bool cbOn_ = false;   // comb
     std::array<float, kOctLen> oc_[2]; int ocW_ = 0; float ocPh_ = 0.f; bool ocOn_ = false;   // octaver

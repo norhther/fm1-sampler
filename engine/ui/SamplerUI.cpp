@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD", "CHOP", "PRINT", "COMB", "TRK COMB"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD", "CHOP", "PRINT", "COMB", "TRK COMB", "SCRATCH", "TRK SCR"};   // by Page
 static_assert(sizeof(kPageTab) / sizeof(*kPageTab) == SamplerApp::kPages, "one tab label for every page");
 }  // namespace
 
@@ -866,7 +866,8 @@ void SamplerUI::pagePanel(Rect r) {
         const bool lit = app_.fxFocusKnob(app_.page()) == i;   // the effect picked in the FX browser
         if (lit) { const Rect row{r.x - 4, y - 2, r.w + 8, rh - 2}; rrect(row, R_CONTROL, theme::withAlpha(ACCENT, 40)); stroke(row, R_CONTROL, ACCENT, 2); }
         text(r.x, y + 8, T_CAPTION, lit ? ACCENT : DIM, p.name, 0, true);
-        text(r.x + r.w, y + 10, T_VALUE, p.isChoice ? ACCENT : TEXT, p.value, 2, true);
+        const bool echo = !p.segs.empty() && p.segCur >= 0 && p.segCur < (int)p.segs.size() && p.segs[(size_t)p.segCur] == p.value;   // the lit button already says it
+        if (!echo) text(r.x + r.w, y + 10, T_VALUE, p.isChoice ? ACCENT : TEXT, p.value, 2, true);
         Rect s{r.x, y + std::min(26.f, rh - 16), r.w, 14};   // never below its own row (the last row of a short panel spilled out)
         if (!p.segs.empty()) {   // a few choices: one button each, the lit one is the state
             const float sw = (r.w - 4.f * (p.segs.size() - 1)) / p.segs.size();

@@ -223,7 +223,7 @@ static void testSynths() {
         if (!finite(o)) bad++;
         if (r0 < 0.01) { silent++; printf("quiet synth %s rms %.4f\n", kSynths[i].name, r0); }
         if (pk > 1.2f) { loud++; printf("loud synth %s peak %.2f\n", kSynths[i].name, pk); }
-        if (tail > 0.01 && kSynths[i].r < 1.5f && kSynths[i].engine != 3) { stuck++; printf("synth %s still sounds after release rms %.4f\n", kSynths[i].name, tail); }
+        if (tail > 0.01 && kSynths[i].r < 1.5f && !isKitEngine(kSynths[i].engine)) { stuck++; printf("synth %s still sounds after release rms %.4f\n", kSynths[i].name, tail); }
         if (sm.peaks().size() != 512) bad++;
     }
     CHECK(kSynthCount >= 20, "%d built-in synths", kSynthCount);
@@ -242,7 +242,7 @@ static void testSynths() {
         CHECK(bad2 == 0, "plucked strings stay finite on the lowest notes (%d bad)", bad2);
     }
     // pitch: the plucked string and the FM patch follow the note (zero crossing count of a low note)
-    for (const char* nm : {"PD Bass", "PD Lead", "Neuro Bass", "Steel Gtr", "Upright Bass"}) {   // the new engine and the new strings follow the note too
+    for (const char* nm : {"PD Bass", "PD Lead", "Neuro Bass", "Steel Gtr", "Upright Bass", "303 Classic", "303 Square"}) {   // the new engine and the new strings follow the note too
         int idx = -1; for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == nm) idx = i;
         Sampler sm(sr); sm.load("synth:" + std::to_string(idx));
         std::vector<float> o((size_t)sr * 2, 0.f); sm.noteOn(45, 110);
@@ -251,6 +251,38 @@ static void testSynths() {
         for (int lag = sr / 180; lag < sr / 60; lag++) { double c = 0; for (int k = 0; k < w; k++) c += o[2 * (size_t)(o0 + k)] * o[2 * (size_t)(o0 + k + lag)]; if (c > bc) { bc = c; best = lag; } }
         const double hz = (double)sr / best;
         CHECK(hz > 102 && hz < 118, "%s plays A2 near 110 Hz (%.0f)", nm, hz);
+    }
+    {   // SLOOP's synthesised kits: every pad of every kit sounds, stays finite and under the ceiling, and ends by itself
+        int dead = 0, hot = 0, bad3 = 0, hang = 0, total = 0; float maxPk = 0.f;
+        for (int i = 0; i < kSynthCount; i++) {
+            if (kSynths[i].engine != 8 && kSynths[i].engine != 10 && kSynths[i].engine != 11) continue;   // SLOOP's kits and X0X's 808
+            for (int pad = 0; pad < 16; pad++) {
+                Sampler sm(sr); sm.load("synth:" + std::to_string(i)); std::vector<float> o((size_t)sr * 3 * 2, 0.f); sm.noteOn(60 + pad, 100);
+                for (int b = 0; b < sr * 3 / 256; b++) sm.render(o.data() + (size_t)b * 512, 256);
+                float pk = 0.f, tail = 0.f; for (size_t k = 0; k < o.size(); k++) { pk = std::max(pk, std::fabs(o[k])); if (k > o.size() - (size_t)sr / 5 * 2) tail = std::max(tail, std::fabs(o[k])); }
+                total++; if (!finite(o)) bad3++; if (pk < 0.02f) dead++; if (pk > 1.2f) hot++; if (tail > 0.01f) hang++; maxPk = std::max(maxPk, pk);
+            }
+        }
+        CHECK(total == 34 * 16, "SLOOP kits and the X0X 808: %d pads", total);
+        CHECK(bad3 == 0 && dead == 0 && hot == 0 && hang == 0, "every SLOOP / X0X pad sounds, is finite, under the ceiling and ends (bad %d, silent %d, loud %d, hanging %d, peak %.2f)", bad3, dead, hot, hang, maxPk);
+    }
+    {   // GHOULBOX engines: the organ and the voice follow the note, the gurdy's drone does not, the voice has its vowel's formants
+        auto idxOf = [&](const char* nm) { for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == nm) return i; return -1; };
+        auto play = [&](const char* nm, int note) { Sampler sm(sr); sm.load("synth:" + std::to_string(idxOf(nm))); std::vector<float> o((size_t)sr, 0.f); sm.noteOn(note, 110);
+            for (int b = 0; b < sr / 2 / 256; b++) sm.render(o.data() + (size_t)b * 512, 256); return o; };
+        auto power = [&](const std::vector<float>& o, double hz) { double re = 0, im = 0; for (int k = sr / 5; k < sr / 5 + sr / 4; k++) { const double ph = 2 * 3.14159265358979 * hz * k / sr; re += o[2 * (size_t)k] * std::cos(ph); im += o[2 * (size_t)k] * std::sin(ph); } return re * re + im * im; };
+        for (const char* nm : {"Full Organ", "Cathedral", "Choir Aah", "Wow Bass"}) {
+            auto o = play(nm, 45); int best = 0; double bc = -1e9; const int w = sr / 4, o0 = sr / 5;
+            for (int lag = sr / 180; lag < sr / 60; lag++) { double c = 0; for (int k = 0; k < w; k++) c += o[2 * (size_t)(o0 + k)] * o[2 * (size_t)(o0 + k + lag)]; if (c > bc) { bc = c; best = lag; } }
+            const double hz = (double)sr / best; CHECK(hz > 102 && hz < 118, "%s (GHOULBOX) plays A2 near 110 Hz (%.0f)", nm, hz);
+        }
+        auto lo = play("Drone Wheel", 45), hi = play("Drone Wheel", 69);   // DRN D: a drone at D2 = 73.4 Hz under any key
+        const double dLo = power(lo, 73.42), dHi = power(hi, 73.42), off = power(hi, 90.0);
+        CHECK(dLo > 20 * off && dHi > 20 * off, "the gurdy's drone sounds at D2 under both keys (%.1e, %.1e vs %.1e off)", dLo, dHi, off);
+        auto ch = play("Choir Aah", 45);   // vowel A: F1 768 Hz, far more there than at the F1 of an I (342 Hz) between its harmonics
+        double a768 = 0, a342 = 0; for (int h = 5; h <= 9; h++) { const double hz = 110.0 * h; if (std::fabs(hz - 768) < 60) a768 = std::max(a768, power(ch, hz)); if (std::fabs(hz - 342) < 60) a342 = std::max(a342, power(ch, hz)); }
+        a342 = std::max(a342, power(ch, 330.0)); a768 = std::max(a768, power(ch, 770.0));
+        CHECK(a768 > a342, "Choir Aah has the formant of an A (770 Hz %.1e > 330 Hz %.1e)", a768, a342);
     }
     for (int idx : {3, 16}) {
         Sampler sm(sr); sm.load("synth:" + std::to_string(idx));
@@ -1074,6 +1106,7 @@ int main() {
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX3, "FX again: the OP-1 effects");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX4, "FX again: fold, auto pan, vinyl, vowel");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX5, "FX again: comb, octaver, frequency shifter");
+    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX6, "FX again: the turntable scratch");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TSTOP, "FX again: the tape stop settings");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX again: back to sends");
     // the four modes: every page belongs to exactly one, the same button steps through its pages, a mode comes back to the page it was left on

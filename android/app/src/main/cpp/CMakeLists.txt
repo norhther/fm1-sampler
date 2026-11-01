@@ -4,7 +4,7 @@ set(ENGINE ${CMAKE_CURRENT_LIST_DIR}/../../../../../engine)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-file(GLOB SRCS ${ENGINE}/dsp/*.cpp ${ENGINE}/session/*.cpp ${ENGINE}/app/*.cpp ${ENGINE}/ui/*.cpp)
+file(GLOB SRCS CONFIGURE_DEPENDS ${ENGINE}/dsp/*.cpp ${ENGINE}/session/*.cpp ${ENGINE}/app/*.cpp ${ENGINE}/ui/*.cpp)
 list(APPEND SRCS ${ENGINE}/3rdparty/kissfft/kiss_fft.c ${ENGINE}/3rdparty/kissfft/kiss_fftr.c)
 
 find_package(oboe REQUIRED CONFIG)

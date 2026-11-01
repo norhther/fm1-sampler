@@ -24,7 +24,7 @@ public:
     static constexpr int kTracks = 16;   // the most; a session starts with 8 and ADD TRACK opens the next ones
     static constexpr int kFmTracks = 8;  // the FM-1 screen and keys only show the first eight
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, P_FX4, P_TFX5, P_CHOP, P_PRINT, P_FX5, P_TFX6, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, P_FX4, P_TFX5, P_CHOP, P_PRINT, P_FX5, P_TFX6, P_FX6, P_TFX7, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -211,7 +211,7 @@ public:
         float vol = 0.8f, pan = 0.5f, sendR = 0.f, sendD = 0.f; bool mute = false, solo = false;   // mute / solo: only for this session
         int entry = -1;
         float tfDj = 0.5f, tfChorus = 0.f, tfCrush = 0.f; int tfGate = 0;   // per track effects
-        float tfDrive = 0.f, tfFlanger = 0.f, tfPhaser = 0.f, tfTremolo = 0.f, tfWah = 0.f, tfRing = 0.f, tfWidth = 0.5f, tfSpring = 0.f, tfPhone = 0.f, tfPunch = 0.f, tfFold = 0.f, tfAutopan = 0.f, tfVinyl = 0.f, tfVowel = 0.f, tfComb = 0.f, tfCombTune = 0.5f, tfOctave = 0.5f, tfFshift = 0.5f; int tfRepeat = 0, tfFreeze = 0;   // ...the same set as the master
+        float tfDrive = 0.f, tfFlanger = 0.f, tfPhaser = 0.f, tfTremolo = 0.f, tfWah = 0.f, tfRing = 0.f, tfWidth = 0.5f, tfSpring = 0.f, tfPhone = 0.f, tfPunch = 0.f, tfFold = 0.f, tfAutopan = 0.f, tfVinyl = 0.f, tfVowel = 0.f, tfComb = 0.f, tfCombTune = 0.5f, tfOctave = 0.5f, tfFshift = 0.5f, tfScratch = 0.f, tfScratchNoise = 0.5f; int tfScratchRate = 2, tfScratchStyle = 0, tfRepeat = 0, tfFreeze = 0;   // ...the same set as the master
         float rootN = 0.5f, synTone = 0.5f, synBody = 0.5f, synMotion = 0.5f, synGrit = 0.5f, sliceSens = 0.5f; int sliceCount = 3;   // SHAPE page: root key (24..96), synth macros, KIT slices (4 8 12 16 24 32)
         int editOp = 0; float fineN = 0.5f, levelN = 1.f / 3.f;   // SAMPLE EDIT page: the edit to apply, fine tune (+-50 cents), sample level (0..3)
         int edW1 = 0, edW2 = 0, edType = 0, edUni = 0, edVoice = 0; float edDet2 = 0.5f, edCut = 0.5f, edRes = 0.f;   // SYNTH pages: the patch edited (0 = as the patch)
@@ -347,7 +347,7 @@ private:
     void applyMaster();
     void applyFmPalette();                       // the FM-1 screen takes the colours of the phone's theme (Theme.h)
     int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;
-    float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f, fold_ = 0.f, autopan_ = 0.f, vinyl_ = 0.f, vowel_ = 0.f, comb_ = 0.f, combTune_ = 0.5f, octave_ = 0.5f, fshift_ = 0.5f;   // OP-1 FX page, FX 4 page, FX 5 page
+    float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f, fold_ = 0.f, autopan_ = 0.f, vinyl_ = 0.f, vowel_ = 0.f, comb_ = 0.f, combTune_ = 0.5f, octave_ = 0.5f, fshift_ = 0.5f, scratch_ = 0.f, scratchNoise_ = 0.5f; int scratchRate_ = 2, scratchStyle_ = 0;   // OP-1 FX page, FX 4 page, FX 5 page, FX 6 page
     int trackCount_ = kFmTracks; std::string defaultState_;
     int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, takeBars_ = 0, seqGrid_ = 0, liveGrid_ = 0, countIn_ = 0;
     float swing_ = 0.f, tSpin_ = 0.557f, tGrav_ = 0.55f, tMass_ = 0.72f, tShape_ = 0.6f;   // swing 0..1 = 50..75 %, tombola knobs   // the pattern plays on a 1/16 grid unless told otherwise

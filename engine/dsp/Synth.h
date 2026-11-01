@@ -4,7 +4,15 @@
 #pragma once
 #include "Common.h"
 #include "Filter.h"
+#include "DungeonSynth.h"
+#include "SloopKits.h"
+#include "Acid303.h"
+#include "Tr808Voice.h"
+#include "Tr909Voice.h"
+#include "AnimalSynth.h"
+#include "Fm6Voice.h"
 
+inline bool isKitEngine(int e) { return e == 3 || e == 8 || e == 10 || e == 11; }   // 16 pads, note 60 + pad
 struct SynthPatch {
     const char* name;
     int w1; float l1;                       // oscillator 1: wave (0 sine 1 saw 2 square 3 triangle), level
@@ -21,7 +29,14 @@ struct SynthPatch {
     float wtPos = 0, wtEnv = 0, wtDec = 0.5f;   // wavetable: frame 0..1, how far the envelope moves it, its decay in s
     int kit = 0;                            // drum kit: 1 808, 2 punch, 3 lo-fi (16 pads, note 60 + pad)
     float mr[6] = {}, ma[6] = {}, md[6] = {};   // modal: partial ratios, levels, decay times in s
+    float x[12] = {};                           // engines 5 gurdy, 6 wheel, 7 voice (GHOULBOX ports, dsp/DungeonSynth.h): their eight knobs; 9 the 303 (dsp/Acid303.h): its twelve pots
 };
+// a GHOULBOX-engine patch: engine 5 gurdy / 6 wheel / 7 voice, its eight knobs, the envelope (a d s r), and the filter that follows (cut Hz)
+static inline SynthPatch dungeonPatch(const char* name, int engine, const float (&k)[8], float a, float d, float s, float r, float cut = 9000.f) {
+    SynthPatch p{name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, cut, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, a, d, s, r, engine};
+    for (int i = 0; i < 8; i++) p.x[i] = k[i];
+    return p;
+}
 
 // the four macro knobs of a synth (-1 .. 1, 0 = the patch as it is): TONE brightens, BODY adds weight and length, MOTION adds movement, GRIT adds drive
 struct SynthMacros { float tone = 0, body = 0, motion = 0, grit = 0; };
@@ -34,6 +49,32 @@ struct SynthEdit {
     int uni = -1;               // unison voices (-1 = the patch's)
     bool mono = false; float glide = 0.f;   // one voice at a time; time in s to slide from the last note
 };
+static inline SynthPatch dungeonOsc(const char* name, int w1, float l1, int w2, float semi2, float det2, float l2, float sub, float noise, int uni, float uniDet, float cut, float res, float fenv, float fdec, float key, float vib, float a, float d, float s, float r) {
+    return SynthPatch{name, w1, l1, w2, semi2, det2, l2, sub, noise, 0.f, 0.5f, uni, uniDet, 1.f, 0.f, 0.f, cut, res, fenv, fdec, key, 0.f, 0.f, vib, false, 0.f, a, d, s, r};
+}
+static inline SynthPatch dungeonPluck(const char* name, float pluckDec, float d, float r) {
+    return SynthPatch{name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, true, pluckDec, 0.002f, d, 0.f, r};
+}
+static inline SynthPatch acidPatch(const char* name, const float (&k)[12], float a, float d, float s, float r) {   // X0X's 303: engine 9, its twelve pots
+    SynthPatch p = dungeonOsc(name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, a, d, s, r);
+    p.engine = 9; for (int i = 0; i < 12; i++) p.x[i] = k[i]; p.l1 = 1.4f; return p;
+}
+static inline SynthPatch animalPatch(const char* name, const float (&k)[8], float a, float d, float s, float r) {   // JIANT's ANIMAL: engine 12, its eight knobs
+    SynthPatch p = dungeonOsc(name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, a, d, s, r);
+    p.engine = 12; for (int i = 0; i < 8; i++) p.x[i] = k[i]; return p;
+}
+static inline SynthPatch fm6Patch(const char* name, int idx) {   // a six-operator FM patch (engine 13: dsp/Fm6Voice.h), x[0] = its number in dsp/Fm6Patches.h
+    SynthPatch p = dungeonOsc(name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.002f, 1.f, 1.f, 0.35f);
+    p.engine = 13; p.x[0] = (float)idx; return p;
+}
+static inline SynthPatch x0xKitPatch(const char* name, int engine, float gain = 1.f) {   // X0X's circuit-modelled kits: engine 10 = TR-808, 16 pads (note 60 + pad)
+    SynthPatch p = dungeonOsc(name, 0, gain, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.001f, 0.01f, 1.f, 0.03f);
+    p.engine = engine; p.kit = 20; return p;
+}
+static inline SynthPatch sloopKitPatch(const char* name, int kit) {   // SLOOP's synthesised kits: engine 8, 16 pads like the other kits (note 60 + pad)
+    SynthPatch p = dungeonOsc(name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.001f, 0.01f, 1.f, 0.03f);
+    p.engine = 8; p.kit = kit + 1; return p;
+}
 
 //   name        w1 l1   w2 semi det  l2   sub  noi  nDec  pw   uni det   fmR  fmI  fmD   cut   res  fenv fdec key   pEnv pDec vib  pluck dec   a     d     s     r
 static const SynthPatch kSynths[] = {
@@ -115,6 +156,132 @@ static const SynthPatch kSynths[] = {
     {"PD Pad", 0, 1.f, 0, 0.f, 9.f, 0.5f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 3500.f, 0.8f, 0.f, 0.1f, 0.f, 0.f, 0.f, 3.f, false, 0.f, 0.4f, 1.f, 0.85f, 1.1f, 4, 0.3f, 0.2f, 2.f, 0},
     {"PD Pluck", 2, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 4000.f, 0.8f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 0.5f, 0.f, 0.2f, 4, 0.2f, 0.75f, 0.12f, 0},
     {"PD Bell", 3, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 2.f, 0.f, 0.8f, 4, 0.8f, -0.5f, 1.2f, 0},
+    // ---- GHOULBOX engines (engine 5 gurdy, 6 wheel organ, 7 formant voice: dsp/DungeonSynth.h) and its dungeon patches ----
+    dungeonPatch("Hurdy Gurdy", 5, {2.f, 90.f, 50.f, 80.f, 85.f, 2.f, 70.f, 40.f}, 0.005f, 0.86f, 1.00f, 0.13f),
+    dungeonPatch("Drone Wheel", 5, {2.f, 127.f, 110.f, 45.f, 0.f, 0.f, 105.f, 70.f}, 0.046f, 0.86f, 1.00f, 1.13f),
+    dungeonPatch("Dance Gurdy", 5, {2.f, 45.f, 0.f, 120.f, 127.f, 4.f, 35.f, 20.f}, 0.003f, 0.86f, 1.00f, 0.07f),
+    dungeonPatch("Trompette", 5, {2.f, 60.f, 0.f, 95.f, 110.f, 0.f, 60.f, 30.f}, 0.004f, 0.86f, 1.00f, 0.13f),
+    dungeonPatch("Vielle", 5, {2.f, 0.f, 0.f, 70.f, 0.f, 0.f, 100.f, 45.f}, 0.020f, 0.86f, 0.94f, 0.38f),
+    dungeonPatch("Bagpipe", 5, {2.f, 127.f, 90.f, 127.f, 0.f, 0.f, 25.f, 0.f}, 0.004f, 0.86f, 1.00f, 0.09f),
+    dungeonPatch("Full Organ", 6, {15.f, 0.f, 0.f, 0.f, 0.f, 30.f, 20.f, 1.f}, 0.003f, 0.86f, 1.00f, 0.15f),
+    dungeonPatch("Jazz Perc Organ", 6, {4.f, 0.f, 0.f, 0.f, 2.f, 50.f, 8.f, 1.f}, 0.003f, 0.86f, 1.00f, 0.13f),
+    dungeonPatch("Gospel Organ", 6, {6.f, 0.f, 0.f, 0.f, 1.f, 60.f, 40.f, 2.f}, 0.003f, 0.86f, 1.00f, 0.15f),
+    dungeonPatch("Soft Flute Organ", 6, {1.f, 0.f, -2.f, 0.f, 0.f, 10.f, 0.f, 1.f}, 0.003f, 0.86f, 1.00f, 0.22f),
+    dungeonPatch("Rock Drive", 6, {7.f, 0.f, 0.f, 0.f, 0.f, 70.f, 100.f, 2.f}, 0.003f, 0.86f, 1.00f, 0.13f),
+    dungeonPatch("Crypt Organ", 6, {12.f, 2.f, 0.f, -3.f, 0.f, 5.f, 15.f, 1.f}, 0.009f, 0.86f, 1.00f, 0.38f),
+    dungeonPatch("Cathedral", 6, {15.f, 3.f, 0.f, -2.f, 0.f, 0.f, 10.f, 0.f}, 0.015f, 0.86f, 1.00f, 0.78f),
+    dungeonPatch("Harmonium", 6, {10.f, 0.f, 1.f, -4.f, 0.f, 10.f, 25.f, 1.f}, 0.007f, 0.86f, 1.00f, 0.18f),
+    dungeonPatch("Tower Flute", 6, {0.f, 0.f, -3.f, -6.f, 0.f, 0.f, 30.f, 1.f}, 0.012f, 0.86f, 1.00f, 0.26f),
+    dungeonPatch("Choir Aah", 7, {0.f, 0.f, 0.f, 0.f, 40.f, 22.f, 60.f, 0.f}, 0.305f, 1.12f, 0.91f, 0.94f),
+    dungeonPatch("Vox Lead", 7, {32.f, 0.f, 0.f, 2.f, 90.f, 8.f, 72.f, 0.f}, 0.004f, 0.92f, 0.83f, 0.22f),
+    dungeonPatch("Wow Bass", 7, {95.f, 0.f, 68.f, 0.f, 100.f, 0.f, 80.f, 0.f}, 0.003f, 0.92f, 0.55f, 0.09f),
+    dungeonPatch("Whisper", 7, {0.f, 95.f, 88.f, 3.f, 50.f, 120.f, 50.f, 0.f}, 0.046f, 1.12f, 0.87f, 0.78f),
+    dungeonPatch("Monks", 7, {105.f, 120.f, 0.f, -5.f, 75.f, 18.f, 70.f, 6.f}, 0.135f, 1.12f, 0.94f, 1.13f),
+    dungeonPatch("Crypt Choir", 7, {95.f, 0.f, 100.f, -2.f, 45.f, 30.f, 55.f, 10.f}, 0.691f, 1.12f, 0.94f, 1.62f),
+    dungeonPatch("Wraith", 7, {127.f, 64.f, 110.f, 0.f, 20.f, 100.f, 40.f, 30.f}, 1.190f, 1.12f, 0.87f, 1.94f),
+    dungeonPatch("Low Drone", 7, {127.f, 95.f, 0.f, -8.f, 95.f, 15.f, 85.f, 4.f}, 0.401f, 1.12f, 1.00f, 1.62f),
+    // ---- GHOULBOX dungeon sounds on the oscillator engine, strings and noise (dungeonOsc: wave 0 sine 1 saw 2 square 3 tri) ----
+    dungeonOsc("Crypt Pad", 1, 1.f, 3, 0.f, 8.f, 0.6f, 0.f, 0.f, 3, 14.f, 1400.f, 0.8f, 0.4f, 1.5f, 0.3f, 3.f, 0.9f, 0.9f, 0.85f, 1.6f),
+    dungeonOsc("Frost Strings", 1, 1.f, 1, 0.f, 6.f, 0.5f, 0.f, 0.f, 5, 12.f, 3200.f, 0.8f, 0.3f, 1.2f, 0.4f, 5.f, 0.5f, 0.9f, 0.85f, 1.2f),
+    dungeonOsc("War Horn", 1, 0.9f, 1, 0.f, 6.f, 0.5f, 0.f, 0.f, 1, 0.f, 900.f, 1.1f, 2.4f, 0.3f, 0.5f, 4.f, 0.06f, 0.3f, 0.8f, 0.4f),
+    dungeonOsc("Dirge Bass", 1, 0.8f, 2, 0.f, 4.f, 0.4f, 0.5f, 0.f, 1, 0.f, 420.f, 1.2f, 1.8f, 0.4f, 0.3f, 0.f, 0.01f, 0.4f, 0.8f, 0.3f),
+    dungeonOsc("Fantasy Pad", 1, 0.9f, 3, 12.f, 7.f, 0.5f, 0.f, 0.f, 3, 14.f, 2200.f, 0.9f, 0.6f, 1.4f, 0.3f, 4.f, 0.8f, 0.9f, 0.85f, 1.5f),
+    dungeonOsc("Mourn Horn", 1, 0.9f, 1, -12.f, 5.f, 0.5f, 0.f, 0.f, 1, 0.f, 1100.f, 1.2f, 1.6f, 0.4f, 0.5f, 5.f, 0.12f, 0.3f, 0.8f, 0.5f),
+    dungeonOsc("String Machine", 1, 1.f, 1, 12.f, 18.f, 0.6f, 0.f, 0.f, 3, 16.f, 3500.f, 0.7f, 0.f, 0.1f, 0.2f, 4.f, 0.25f, 0.5f, 0.9f, 0.8f),
+    dungeonOsc("Shawm", 1, 0.9f, 1, 12.f, 4.f, 0.6f, 0.f, 0.f, 1, 0.f, 2600.f, 3.5f, 0.8f, 0.2f, 0.6f, 5.f, 0.01f, 0.2f, 0.9f, 0.15f),
+    dungeonOsc("Tower Lead", 2, 0.9f, 2, 0.f, 6.f, 0.3f, 0.f, 0.f, 1, 0.f, 4200.f, 0.9f, 0.5f, 0.3f, 0.4f, 6.f, 0.005f, 0.2f, 0.85f, 0.2f),
+    // wind and fire: filtered noise
+    dungeonOsc("Cave Wind", 1, 0.f, 0, 0.f, 0.f, 0.f, 0.f, 1.f, 1, 0.f, 600.f, 6.f, 1.2f, 2.f, 0.3f, 0.f, 1.2f, 1.f, 0.9f, 2.f),
+    dungeonOsc("Torch", 1, 0.f, 0, 0.f, 0.f, 0.f, 0.f, 0.8f, 1, 0.f, 1800.f, 2.5f, 0.8f, 0.15f, 0.f, 0.f, 0.05f, 0.4f, 0.8f, 0.5f),
+    // GHOULBOX's plucked strings (the Karplus-Strong voice): lute, harpsichord, dungeon harp
+    dungeonPluck("Lute", 0.30f, 2.2f, 0.4f),
+    dungeonPluck("Harpsichord", 0.55f, 1.6f, 0.3f),
+    dungeonPluck("Dungeon Harp", 0.6f, 3.5f, 0.8f),
+    // ---- SLOOP's synthesised drum kits (engine 8: dsp/SloopDrum.h, tables from tools/gen_sloop_kits.py) ----
+    sloopKitPatch("Sloop 808", 0),
+    sloopKitPatch("Sloop 909", 1),
+    sloopKitPatch("Sloop 606", 2),
+    sloopKitPatch("Sloop 80S", 3),
+    sloopKitPatch("Sloop VINTAGE", 4),
+    sloopKitPatch("Sloop TRAP", 5),
+    sloopKitPatch("Sloop DRILL", 6),
+    sloopKitPatch("Sloop BOOMBAP", 7),
+    sloopKitPatch("Sloop LO-FI", 8),
+    sloopKitPatch("Sloop PHONK", 9),
+    sloopKitPatch("Sloop HOUSE", 10),
+    sloopKitPatch("Sloop D.HOUSE", 11),
+    sloopKitPatch("Sloop TECHNO", 12),
+    sloopKitPatch("Sloop MINIMAL", 13),
+    sloopKitPatch("Sloop ELECTRO", 14),
+    sloopKitPatch("Sloop DISCO", 15),
+    sloopKitPatch("Sloop GARAGE", 16),
+    sloopKitPatch("Sloop JUNGLE", 17),
+    sloopKitPatch("Sloop DUBSTEP", 18),
+    sloopKitPatch("Sloop DEMBOW", 19),
+    sloopKitPatch("Sloop AMAPIANO", 20),
+    sloopKitPatch("Sloop AFRO", 21),
+    sloopKitPatch("Sloop LATIN", 22),
+    sloopKitPatch("Sloop TRIBAL", 23),
+    sloopKitPatch("Sloop SYNTHWV", 24),
+    sloopKitPatch("Sloop CHIP", 25),
+    sloopKitPatch("Sloop ARCADE", 26),
+    sloopKitPatch("Sloop GLITCH", 27),
+    sloopKitPatch("Sloop INDUSTR", 28),
+    sloopKitPatch("Sloop HYPER", 29),
+    sloopKitPatch("Sloop AMBIENT", 30),
+    sloopKitPatch("Sloop JAZZ", 31),
+    // ---- X0X's TB-303 (engine 9: dsp/Acid303.h, dsp/bass303.cpp), pots: CUTOFF RESO ENVMOD DECAY ACCENT WAVE TUNE VOLUME DRIVE DRVTYPE SLIDE ACCDEC ----
+    acidPatch("303 Classic",  {64, 90, 90, 40, 90, 0, 64, 96, 0, 1, 21, 7}, 0.002f, 0.4f, 0.9f, 0.08f),
+    acidPatch("303 Squelch",  {40, 120, 110, 30, 100, 0, 64, 96, 20, 1, 21, 7}, 0.002f, 0.3f, 0.9f, 0.08f),
+    acidPatch("303 Square",   {70, 80, 80, 50, 80, 1, 64, 96, 0, 1, 21, 7}, 0.002f, 0.4f, 0.9f, 0.08f),
+    acidPatch("303 Rubber",   {55, 100, 70, 90, 70, 0, 64, 96, 0, 1, 80, 20}, 0.002f, 0.5f, 0.9f, 0.1f),
+    acidPatch("303 Devilfish",{80, 110, 100, 20, 127, 0, 64, 96, 40, 2, 10, 4}, 0.002f, 0.3f, 0.9f, 0.06f),
+    acidPatch("303 RAT Drive",{60, 95, 85, 45, 90, 0, 64, 90, 80, 2, 21, 7}, 0.002f, 0.4f, 0.9f, 0.08f),
+    acidPatch("303 Sub",      {20, 40, 40, 80, 60, 1, 64, 100, 10, 1, 21, 30}, 0.002f, 0.6f, 0.9f, 0.12f),
+    acidPatch("303 Open",     {110, 70, 60, 100, 80, 0, 64, 96, 0, 0, 21, 7}, 0.002f, 0.6f, 0.9f, 0.12f),
+    x0xKitPatch("X0X 808 Kit", 10),
+    x0xKitPatch("X0X 909 Kit", 11),
+    // ---- JIANT FM's ANIMAL engine (engine 12: dsp/AnimalSynth.h): CMOS bird machine, pulses (cricket, frog), syrinx (songbirds), wings, larynx ----
+    animalPatch("CMOS Bird", {0.f, 90.f, 0.f, 37.f, 16.f, 74.f, 0.f, 20.f}, 0.003f, 0.86f, 1.00f, 0.13f),
+    animalPatch("CMOS Trill", {0.f, 70.f, 0.f, 50.f, 6.f, 94.f, 0.f, 6.f}, 0.003f, 0.86f, 1.00f, 0.13f),
+    animalPatch("CMOS Monkey", {0.f, 110.f, 20.f, 80.f, -40.f, 70.f, 5.f, 28.f}, 0.003f, 0.86f, 1.00f, 0.18f),
+    animalPatch("CMOS Bug", {0.f, 60.f, 90.f, 20.f, 12.f, 104.f, 0.f, 16.f}, 0.003f, 0.86f, 1.00f, 0.09f),
+    animalPatch("Cricket", {1.f, 127.f, 100.f, 26.f, 0.f, 119.f, 7.f, 22.f}, 0.003f, 0.86f, 1.00f, 0.09f),
+    animalPatch("Tree Cricket", {1.f, 127.f, 110.f, 32.f, 4.f, 102.f, 1.f, 22.f}, 0.003f, 0.86f, 1.00f, 0.13f),
+    animalPatch("Katydid", {1.f, 10.f, 20.f, 24.f, 50.f, 80.f, 7.f, 22.f}, 0.003f, 0.86f, 1.00f, 0.09f),
+    animalPatch("Cicada", {1.f, 38.f, 85.f, 28.f, 14.f, 60.f, 0.f, 24.f}, 0.009f, 0.86f, 1.00f, 0.26f),
+    animalPatch("Treefrog", {1.f, 106.f, 49.f, 41.f, 6.f, 127.f, 15.f, 26.f}, 0.003f, 0.86f, 1.00f, 0.13f),
+    animalPatch("Toad", {1.f, 127.f, 80.f, 44.f, 8.f, 116.f, 1.f, 22.f}, 0.004f, 0.86f, 1.00f, 0.18f),
+    animalPatch("Bullfrog", {1.f, 70.f, 30.f, 53.f, 10.f, 52.f, 7.f, 22.f}, 0.003f, 0.86f, 1.00f, 0.18f),
+    animalPatch("Canary", {2.f, 100.f, 20.f, 38.f, -30.f, 112.f, 14.f, 22.f}, 0.003f, 0.86f, 1.00f, 0.09f),
+    animalPatch("Cardinal", {2.f, 110.f, 6.f, 46.f, -40.f, 77.f, 10.f, 22.f}, 0.003f, 0.86f, 1.00f, 0.09f),
+    animalPatch("Dove", {2.f, 70.f, 10.f, 66.f, 15.f, 60.f, 9.f, 22.f}, 0.004f, 0.86f, 1.00f, 0.18f),
+    animalPatch("Owl", {2.f, 80.f, 8.f, 68.f, -8.f, 68.f, 9.f, 22.f}, 0.004f, 0.86f, 1.00f, 0.18f),
+    animalPatch("Peeper", {2.f, 100.f, 4.f, 34.f, 30.f, 80.f, 3.f, 22.f}, 0.003f, 0.86f, 1.00f, 0.09f),
+    animalPatch("Bat", {2.f, 120.f, 0.f, 40.f, -64.f, 127.f, 3.f, 22.f}, 0.003f, 0.86f, 1.00f, 0.06f),
+    animalPatch("Mosquito", {3.f, 30.f, 50.f, 64.f, 20.f, 40.f, 2.f, 22.f}, 0.005f, 0.86f, 1.00f, 0.13f),
+    animalPatch("Bee", {3.f, 90.f, 30.f, 75.f, 10.f, 40.f, 2.f, 22.f}, 0.005f, 0.86f, 1.00f, 0.13f),
+    animalPatch("Fly", {3.f, 70.f, 90.f, 78.f, 25.f, 50.f, 1.f, 22.f}, 0.005f, 0.86f, 1.00f, 0.13f),
+    animalPatch("Wolf", {4.f, 0.f, 8.f, 64.f, 40.f, 50.f, 0.f, 5.f}, 0.009f, 0.86f, 1.00f, 0.26f),
+    animalPatch("Dog Bark", {4.f, 100.f, 70.f, 64.f, -15.f, 85.f, 5.f, 6.f}, 0.003f, 0.86f, 1.00f, 0.09f),
+    animalPatch("Roar", {4.f, 110.f, 100.f, 100.f, -20.f, 50.f, 3.f, 9.f}, 0.004f, 0.86f, 1.00f, 0.18f),
+    animalPatch("Purr", {4.f, 10.f, 60.f, 50.f, 0.f, 60.f, 1.f, 19.f}, 0.005f, 0.86f, 1.00f, 0.13f),
+    // ---- FM6: Felucca's msfa six-operator FM (engine 13: dsp/Fm6Voice.h), its factory patches ----
+    fm6Patch("FM6 Tine Ep", 0),
+    fm6Patch("FM6 Bell", 1),
+    fm6Patch("FM6 Fm Bass", 2),
+    fm6Patch("FM6 Brass", 3),
+    fm6Patch("FM6 Pad", 4),
+    fm6Patch("FM6 Marimba", 5),
+    fm6Patch("FM6 Organ", 6),
+    fm6Patch("FM6 Pluck", 7),
+    fm6Patch("FM6 French Horn", 8),
+    fm6Patch("FM6 Harpsichord", 9),
+    fm6Patch("FM6 Glass Choir", 10),
+    fm6Patch("FM6 Dark Strings", 11),
+    fm6Patch("FM6 Lofi Flute", 12),
+    fm6Patch("FM6 Crypt Organ", 13),
+    fm6Patch("FM6 Tuba", 14),
 };
 constexpr int kSynthCount = (int)(sizeof(kSynths) / sizeof(kSynths[0]));
 
@@ -155,7 +322,14 @@ public:
         gl_ = glideSemis; glT_ = std::max(0.005f, glideTime);
         p_ = &p; sr_ = sr; note_ = (float)note; vel_ = vel; rng_ = seed * 2654435761u + 12345u;
         for (int k = 0; k < 5; k++) ph_[k] = rnd();   // free-running phases: a stack does not sound like one thick oscillator
+        if (p.engine == 8) { pad_ = ((note - 60) % 16 + 16) % 16; if (p.kit >= 1 && p.kit <= kSloopKitCount) dk_.start(kSloopKits[p.kit - 1].s[pad_], kSloopKits[p.kit - 1].crush, vel, sr, padPitch, seed); else done_ = true; return; }
         if (p.engine == 3) { pad_ = ((note - 60) % 16 + 16) % 16; padPitch_ = padPitch; padDecay_ = padDecay; return; }
+        if (p.engine == 13) { fm_.start((int)p.x[0], (int)note_, vel, sr); return; }
+        if (p.engine == 12) { an_.start(p.x, vel, sr, seed); return; }
+        if (p.engine == 11) { pad_ = ((note - 60) % 16 + 16) % 16; d9_.start(pad_, vel, sr); return; }
+        if (p.engine == 10) { pad_ = ((note - 60) % 16 + 16) % 16; d8_.start(pad_, vel, sr); return; }
+        if (p.engine == 9) { ac_.start(p.x, (int)note_, vel, sr); return; }
+        if (p.engine >= 5 && p.engine <= 7) { dv_.start(p.x, p.engine, vel, sr, seed); return; }
         if (p.engine == 2) {
             const float f = freq(0.f);
             for (int k = 0; k < 6; k++) { mph_[k] = 0.f; mAmp_[k] = p.ma[k] > 0.f ? p.ma[k] : 0.f; }
@@ -179,7 +353,14 @@ public:
         t_ += dt1;
         float oL = 0.f, oR = 0.f;
         if (p.engine == 3) drum(m, oL, oR);
+        else if (p.engine == 13) { oL = oR = fm_.next(bend) * p.l1; if (t_ > 0.1f && fm_.done()) done_ = true; }
+        else if (p.engine == 12) { oL = oR = an_.next(freq(bend), m.tone) * p.l1; }
+        else if (p.engine == 11) { oL = oR = d9_.next() * p.l1; if (!d9_.alive() && t_ > 0.05f) done_ = true; }
+        else if (p.engine == 10) { oL = oR = d8_.next() * p.l1; if (!d8_.alive() && t_ > 0.05f) done_ = true; }
+        else if (p.engine == 9) { oL = oR = ac_.next() * p.l1; }
+        else if (p.engine == 8) { oL = oR = dk_.next(); if (!dk_.alive()) done_ = true; }
         else if (p.engine == 2) modal(bend, m, oL, oR);
+        else if (p.engine >= 5 && p.engine <= 7) { oL = oR = dv_.next(freq(bend), m.tone, m.motion) * p.l1; }
         else {
             const float vib = p.vib + std::max(0.f, m.motion) * 12.f;
             const float vibDeg = vib > 0.f ? vib * std::min(1.f, t_ / 0.4f) * std::sin(2.f * kPi * 5.2f * t_) : 0.f;
@@ -348,6 +529,7 @@ private:
     }
     const SynthPatch* p_ = nullptr;
     float sr_ = 44100.f, note_ = 60.f, vel_ = 1.f, t_ = 0.f, ph_[5] = {}, ph2_ = 0.f, phs_ = 0.f, phm_ = 0.f;
+    dungeon::Voice dv_; SloopDrumVoice dk_; Acid303 ac_; Drum808Voice d8_; Tr909Voice d9_; animal::Voice an_; fm6::Voice fm_;
     Lowpass lp_; int coefCount_ = 0; uint32_t rng_ = 1; bool done_ = false;
     float dl_[kDl] = {}; int plW_ = 0; float plN_ = 100.f, plDec_ = 0.99f, plZ_ = 0.f;
     float mph_[6] = {}, mAmp_[6] = {}, mf_ = 261.6f;                            // modal

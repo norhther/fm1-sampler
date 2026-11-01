@@ -155,6 +155,24 @@ int main() {
           p.fshift = 0.5f - 0.5f * (float)std::sqrt(300.0 / 800.0); const auto dn = run5(p, s1k);
           CHECK(power(dn, 700) > 10 * power(dn, 1300) && power(dn, 700) > 10 * power(dn, 1000), "FREQ SHIFT down: 1000 Hz moves to 700 Hz (700 Hz %.4f, 1300 Hz %.4f)", power(dn, 700), power(dn, 1300)); }
     }
+    {   // the FX 6 effect: the turntable scratch
+        const int sr6 = 44100, N6 = sr6 * 2;
+        std::vector<float> sine6((size_t)N6 * 2); for (int i = 0; i < N6; i++) sine6[2 * i] = sine6[2 * i + 1] = 0.5f * std::sin(2 * M_PI * 440.0 * i / sr6);
+        auto run6 = [&](const FxParams& p) { MasterFx fx(sr6); fx.set(p); std::vector<float> o = sine6; for (int i = 0; i < N6; i += 256) fx.process(o.data() + 2 * i, std::min(256, N6 - i), i / (double)sr6 * 2.0, 2.0 / sr6); return o; };
+        { MasterFx fx(sr6); FxParams p; CHECK(!fx.active(), "SCRATCH at rest: bypassed"); p.scratch = 0.5f; fx.set(p); CHECK(fx.active(), "SCRATCH turned up: active"); }
+        { const auto o = run6(FxParams()); double d = 0; for (size_t i = 0; i < o.size(); i++) d += std::fabs(o[i] - sine6[i]); CHECK(d == 0.0, "SCRATCH at zero leaves the sound untouched (diff %.6f)", d); }
+        auto windows = [&](const std::vector<float>& o, int& zcMin, int& zcMax, double& rmsMin, double& rmsMax) {   // 10 ms windows after the first 0.3 s: zero crossings and level
+            zcMin = 1 << 30; zcMax = 0; rmsMin = 1e9; rmsMax = 0; const int w = sr6 / 100;
+            for (int s = (int)(0.3 * sr6); s + w <= N6; s += w) { int zc = 0; double e = 0; for (int i = s + 1; i < s + w; i++) { if ((o[2 * i] > 0) != (o[2 * (i - 1)] > 0)) zc++; e += (double)o[2 * i] * o[2 * i]; }
+                zcMin = std::min(zcMin, zc); zcMax = std::max(zcMax, zc); const double r = std::sqrt(e / w); rmsMin = std::min(rmsMin, r); rmsMax = std::max(rmsMax, r); }
+        };
+        { FxParams p; p.scratch = 0.8f; p.scratchStyle = 0; p.scratchRate = 2; const auto o = run6(p); int a, b; double c, d; windows(o, a, b, c, d); bool fin = true; double pk = 0; for (float v : o) { fin = fin && std::isfinite(v); pk = std::max(pk, (double)std::fabs(v)); }
+          CHECK(fin && pk < 1.5 && a <= 4 && b >= 14, "BABY scratch swings the pitch between slow and fast (%d to %d crossings per 10 ms, 9 without it; peak %.2f)", a, b, pk); }
+        { FxParams p; p.scratch = 0.8f; p.scratchStyle = 3; p.scratchRate = 1; const auto o = run6(p); int a, b; double c, d; windows(o, a, b, c, d);
+          CHECK(c < 0.2 * d, "TRANSFORMER chops the sound into gaps (quietest 10 ms %.3f, loudest %.3f)", c, d); }
+        { int bad = 0; for (int st = 0; st < 4; st++) for (int rt = 0; rt < 5; rt++) for (float dp : {0.1f, 0.6f, 1.0f}) { FxParams p; p.scratch = dp; p.scratchStyle = st; p.scratchRate = rt; p.scratchNoise = 1.f; const auto o = run6(p); double pk = 0; bool fin = true; for (float v : o) { fin = fin && std::isfinite(v); pk = std::max(pk, (double)std::fabs(v)); } if (!fin || pk > 1.5) bad++; }
+          CHECK(bad == 0, "every style, cycle and depth of SCRATCH stays finite and bounded (%d bad of 60)", bad); }
+    }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;
 }

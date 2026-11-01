@@ -138,7 +138,7 @@ void Sampler::noteOn(int note, int vel) {
         lastNote_ = note;
         sv_[vi].start(kSynths[synth_], note, v.vel, (float)sr_, bornCounter_, mac_, pad ? pad->pitch : 0.f, pad ? pad->decay : 1.f, gs, edit_.glide);
         v.env.set(atk_, dec_, sus_, rel_, (float)sr_);
-        if (kSynths[synth_].engine == 3) v.env.set(0.001f, 0.01f, 1.f, 0.02f, (float)sr_);   // a drum hit plays itself out
+        if (isKitEngine(kSynths[synth_].engine)) v.env.set(0.001f, 0.01f, 1.f, 0.02f, (float)sr_);   // a drum hit plays itself out
         v.env.gateOn();
         return;
     }
@@ -159,7 +159,7 @@ void Sampler::fadeOut(Voice& v) {
 void Sampler::noteOff(int note) {
     if (mode_ == ONESHOT && synth_ < 0) return;   // always plays out
     if (mode_ == KIT && chopFull_ && synth_ < 0) return;   // so does a whole chop
-    if (synth_ >= 0 && kSynths[synth_].engine == 3) return;   // so does a drum hit
+    if (synth_ >= 0 && isKitEngine(kSynths[synth_].engine)) return;   // so does a drum hit
     for (auto& v : voices_) if (v.on && v.gate && v.note == note) { v.gate = false; v.env.gateOff(); }
 }
 void Sampler::allOff() { for (auto& v : voices_) v = Voice(); }

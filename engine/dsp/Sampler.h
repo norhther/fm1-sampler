@@ -39,7 +39,7 @@ public:
     // per pad (KIT mode and the synth drum kits: pad = note - 60 mod 16): level, tuning in semitones, decay length, pan, choke group (0 = none; a pad cuts the sounding pads of its group)
     struct Pad { float vol = 1.f, pitch = 0.f, decay = 1.f, pan = 0.f; int group = 0; };
     void setPad(int pad, const Pad& p) { if (pad >= 0 && pad < 16) pads_[pad] = p; }
-    bool padMode() const { return mode_ == KIT || (synth_ >= 0 && kSynths[synth_].engine == 3); }
+    bool padMode() const { return mode_ == KIT || (synth_ >= 0 && isKitEngine(kSynths[synth_].engine)); }
     void setLevel(float g) { level_ = clampf(g, 0.f, 3.f); }           // sample level
     void setFine(float cents) { fine_ = clampf(cents, -100.f, 100.f); }   // fine tuning
     // audio thread: the sample was edited (reversed, trimmed ...): the new buffer with its overview and slices, built on the worker
