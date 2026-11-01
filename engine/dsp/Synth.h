@@ -11,6 +11,7 @@
 #include "Tr909Voice.h"
 #include "AnimalSynth.h"
 #include "Fm6Voice.h"
+#include "FelVoice.h"
 
 inline bool isKitEngine(int e) { return e == 3 || e == 8 || e == 10 || e == 11; }   // 16 pads, note 60 + pad
 struct SynthPatch {
@@ -66,6 +67,12 @@ static inline SynthPatch animalPatch(const char* name, const float (&k)[8], floa
 static inline SynthPatch fm6Patch(const char* name, int idx) {   // a six-operator FM patch (engine 13: dsp/Fm6Voice.h), x[0] = its number in dsp/Fm6Patches.h
     SynthPatch p = dungeonOsc(name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.002f, 1.f, 1.f, 0.35f);
     p.engine = 13; p.x[0] = (float)idx; return p;
+}
+// Felucca-Engines: engine 14 ANALOG, 15 TRIO, 16 LOFI, 17 NOISE. x = the eight knobs as the Felucca editor has them (0..127); env = its A D S R, 0..127
+static inline SynthPatch felPatch(const char* name, int engine, const float (&k)[8], const float (&e)[4], float l1 = 0.7f) {
+    const auto t = [](float v, float lo, float span) { const float u = v / 127.f; return lo + u * u * span; };
+    SynthPatch p = dungeonOsc(name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, t(e[0], 0.002f, 2.f), t(e[1], 0.03f, 3.f), e[2] / 127.f, t(e[3], 0.03f, 3.f));
+    p.engine = engine; for (int i = 0; i < 8; i++) p.x[i] = k[i]; p.l1 = l1; return p;
 }
 static inline SynthPatch x0xKitPatch(const char* name, int engine, float gain = 1.f) {   // X0X's circuit-modelled kits: engine 10 = TR-808, 16 pads (note 60 + pad)
     SynthPatch p = dungeonOsc(name, 0, gain, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.001f, 0.01f, 1.f, 0.03f);
@@ -282,6 +289,35 @@ static const SynthPatch kSynths[] = {
     fm6Patch("FM6 Lofi Flute", 12),
     fm6Patch("FM6 Crypt Organ", 13),
     fm6Patch("FM6 Tuba", 14),
+    // ---- Felucca-Engines (MIT): ANALOG TRIO LOFI NOISE, their factory sounds ----
+    felPatch("Fel Saw Lead", 14, {0, 12, 64, 0, 90, 30, 10, 64}, {4, 70, 100, 50}),
+    felPatch("Fel Soft Pad", 14, {0, 20, 64, 4, 60, 10, 0, 32}, {80, 90, 110, 95}),
+    felPatch("Fel Sqr Bass", 14, {1, 0, 0, 0, 50, 70, 40, 64}, {0, 60, 40, 30}),
+    felPatch("Fel Pwm Str", 14, {4, 8, 40, 0, 75, 20, 0, 48}, {60, 80, 110, 85}),
+    felPatch("Fel Acid", 14, {0, 0, 0, 0, 50, 100, 25, 64}, {0, 55, 20, 30}),
+    felPatch("Fel Sine Key", 14, {3, 6, 50, 0, 127, 0, 0, 0}, {2, 80, 30, 70}),
+    felPatch("Fel Rave", 14, {4, 30, 64, 0, 85, 20, 30, 64}, {20, 80, 110, 60}),
+    felPatch("Fel Sub Bass", 14, {3, 0, 0, 0, 40, 0, 20, 0}, {0, 60, 100, 20}),
+    felPatch("Fel Pluck", 14, {0, 8, 50, 0, 30, 40, 0, 64}, {0, 88, 0, 60}),
+    felPatch("Fel Brass", 14, {0, 10, 64, 0, 45, 20, 10, 64}, {35, 70, 90, 45}),
+    felPatch("Fel Wind", 14, {0, 0, 0, 90, 30, 90, 0, 0}, {60, 90, 60, 80}),
+    felPatch("Fel Strings", 14, {0, 25, 64, 0, 70, 10, 0, 32}, {70, 90, 115, 90}),
+    felPatch("Fel Sync Saw", 14, {5, 40, 64, 0, 100, 25, 0, 64}, {2, 70, 100, 40}),
+    felPatch("Fel Sub Saw", 14, {6, 0, 80, 0, 70, 20, 10, 64}, {0, 60, 90, 30}),
+    felPatch("Trio Fat Bass", 15, {0, 0, -12, 9, 0, 62, 45, 64}, {0, 62, 60, 25}),
+    felPatch("Trio Arp Lead", 15, {2, 12, 0, 4, 0, 88, 25, 32}, {0, 60, 90, 30}),
+    felPatch("Trio Sync Lead", 15, {9, 9, 0, 0, 0, 82, 30, 64}, {2, 70, 100, 40}),
+    felPatch("Trio Ring Bell", 15, {13, 0, 18, 6, 1, 96, 30, 64}, {0, 92, 0, 80}),
+    felPatch("Trio Chip Choir", 15, {1, 0, 12, 7, 1, 62, 95, 40}, {70, 90, 110, 85}),
+    felPatch("Lofi Pulse Lead", 16, {0, 0, 32, 0, 0, 20, 0, 127}, {0, 60, 90, 30}),
+    felPatch("Lofi Wave Bass", 16, {1, 1, 0, 0, 0, 0, 0, 90}, {0, 50, 70, 20}),
+    felPatch("Lofi Arp 8bit", 16, {2, 0, 96, 0, 0, 0, 2, 110}, {0, 60, 80, 40}),
+    felPatch("Lofi Wave Lead", 16, {0, 4, 92, 0, 0, 18, 0, 110}, {0, 70, 90, 30}),
+    felPatch("Lofi Step Lead", 16, {4, 0, 40, 34, 0, 16, 0, 127}, {0, 64, 127, 55}),
+    felPatch("Noise Wind", 17, {0, 64, 70, 100, 127, 0, 70, 0}, {90, 90, 110, 90}),
+    felPatch("Noise Rain", 17, {1, 30, 88, 80, 64, 105, 40, 0}, {10, 90, 127, 70}),
+    felPatch("Noise Arcade", 17, {2, 0, 127, 0, 127, 112, 0, 84}, {0, 80, 0, 50}),
+    felPatch("Noise Metal", 17, {3, 0, 100, 40, 100, 32, 0, 0}, {0, 75, 40, 60}),
 };
 constexpr int kSynthCount = (int)(sizeof(kSynths) / sizeof(kSynths[0]));
 
@@ -324,6 +360,7 @@ public:
         for (int k = 0; k < 5; k++) ph_[k] = rnd();   // free-running phases: a stack does not sound like one thick oscillator
         if (p.engine == 8) { pad_ = ((note - 60) % 16 + 16) % 16; if (p.kit >= 1 && p.kit <= kSloopKitCount) dk_.start(kSloopKits[p.kit - 1].s[pad_], kSloopKits[p.kit - 1].crush, vel, sr, padPitch, seed); else done_ = true; return; }
         if (p.engine == 3) { pad_ = ((note - 60) % 16 + 16) % 16; padPitch_ = padPitch; padDecay_ = padDecay; return; }
+        if (p.engine >= 14 && p.engine <= 17) { fl_.start(p.engine - 14, p.x, sr, seed); return; }
         if (p.engine == 13) { fm_.start((int)p.x[0], (int)note_, vel, sr); return; }
         if (p.engine == 12) { an_.start(p.x, vel, sr, seed); return; }
         if (p.engine == 11) { pad_ = ((note - 60) % 16 + 16) % 16; d9_.start(pad_, vel, sr); return; }
@@ -353,6 +390,7 @@ public:
         t_ += dt1;
         float oL = 0.f, oR = 0.f;
         if (p.engine == 3) drum(m, oL, oR);
+        else if (p.engine >= 14 && p.engine <= 17) { oL = oR = fl_.next(freq(bend), m.tone, m.motion) * p.l1; }
         else if (p.engine == 13) { oL = oR = fm_.next(bend) * p.l1; if (t_ > 0.1f && fm_.done()) done_ = true; }
         else if (p.engine == 12) { oL = oR = an_.next(freq(bend), m.tone) * p.l1; }
         else if (p.engine == 11) { oL = oR = d9_.next() * p.l1; if (!d9_.alive() && t_ > 0.05f) done_ = true; }
@@ -529,7 +567,7 @@ private:
     }
     const SynthPatch* p_ = nullptr;
     float sr_ = 44100.f, note_ = 60.f, vel_ = 1.f, t_ = 0.f, ph_[5] = {}, ph2_ = 0.f, phs_ = 0.f, phm_ = 0.f;
-    dungeon::Voice dv_; SloopDrumVoice dk_; Acid303 ac_; Drum808Voice d8_; Tr909Voice d9_; animal::Voice an_; fm6::Voice fm_;
+    dungeon::Voice dv_; SloopDrumVoice dk_; Acid303 ac_; Drum808Voice d8_; Tr909Voice d9_; animal::Voice an_; fm6::Voice fm_; fel::Voice fl_;
     Lowpass lp_; int coefCount_ = 0; uint32_t rng_ = 1; bool done_ = false;
     float dl_[kDl] = {}; int plW_ = 0; float plN_ = 100.f, plDec_ = 0.99f, plZ_ = 0.f;
     float mph_[6] = {}, mAmp_[6] = {}, mf_ = 261.6f;                            // modal
