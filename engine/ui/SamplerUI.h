@@ -23,6 +23,7 @@ public:
     std::string takeAnnounce() { std::string s; s.swap(announce_); return s; }                    // a message for the screen reader (TalkBack)
     void openMenu() { menuOpen_ = true; }
     void openLibraryBrowser() { openLibrary(); }
+    int fxFocusPage_ = -1, fxFocusKnob_ = -1;   // the knob the FX browser sent you to, lit on its page
     void openFxBrowser(bool track) { fxOpen_ = true; fxTrack_ = track; }
     bool menuOpen() const { return menuOpen_; }
     bool tourOpen() const { return tourOpen_; }

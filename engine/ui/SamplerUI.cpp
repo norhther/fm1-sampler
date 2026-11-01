@@ -860,7 +860,9 @@ void SamplerUI::pagePanel(Rect r) {
         const auto& p = k[(size_t)i];
         const float y = top + i * rh;
         if (!p.valid) continue;
-        text(r.x, y + 8, T_CAPTION, DIM, p.name, 0, true);
+        const bool lit = fxFocusPage_ == (int)app_.page() && fxFocusKnob_ == i;   // the effect picked in the FX browser
+        if (lit) { const Rect row{r.x - 4, y - 2, r.w + 8, rh - 2}; rrect(row, R_CONTROL, theme::withAlpha(ACCENT, 40)); stroke(row, R_CONTROL, ACCENT, 2); }
+        text(r.x, y + 8, T_CAPTION, lit ? ACCENT : DIM, p.name, 0, true);
         text(r.x + r.w, y + 10, T_VALUE, p.isChoice ? ACCENT : TEXT, p.value, 2, true);
         Rect s{r.x, y + std::min(26.f, rh - 16), r.w, 14};   // never below its own row (the last row of a short panel spilled out)
         if (!p.segs.empty()) {   // a few choices: one button each, the lit one is the state
@@ -1008,7 +1010,12 @@ void SamplerUI::fxSheet() {
             rrect(c, R_CONTROL, has ? SURFACE : BG); stroke(c, R_CONTROL, on ? ACCENT : OUTLINE, on ? 2 : 1);
             text(c.x + 24, c.y + c.h / 2, T_BODY - 1, has ? TEXT : DIM, fit(f.name, colW - 30, T_BODY - 1), 0, on);
             if (on) circle(c.x + 12, c.y + c.h / 2, 4.f, ACCENT); else if (has) circle(c.x + 12, c.y + c.h / 2, 3.f, OUTLINE);
-            if (has) tap(c, [this, pg] { fxOpen_ = false; app_.gotoPage(pg); });
+            if (has) tap(c, [this, pg, nm = std::string(f.name)] {
+                app_.gotoPage(pg);   // the browser stays open
+                fxFocusPage_ = (int)pg; fxFocusKnob_ = -1;   // light the knob of this effect (EQ -> EQ LOW)
+                const auto kk = app_.knobs(pg);
+                for (int i = 0; i < 4; i++) if (kk[(size_t)i].valid && std::string(kk[(size_t)i].name).rfind(nm, 0) == 0) { fxFocusKnob_ = i; break; }
+            });
             y += rh;
         }
         y += 8;

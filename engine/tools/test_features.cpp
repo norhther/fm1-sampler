@@ -1050,6 +1050,7 @@ int main() {
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE, "FX again: live fx");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE2, "FX again: live fx 2");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX3, "FX again: the OP-1 effects");
+    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX4, "FX again: fold, auto pan, vinyl, vowel");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TSTOP, "FX again: the tape stop settings");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX again: back to sends");
     // the four modes: every page belongs to exactly one, the same button steps through its pages, a mode comes back to the page it was left on
