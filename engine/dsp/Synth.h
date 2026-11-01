@@ -13,6 +13,7 @@
 #include "Fm6Voice.h"
 #include "FelVoice.h"
 #include "DrumXVoice.h"
+#include "OracleSynth.h"
 
 inline bool isKitEngine(int e) { return e == 3 || e == 8 || e == 10 || e == 11 || e == 18; }   // 16 pads, note 60 + pad
 struct SynthPatch {
@@ -78,6 +79,11 @@ static inline SynthPatch felPatch(const char* name, int engine, const float (&k)
 static inline SynthPatch x0xKitPatch(const char* name, int engine, float gain = 1.f) {   // X0X's circuit-modelled kits: engine 10 = TR-808, 16 pads (note 60 + pad)
     SynthPatch p = dungeonOsc(name, 0, gain, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.001f, 0.01f, 1.f, 0.03f);
     p.engine = engine; p.kit = 20; return p;
+}
+static inline SynthPatch oraclePatch(const char* name, int sound) {   // Tessera's ORACLE (Prophet-5 style, engine 19): x[0] = its sound; the host ADSR is the sound's amplitude envelope
+    float a, d, sus, r; oracle::Voice::adsr(sound, a, d, sus, r);
+    SynthPatch p = dungeonOsc(name, 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, a, d, sus, r);
+    p.engine = 19; p.x[0] = (float)sound; p.l1 = 1.f; return p;
 }
 static inline SynthPatch drumxKitPatch(const char* name, int kit) {   // JIANT's DRUM-X kits: engine 18, pads 0..7 its eight sounds (patch A), 8..15 the same on patch B
     SynthPatch p = dungeonOsc(name, 0, 0.9f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 1, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.001f, 0.01f, 1.f, 0.03f);
@@ -333,6 +339,31 @@ static const SynthPatch kSynths[] = {
     drumxKitPatch("DX Dub Roots Kit", 7),
     drumxKitPatch("DX Techno Raw Kit", 8),
     drumxKitPatch("DX Breaks Kit", 9),
+    // ---- ORACLE (Tessera): a Prophet-5 style voice, its 24 sounds ----
+    oraclePatch("Oracle Init", 0),
+    oraclePatch("Oracle Warm Pad", 1),
+    oraclePatch("Oracle Glass Pad", 2),
+    oraclePatch("Oracle Soft Strings", 3),
+    oraclePatch("Oracle Brass", 4),
+    oraclePatch("Oracle Sync Lead", 5),
+    oraclePatch("Oracle Funk Bass", 6),
+    oraclePatch("Oracle Sub Bass", 7),
+    oraclePatch("Oracle Acid Line", 8),
+    oraclePatch("Oracle Pluck", 9),
+    oraclePatch("Oracle Poly Bells", 10),
+    oraclePatch("Oracle Keys", 11),
+    oraclePatch("Oracle Clav", 12),
+    oraclePatch("Oracle Koto", 13),
+    oraclePatch("Oracle Drone", 14),
+    oraclePatch("Oracle Wind", 15),
+    oraclePatch("Oracle Rumble", 16),
+    oraclePatch("Oracle Square Lead", 17),
+    oraclePatch("Oracle Vox", 18),
+    oraclePatch("Oracle Sweep Pad", 19),
+    oraclePatch("Oracle Seq Blip", 20),
+    oraclePatch("Oracle Flute", 21),
+    oraclePatch("Oracle Fat Poly", 22),
+    oraclePatch("Oracle Dub Chord", 23),
 };
 constexpr int kSynthCount = (int)(sizeof(kSynths) / sizeof(kSynths[0]));
 
@@ -375,6 +406,7 @@ public:
         for (int k = 0; k < 5; k++) ph_[k] = rnd();   // free-running phases: a stack does not sound like one thick oscillator
         if (p.engine == 8) { pad_ = ((note - 60) % 16 + 16) % 16; if (p.kit >= 1 && p.kit <= kSloopKitCount) dk_.start(kSloopKits[p.kit - 1].s[pad_], kSloopKits[p.kit - 1].crush, vel, sr, padPitch, seed); else done_ = true; return; }
         if (p.engine == 3) { pad_ = ((note - 60) % 16 + 16) % 16; padPitch_ = padPitch; padDecay_ = padDecay; return; }
+        if (p.engine == 19) { or_.start((int)p.x[0], note, vel, sr, seed); return; }
         if (p.engine == 18) { pad_ = ((note - 60) % 16 + 16) % 16; dx_.start(p.kit, pad_ & 7, pad_ >= 8 ? 1.f : 0.f, 0.f, sr, seed); return; }
         if (p.engine >= 14 && p.engine <= 17) { fl_.start(p.engine - 14, p.x, sr, seed); return; }
         if (p.engine == 13) { fm_.start((int)p.x[0], (int)note_, vel, sr); return; }
@@ -406,6 +438,7 @@ public:
         t_ += dt1;
         float oL = 0.f, oR = 0.f;
         if (p.engine == 3) drum(m, oL, oR);
+        else if (p.engine == 19) { oL = oR = or_.next(freq(bend)) * p.l1; }
         else if (p.engine == 18) { oL = oR = dx_.next() * p.l1; if (!dx_.alive() && t_ > 0.02f) done_ = true; }
         else if (p.engine >= 14 && p.engine <= 17) { oL = oR = fl_.next(freq(bend), m.tone, m.motion) * p.l1; }
         else if (p.engine == 13) { oL = oR = fm_.next(bend) * p.l1; if (t_ > 0.1f && fm_.done()) done_ = true; }
@@ -584,7 +617,7 @@ private:
     }
     const SynthPatch* p_ = nullptr;
     float sr_ = 44100.f, note_ = 60.f, vel_ = 1.f, t_ = 0.f, ph_[5] = {}, ph2_ = 0.f, phs_ = 0.f, phm_ = 0.f;
-    dungeon::Voice dv_; SloopDrumVoice dk_; Acid303 ac_; Drum808Voice d8_; Tr909Voice d9_; animal::Voice an_; fm6::Voice fm_; fel::Voice fl_; DrumXVoice dx_;
+    dungeon::Voice dv_; SloopDrumVoice dk_; Acid303 ac_; Drum808Voice d8_; Tr909Voice d9_; animal::Voice an_; fm6::Voice fm_; fel::Voice fl_; DrumXVoice dx_; oracle::Voice or_;
     Lowpass lp_; int coefCount_ = 0; uint32_t rng_ = 1; bool done_ = false;
     float dl_[kDl] = {}; int plW_ = 0; float plN_ = 100.f, plDec_ = 0.99f, plZ_ = 0.f;
     float mph_[6] = {}, mAmp_[6] = {}, mf_ = 261.6f;                            // modal

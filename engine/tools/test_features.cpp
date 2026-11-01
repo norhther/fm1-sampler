@@ -242,7 +242,7 @@ static void testSynths() {
         CHECK(bad2 == 0, "plucked strings stay finite on the lowest notes (%d bad)", bad2);
     }
     // pitch: the plucked string and the FM patch follow the note (zero crossing count of a low note)
-    for (const char* nm : {"PD Bass", "PD Lead", "Neuro Bass", "Steel Gtr", "Upright Bass", "303 Classic", "303 Square", "FM6 Fm Bass", "Fel Sqr Bass", "Fel Sub Bass", "Lofi Wave Bass"}) {   // the new engine and the new strings follow the note too
+    for (const char* nm : {"PD Bass", "PD Lead", "Neuro Bass", "Steel Gtr", "Upright Bass", "303 Classic", "303 Square", "FM6 Fm Bass", "Fel Sqr Bass", "Fel Sub Bass", "Lofi Wave Bass", "Oracle Init"}) {   // the new engine and the new strings follow the note too
         int idx = -1; for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == nm) idx = i;
         Sampler sm(sr); sm.load("synth:" + std::to_string(idx));
         std::vector<float> o((size_t)sr * 2, 0.f); sm.noteOn(45, 110);
