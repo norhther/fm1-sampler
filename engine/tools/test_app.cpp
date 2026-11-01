@@ -134,6 +134,27 @@ int main() {
             CHECK(fin && diff / a.size() > 0.005 && pk < 3.0, "%s changes the sound (mean diff %.3f, peak %.2f)", e.name, diff / a.size(), pk);
         }
     }
+    {   // the FX 5 effects: comb filter, octaver, frequency shifter
+        const int sr5 = 44100, N5 = sr5 * 2;
+        auto power = [&](const std::vector<float>& v, double hz) { double re = 0, im = 0; const size_t from = 4000; for (size_t i = from; i < v.size() / 2; i++) { const double w = 2 * M_PI * hz * (double)i / sr5; re += v[2 * i] * std::cos(w); im += v[2 * i] * std::sin(w); } return (re * re + im * im) / (double)(v.size() / 2 - from); };
+        auto run5 = [&](const FxParams& p, const std::vector<float>& in) { MasterFx fx(sr5); fx.set(p); std::vector<float> o = in; for (int i = 0; i < N5; i += 256) fx.process(o.data() + 2 * i, std::min(256, N5 - i), i / (double)sr5 * 2.0, 2.0 / sr5); return o; };
+        { MasterFx fx(sr5); FxParams p; CHECK(!fx.active(), "FX 5 at rest: bypassed"); }
+        std::vector<float> noise((size_t)N5 * 2), sine((size_t)N5 * 2); uint32_t r = 7;
+        for (int i = 0; i < N5; i++) { r = r * 1664525u + 1013904223u; noise[2 * i] = noise[2 * i + 1] = ((r >> 8) / 16777216.f - 0.5f) * 0.6f; sine[2 * i] = sine[2 * i + 1] = 0.5f * std::sin(2 * M_PI * 440.0 * i / sr5); }
+        { FxParams p; p.comb = 0.9f; p.combTune = 0.4f; const auto o = run5(p, noise);   // 0.4 -> 60 Hz * 2^2 = 240 Hz
+          const double pk = power(o, 240), tr = power(o, 360), pk2 = power(o, 480); bool fin = true; double mx = 0; for (float v : o) { fin = fin && std::isfinite(v); mx = std::max(mx, (double)std::fabs(v)); }
+          CHECK(fin && mx < 3.0 && pk > 4 * tr && pk2 > 4 * tr, "COMB rings at its note: 240 Hz %.5f, 480 Hz %.5f against the dip at 360 Hz %.5f (peak %.2f)", pk, pk2, tr, mx); }
+        auto band = [&](const std::vector<float>& v, double lo, double hi) { double s = 0; for (double hz = lo; hz <= hi; hz += 4.0) s += power(v, hz); return s; };   // energy between two frequencies
+        { FxParams p; p.octave = 0.1f; const auto o = run5(p, sine); const double dn = band(o, 170, 270), dry = band(o, 400, 480), other = band(o, 600, 1500);   // a delay line shifter smears a pure tone into a few Hz of sidebands
+          CHECK(dn > 0.5 * dry && dn > 5 * other, "OCTAVE down: energy an octave below (%.0f against the dry tone's %.0f, %.0f elsewhere)", dn, dry, other); }
+        { FxParams p; p.octave = 0.9f; const auto o = run5(p, sine); const double up = band(o, 800, 960), dry = band(o, 400, 480), other = band(o, 100, 380);
+          CHECK(up > 0.05 * dry && up > 5 * other, "OCTAVE up: energy an octave above (%.0f against the dry tone's %.0f, %.0f below)", up, dry, other); }
+        { std::vector<float> s1k((size_t)N5 * 2); for (int i = 0; i < N5; i++) s1k[2 * i] = s1k[2 * i + 1] = 0.5f * std::sin(2 * M_PI * 1000.0 * i / sr5);
+          FxParams p; p.fshift = 0.5f + 0.5f * (float)std::sqrt(300.0 / 800.0); const auto up = run5(p, s1k);   // +300 Hz
+          CHECK(power(up, 1300) > 10 * power(up, 700) && power(up, 1300) > 10 * power(up, 1000), "FREQ SHIFT up: 1000 Hz moves to 1300 Hz (1300 Hz %.4f, 700 Hz %.4f, 1000 Hz %.4f)", power(up, 1300), power(up, 700), power(up, 1000));
+          p.fshift = 0.5f - 0.5f * (float)std::sqrt(300.0 / 800.0); const auto dn = run5(p, s1k);
+          CHECK(power(dn, 700) > 10 * power(dn, 1300) && power(dn, 700) > 10 * power(dn, 1000), "FREQ SHIFT down: 1000 Hz moves to 700 Hz (700 Hz %.4f, 1300 Hz %.4f)", power(dn, 700), power(dn, 1300)); }
+    }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;
 }

@@ -93,6 +93,7 @@ int main(int argc, char** argv) {
     tapAt(60, 20); ui.frame(now);   // EXIT of the chop editor
     app.gotoPage(SamplerApp::P_CHOP); app.setChopSel(2); ui.frame(now); dump("chop_page");
     app.gotoPage(SamplerApp::P_MIX); ui.frame(now); dump("mix_chip");
+    app.gotoPage(SamplerApp::P_FX5); { auto k = app.knobs(); k[0].set(0.6f); k[2].set(0.2f); k[3].set(0.75f); } ui.frame(now); dump("fx5"); ui.openFxBrowser(false); ui.frame(now); dump("fxbrowser3"); ui.touch(0, 790, 22, now); ui.touch(2, 790, 22, now); ui.frame(now);
     app.gotoPage(SamplerApp::P_PRINT); app.setPrintFx(0, true); ui.frame(now); dump("print_fx"); app.setPrintFx(0, false);
     ui.openFmHints(); ui.frame(now); dump("fm_hints"); ui.touch(0, 790, 22, now); ui.touch(2, 790, 22, now); ui.frame(now);
     app.gotoPage(SamplerApp::P_FX); ui.openFxBrowser(false); ui.frame(now); dump("fxbrowser2");

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generates the synthesized instruments of the sample library (original sounds, nothing is sampled from a recording).
 
-usage: tools/gen_instruments.py [outdir]      default: <repo>/samples
+usage: tools/gen_instruments.py [outdir] [--only=Name,Name]      default: <repo>/samples
 
 Conventions of the library: a melodic sample plays at its own pitch for MIDI note 60 (middle C), so keys, pads and leads are C4 and
 basses are C2. Drum kits hold up to 16 hits, each one a clear onset after silence (the app slices them on transients, pad = note - 60).
@@ -698,18 +698,155 @@ def place(hits):
     return out
 
 
+# ---------- more instruments (added in v0.43) ----------
+def celesta():
+    t = tt(4.5)
+    rng = seeded("Celesta")
+    y = modal(C4, t, [1, 3.99, 9.9, 15.2], [1.0, 0.45, 0.14, 0.05], [2.2, 0.8, 0.25, 0.1])
+    y += 0.1 * hp(noise(len(t), rng), 6000) * expenv(t, 0.004)               # the hammer
+    y *= attack(t, 0.001)
+    return fade(reverb(y, 1.4, 0.2, "Celesta"), 0.6)
+
+
+def toy_piano():
+    t = tt(3.0)
+    rng = seeded("Toy Piano")
+    y = modal(C4, t, [1, 2.32, 4.1, 6.5, 9.4], [1.0, 0.7, 0.45, 0.25, 0.12], [0.9, 0.35, 0.15, 0.08, 0.05])
+    y += 0.25 * bp(noise(len(t), rng), 3000, 2) * expenv(t, 0.006)
+    y = np.tanh(1.4 * y) * attack(t, 0.0008)
+    return fade(reverb(y, 0.5, 0.08, "Toy Piano"), 0.4)
+
+
+def accordion():
+    t = tt(5.0)
+    n = len(t)
+    f = C4
+    src = saw(f * cents(-7), n) + saw(f * cents(7), n, 0.31) + 0.5 * pulse(f * 2, n, 0.35, 0.1)
+    src *= 1.0 + 0.12 * np.sin(2 * np.pi * 6.0 * t)                                # the bellows
+    y = 0.9 * bp(src, 900, 1.2) + 0.7 * bp(src, 1900, 1.5) + 0.25 * lp(src, 400)
+    y *= attack(t, 0.09) ** 1.3
+    return fade(reverb(y, 0.9, 0.12, "Accordion"), 0.5)
+
+
+def moog_bass():
+    t = tt(2.6)
+    n = len(t)
+    f = C2
+    src = saw(f, n) + 0.8 * pulse(f * cents(5), n, 0.5) + 0.7 * sine(f / 2, n)
+    cut = 260 + 3600 * np.exp(-t / 0.22)
+    y = sweep_lp(src, cut, 2.4) * attack(t, 0.004) * (0.35 + 0.65 * expenv(t, 1.1))
+    return fade(np.tanh(1.3 * y), 0.4)
+
+
+def wobble_bass():
+    t = tt(4.0)
+    n = len(t)
+    f = C2
+    src = saw(f * cents(-9), n) + saw(f * cents(9), n, 0.4) + 0.6 * sine(f, n)
+    cut = 180 + 1700 * (0.5 + 0.5 * np.sin(2 * np.pi * 2.4 * t - 1.57)) ** 1.5
+    y = sweep_lp(src, cut, 3.0) * attack(t, 0.006)
+    return fade(np.tanh(1.5 * y), 0.4)
+
+
+def dub_sub():
+    t = tt(3.0)
+    n = len(t)
+    f = C2 * (1.0 + 0.45 * np.exp(-t / 0.025))
+    y = np.tanh(1.7 * sine(f, n)) * attack(t, 0.003) * (expenv(t, 1.3) * 0.9 + 0.1)
+    return fade(lp(y, 600), 0.5)
+
+
+def vapor_pad():
+    t = tt(7.0)
+    n = len(t)
+    f = C4
+    src = np.zeros(n)
+    for i, d in enumerate([-19, -10, 0, 10, 19]):
+        src += saw(f * cents(d) * vib(t, 0.31 + 0.07 * i, 0.002, 0.2), n, 0.17 * i)
+    y = sweep_lp(src, 700 + 1500 * (0.5 + 0.5 * np.sin(2 * np.pi * 0.11 * t)), 1.2)
+    y *= attack(t, 1.1) ** 1.4
+    st = chorus(y, 9, 0.18, 0.7, 16)
+    return fade(reverb(st, 3.4, 0.42, "Vapor Pad"), 1.0)
+
+
+def ice_pad():
+    t = tt(7.0)
+    n = len(t)
+    f = C4
+    rng = seeded("Ice Pad")
+    outs = []
+    for side in (-1, 1):
+        y = np.zeros(n)
+        for k, r in enumerate([1, 2, 3, 5, 7, 9, 12]):
+            lfo = 0.55 + 0.45 * np.sin(2 * np.pi * (0.05 + 0.04 * k) * t + rng.uniform(0, 6.28))
+            y += (r ** 0.15 / r) * lfo * sine(f * r * cents(0.5 * side * k), n, rng.uniform(0, 1))
+        y += 0.03 * hp(noise(n, rng), 7000) * (0.5 + 0.5 * np.sin(2 * np.pi * 0.13 * t))
+        outs.append(y)
+    st = np.stack(outs, axis=1) * (attack(t, 1.2) ** 1.3)[:, None]
+    return fade(reverb(st, 3.6, 0.45, "Ice Pad"), 1.0)
+
+
+def theremin():
+    t = tt(4.0)
+    n = len(t)
+    glide = 1.0 - 0.12 * np.exp(-t / 0.18)                                          # it slides up into the note
+    f = C4 * glide * vib(t, 5.6, 0.0075, 0.35, 0.8)
+    y = sine(f, n) + 0.12 * sine(f * 2, n, 0.2)
+    y = lp(y, 3200) * attack(t, 0.14) ** 1.2
+    return fade(reverb(y, 1.1, 0.16, "Theremin"), 0.6)
+
+
+def formant_lead():
+    t = tt(4.0)
+    n = len(t)
+    f = C4
+    src = saw(f * cents(-6) * vib(t, 5.3, 0.003, 0.4), n) + saw(f * cents(6) * vib(t, 5.3, 0.003, 0.4), n, 0.4)
+    ah = bp(src, 700, 6) + 0.55 * bp(src, 1220, 8) + 0.3 * bp(src, 2600, 10)
+    ee = bp(src, 300, 6) + 0.7 * bp(src, 2300, 9) + 0.4 * bp(src, 3000, 10)
+    m = np.clip((t - 0.4) / 2.2, 0, 1)
+    m = m * m * (3 - 2 * m)                                                          # the vowel walks from "ah" to "ee"
+    y = (ah * (1 - m) + ee * m) * attack(t, 0.04)
+    return fade(reverb(y, 1.2, 0.16, "Formant Lead"), 0.6)
+
+
+def kit909():
+    rng = seeded("909 Kit")
+    hh = 205.3 * np.array([2, 3, 4.16, 5.43, 6.79, 8.21])
+    hits = [
+        d_sine_drop(185, 50, 0.022, 0.32, 0.7, 0.55, 3.2, rng),
+        d_sine_drop(150, 42, 0.035, 0.7, 1.2, 0.3, 2.6, rng),
+        d_sine_drop(235, 185, 0.012, 0.05, 0.3, 0.0, 1.4) * 0.7 + d_noise(0.3, 0.085, rng, 1700, 12000) * 1.0,
+        d_clap(rng, 0.12, 0.009, 4) * 1.1,
+        d_noise(0.09, 0.012, rng, bpf=1800, q=2) * 2.0,
+        d_metal(hh * 1.2, 0.1, 0.017, 8500, rng),
+        d_metal(hh * 1.2, 0.5, 0.15, 8000, rng) * 0.9,
+        d_sine_drop(220, 120, 0.04, 0.22, 0.5, 0.25, 2.0, rng),
+        d_sine_drop(280, 160, 0.04, 0.2, 0.5, 0.25, 2.0, rng),
+        d_sine_drop(370, 230, 0.04, 0.18, 0.4, 0.25, 2.0, rng),
+        bp(d_metal([560, 845], 0.35, 0.12, 400, rng), 760, 1.6) * 1.8,
+        np.tanh(2 * d_sine_drop(1000, 240, 0.03, 0.08, 0.3, 0.0)) * 0.7,
+        d_sine_drop(430, 310, 0.035, 0.15, 0.3, 0.15, 1.2, rng) * 0.9,
+        d_noise(0.14, 0.035, rng, bpf=4600, q=1.2) * (0.4 + np.minimum(tt(0.14) / 0.03, 1)),
+        d_metal(hh * 1.0, 1.5, 0.55, 5000, rng) * 0.75 + d_noise(1.5, 0.5, rng, 5000) * 0.4,
+        np.tanh(3 * d_sine_drop(75, 60, 0.15, 0.6, 1.0, 0.0)) * 0.8,
+    ]
+    return place(hits)
+
+
 INSTRUMENTS = {
     "Keys": [("E-Piano", e_piano), ("Wurly", wurly), ("Organ", organ), ("Marimba", marimba), ("Music Box", music_box), ("Bell", bell),
-             ("Harpsichord", harpsichord), ("Clav", clav), ("Vibraphone", vibraphone)],
-    "Bass": [("808 Sub", sub808), ("Saw Bass", saw_bass), ("Square Bass", square_bass), ("Pluck Bass", pluck_bass), ("Reese", reese), ("Funk Bass", funk_bass)],
-    "Pads": [("Strings", strings), ("Choir", choir), ("Warm Pad", warm_pad), ("Glass Pad", glass_pad), ("Brass Pad", brass_pad), ("Dark Pad", dark_pad)],
-    "Leads": [("Square Lead", square_lead), ("Saw Lead", saw_lead), ("Chip", chip), ("Flute", flute), ("Pluck Lead", pluck_lead), ("Sync Lead", sync_lead)],
-    "Drums": [("808 Kit", kit808), ("Electro Kit", electro_kit), ("Lo-Fi Kit", lofi_kit)],
+             ("Harpsichord", harpsichord), ("Clav", clav), ("Vibraphone", vibraphone),
+             ("Celesta", celesta), ("Toy Piano", toy_piano), ("Accordion", accordion)],
+    "Bass": [("808 Sub", sub808), ("Saw Bass", saw_bass), ("Square Bass", square_bass), ("Pluck Bass", pluck_bass), ("Reese", reese), ("Funk Bass", funk_bass),
+             ("Moog Bass", moog_bass), ("Wobble Bass", wobble_bass), ("Dub Sub", dub_sub)],
+    "Pads": [("Strings", strings), ("Choir", choir), ("Warm Pad", warm_pad), ("Glass Pad", glass_pad), ("Brass Pad", brass_pad), ("Dark Pad", dark_pad), ("Vapor Pad", vapor_pad), ("Ice Pad", ice_pad)],
+    "Leads": [("Square Lead", square_lead), ("Saw Lead", saw_lead), ("Chip", chip), ("Flute", flute), ("Pluck Lead", pluck_lead), ("Sync Lead", sync_lead), ("Theremin", theremin), ("Formant Lead", formant_lead)],
+    "Drums": [("808 Kit", kit808), ("Electro Kit", electro_kit), ("Lo-Fi Kit", lofi_kit), ("909 Kit", kit909)],
 }
 
 
 # sounds without a stereo image worth the size: written as mono (the reverb of a mono sound is mono anyway)
-MONO = {"E-Piano", "Wurly", "Marimba", "Music Box", "Harpsichord", "Clav", "Flute", "Pluck Lead", "Sync Lead", "Square Lead"}
+MONO = {"Celesta", "Toy Piano", "Accordion", "Moog Bass", "Dub Sub", "Theremin", "E-Piano", "Wurly", "Marimba", "Music Box", "Harpsichord", "Clav", "Flute", "Pluck Lead", "Sync Lead", "Square Lead"}
 
 
 def write_wav(path, x, peak=0.89):
@@ -728,11 +865,16 @@ def write_wav(path, x, peak=0.89):
 
 
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "samples")
+    sel = [a[len("--only="):] for a in sys.argv[1:] if a.startswith("--only=")]
+    only = set(sel[0].split(",")) if sel else None   # --only=Name,Name: just those (the rest of the library stays as it is)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    out = args[0] if args else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "samples")
     total = 0
     for group, items in INSTRUMENTS.items():
         os.makedirs(os.path.join(out, group), exist_ok=True)
         for name, fn in items:
+            if only is not None and name not in only:
+                continue
             x = fn()
             if name in MONO and x.ndim == 2:
                 x = x.mean(axis=1)

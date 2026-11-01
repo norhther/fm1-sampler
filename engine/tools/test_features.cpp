@@ -191,7 +191,7 @@ static void testLibrary() {
     }
     CHECK(bad == 0 && files >= 40 && groups >= 5, "the library: %d files in %d groups all load and are not silent", files, groups);
     static const double slot[16] = {0.5, 1.0, 0.5, 0.5, 0.4, 0.4, 0.7, 0.5, 0.5, 0.5, 0.5, 0.4, 0.5, 0.4, 1.4, 0.9};
-    for (const char* kit : {"808 Kit", "Electro Kit", "Lo-Fi Kit", "Rusty Kit", "Boom Bap Kit"}) {
+    for (const char* kit : {"808 Kit", "Electro Kit", "Lo-Fi Kit", "Rusty Kit", "Boom Bap Kit", "909 Kit"}) {
         std::vector<float> d; int sr = 0; readWav((root / "Drums" / (std::string(kit) + ".wav")).string(), d, sr);
         const auto sl = findSlices(d, (int)(d.size() / 2), sr, 16);
         int good = 0; double want = 0.01; for (size_t i = 0; i < sl.size() && i < 16; i++) { good += std::fabs(sl[i] / (double)sr - want) < 0.03; want += slot[i]; }
@@ -229,7 +229,29 @@ static void testSynths() {
     CHECK(kSynthCount >= 20, "%d built-in synths", kSynthCount);
     CHECK(bad == 0 && silent == 0 && loud == 0, "every synth sounds, stays finite and under the ceiling (bad %d, quiet %d, loud %d)", bad, silent, loud);
     CHECK(stuck == 0, "every synth ends after the note off (%d hang)", stuck);
+    {   // a plucked string on the lowest notes: its delay line is longer than the buffer, it must stay inside it and finite
+        int bad2 = 0;
+        for (const char* nm : {"Upright Bass", "Nylon Gtr", "Pluck", "Muted Bass"}) {
+            int idx = -1; for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == nm) idx = i;
+            for (int note : {0, 8, 14, 20}) {
+                Sampler sm(sr); sm.load("synth:" + std::to_string(idx)); std::vector<float> o((size_t)sr / 2 * 2, 0.f); sm.noteOn(note, 110);
+                for (int b = 0; b < (sr / 2) / 256; b++) sm.render(o.data() + (size_t)b * 512, 256);
+                if (!finite(o)) bad2++;
+            }
+        }
+        CHECK(bad2 == 0, "plucked strings stay finite on the lowest notes (%d bad)", bad2);
+    }
     // pitch: the plucked string and the FM patch follow the note (zero crossing count of a low note)
+    for (const char* nm : {"PD Bass", "PD Lead", "Neuro Bass", "Steel Gtr", "Upright Bass"}) {   // the new engine and the new strings follow the note too
+        int idx = -1; for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == nm) idx = i;
+        Sampler sm(sr); sm.load("synth:" + std::to_string(idx));
+        std::vector<float> o((size_t)sr * 2, 0.f); sm.noteOn(45, 110);
+        for (int b = 0; b < sr / 256; b++) sm.render(o.data() + (size_t)b * 512, 256);
+        const int w = sr / 4, o0 = sr / 5; int best = 0; double bc = -1e9;
+        for (int lag = sr / 180; lag < sr / 60; lag++) { double c = 0; for (int k = 0; k < w; k++) c += o[2 * (size_t)(o0 + k)] * o[2 * (size_t)(o0 + k + lag)]; if (c > bc) { bc = c; best = lag; } }
+        const double hz = (double)sr / best;
+        CHECK(hz > 102 && hz < 118, "%s plays A2 near 110 Hz (%.0f)", nm, hz);
+    }
     for (int idx : {3, 16}) {
         Sampler sm(sr); sm.load("synth:" + std::to_string(idx));
         std::vector<float> o((size_t)sr * 2, 0.f); sm.noteOn(45, 110);   // A2 = 110 Hz
@@ -1051,6 +1073,7 @@ int main() {
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_LIVE2, "FX again: live fx 2");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX3, "FX again: the OP-1 effects");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX4, "FX again: fold, auto pan, vinyl, vowel");
+    btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX5, "FX again: comb, octaver, frequency shifter");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_TSTOP, "FX again: the tape stop settings");
     btn(SamplerApp::FX); CHECK(app.page() == SamplerApp::P_FX, "FX again: back to sends");
     // the four modes: every page belongs to exactly one, the same button steps through its pages, a mode comes back to the page it was left on

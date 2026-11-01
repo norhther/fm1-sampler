@@ -75,6 +75,46 @@ static const SynthPatch kSynths[] = {
     {"Synth Kit 808",  0, 1.0f, 0, 0, 0,   0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0,   1, 0.f, 0.f, 9000, 0.7f, 0.f, 0.1f,  0.f, 0, 0, 0, false, 0, 0.001f, 0.01f, 1.0f, 0.03f, 3, 0.f, 0.f, 0.5f, 1},
     {"Synth Kit Punch",0, 1.0f, 0, 0, 0,   0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0,   1, 0.f, 0.f, 9000, 0.7f, 0.f, 0.1f,  0.f, 0, 0, 0, false, 0, 0.001f, 0.01f, 1.0f, 0.03f, 3, 0.f, 0.f, 0.5f, 2},
     {"Synth Kit Lo-Fi",0, 1.0f, 0, 0, 0,   0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0,   1, 0.f, 0.f, 9000, 0.7f, 0.f, 0.1f,  0.f, 0, 0, 0, false, 0, 0.001f, 0.01f, 1.0f, 0.03f, 3, 0.f, 0.f, 0.5f, 3},
+    // ---- more patches (appended: a saved project names a synth by its number, so the old ones keep theirs) ----
+    {"Neuro Bass", 1, 0.7f, 1, 0.f, 14.f, 0.7f, 0.3f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 380.f, 3.5f, 2.2f, 0.35f, 0.25f, 0.f, 0.f, 0.f, false, 0.f, 0.004f, 0.4f, 0.8f, 0.1f},
+    {"Pulse Bass", 2, 0.8f, 0, 0.f, 0.f, 0.f, 0.6f, 0.f, 0.f, 0.3f, 1, 0.f, 1.f, 0.f, 0.f, 450.f, 2.f, 2.6f, 0.2f, 0.3f, 0.f, 0.f, 0.f, false, 0.f, 0.003f, 0.25f, 0.6f, 0.1f},
+    {"Mellow Bass", 3, 1.f, 0, 0.f, 0.f, 0.f, 0.5f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 700.f, 0.8f, 1.2f, 0.25f, 0.3f, 0.f, 0.f, 0.f, false, 0.f, 0.006f, 0.3f, 0.8f, 0.15f},
+    {"Sub Drop", 0, 1.f, 0, 0.f, 0.f, 0.f, 0.4f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 900.f, 0.7f, 0.f, 0.1f, 0.f, 36.f, 0.35f, 0.f, false, 0.f, 0.001f, 0.9f, 0.f, 0.3f},
+    {"Rave Stab", 1, 0.7f, 1, 7.f, 8.f, 0.5f, 0.f, 0.f, 0.f, 0.5f, 3, 14.f, 1.f, 0.f, 0.f, 1500.f, 1.2f, 2.8f, 0.22f, 0.4f, 0.f, 0.f, 0.f, false, 0.f, 0.003f, 0.25f, 0.15f, 0.15f},
+    {"Funk Stab", 1, 0.8f, 2, 12.f, 0.f, 0.35f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 1100.f, 2.2f, 2.4f, 0.15f, 0.5f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 0.18f, 0.f, 0.1f},
+    {"Trance Lead", 1, 0.9f, 2, 0.f, 4.f, 0.25f, 0.f, 0.f, 0.f, 0.5f, 5, 18.f, 1.f, 0.f, 0.f, 5200.f, 0.9f, 0.8f, 0.5f, 0.4f, 0.f, 0.f, 5.f, false, 0.f, 0.01f, 0.3f, 0.8f, 0.25f},
+    {"Bit Lead", 2, 0.9f, 2, 12.f, 0.f, 0.3f, 0.f, 0.f, 0.f, 0.25f, 1, 0.f, 1.f, 0.f, 0.f, 7000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 8.f, false, 0.f, 0.004f, 0.2f, 0.7f, 0.12f},
+    {"Reso Lead", 1, 0.8f, 1, 0.f, 6.f, 0.4f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 1800.f, 5.5f, 2.f, 0.3f, 0.4f, 0.f, 0.f, 4.f, false, 0.f, 0.006f, 0.3f, 0.8f, 0.2f},
+    {"Whistle", 0, 0.9f, 0, 12.f, 0.f, 0.08f, 0.f, 0.03f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 6000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 14.f, false, 0.f, 0.08f, 0.2f, 0.9f, 0.3f},
+    {"Space Pad", 1, 0.8f, 2, 0.f, 9.f, 0.4f, 0.3f, 0.f, 0.f, 0.5f, 5, 16.f, 1.f, 0.f, 0.f, 900.f, 2.4f, 1.8f, 2.5f, 0.3f, 0.f, 0.f, 3.f, false, 0.f, 0.55f, 1.f, 0.9f, 2.f},
+    {"Sweep Pad", 1, 0.8f, 1, 7.f, 6.f, 0.5f, 0.f, 0.f, 0.f, 0.5f, 3, 10.f, 1.f, 0.f, 0.f, 400.f, 3.2f, 3.2f, 3.f, 0.2f, 0.f, 0.f, 0.f, false, 0.f, 0.5f, 1.5f, 0.8f, 1.6f},
+    {"Ambient Drone", 1, 0.8f, 3, -12.f, 5.f, 0.6f, 0.f, 0.f, 0.f, 0.5f, 5, 25.f, 1.f, 0.f, 0.f, 600.f, 1.6f, 1.f, 3.f, 0.2f, 0.f, 0.f, 2.f, false, 0.f, 0.5f, 1.f, 1.f, 3.f},
+    {"Detune Keys", 2, 0.8f, 1, 0.f, 12.f, 0.6f, 0.f, 0.f, 0.f, 0.35f, 1, 0.f, 1.f, 0.f, 0.f, 2800.f, 1.1f, 1.6f, 0.5f, 0.5f, 0.f, 0.f, 0.f, false, 0.f, 0.004f, 0.8f, 0.35f, 0.35f},
+    {"Saw Pluck", 1, 0.9f, 1, 0.f, 7.f, 0.5f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 800.f, 1.6f, 3.f, 0.22f, 0.5f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 0.35f, 0.f, 0.2f},
+    {"Riser", 1, 0.f, 0, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 6000.f, 4.f, -4.f, 2.5f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.45f, 1.f, 0.9f, 0.6f},
+    {"Digi Bell", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 1.8f, 0.f, 0.8f, 1, 0.5f, 0.5f, 0.6f, 0},
+    {"Choir Pad", 1, 1.f, 0, 0.f, 8.f, 0.3f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 5500.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 4.f, false, 0.f, 0.35f, 0.8f, 0.9f, 1.4f, 1, 0.6f, 0.1f, 1.f, 0},
+    {"Wave Pluck", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 6000.f, 0.9f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 0.5f, 0.f, 0.2f, 1, 0.1f, 0.6f, 0.15f, 0},
+    {"Morph Lead", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 6000.f, 1.f, 0.6f, 0.4f, 0.f, 0.f, 0.f, 6.f, false, 0.f, 0.01f, 0.3f, 0.8f, 0.2f, 1, 0.2f, 0.6f, 1.2f, 0},
+    {"Hollow Keys", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 4500.f, 0.8f, 1.f, 0.4f, 0.4f, 0.f, 0.f, 0.f, false, 0.f, 0.004f, 0.9f, 0.3f, 0.3f, 1, 0.95f, -0.35f, 0.5f, 0},
+    {"Steel Drum", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 0.2f, 1.f, 0.3f, 2, 0.f, 0.f, 0.5f, 0, {1.f, 2.01f, 3.02f, 4.06f}, {1.f, 0.6f, 0.35f, 0.2f}, {1.4f, 0.9f, 0.5f, 0.3f}},
+    {"Gamelan", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 0.2f, 1.f, 0.5f, 2, 0.f, 0.f, 0.5f, 0, {1.f, 2.76f, 5.4f, 8.93f, 13.34f}, {1.f, 0.7f, 0.5f, 0.3f, 0.2f}, {2.5f, 1.6f, 1.f, 0.6f, 0.4f}},
+    {"Wood Block", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.001f, 0.2f, 1.f, 0.1f, 2, 0.f, 0.f, 0.5f, 0, {1.f, 2.3f, 4.1f}, {1.f, 0.5f, 0.25f}, {0.06f, 0.04f, 0.025f}},
+    {"Singing Bowl", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 0.2f, 1.f, 1.5f, 2, 0.f, 0.f, 0.5f, 0, {1.f, 2.71f, 5.15f, 8.4f}, {1.f, 0.6f, 0.4f, 0.2f}, {6.f, 4.5f, 3.f, 2.f}},
+    {"Xylophone", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.001f, 0.2f, 1.f, 0.1f, 2, 0.f, 0.f, 0.5f, 0, {1.f, 3.f, 6.f}, {1.f, 0.5f, 0.2f}, {0.35f, 0.12f, 0.06f}},
+    {"Crotales", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.001f, 0.2f, 1.f, 0.4f, 2, 0.f, 0.f, 0.5f, 0, {2.f, 5.4f, 10.6f}, {1.f, 0.6f, 0.3f}, {2.2f, 1.1f, 0.5f}},
+    {"Nylon Gtr", 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, true, 0.22f, 0.002f, 2.f, 0.f, 0.5f},
+    {"Steel Gtr", 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, true, 0.35f, 0.002f, 2.5f, 0.f, 0.5f},
+    {"Banjo", 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, true, 0.15f, 0.002f, 1.2f, 0.f, 0.2f},
+    {"Upright Bass", 0, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, true, 0.06f, 0.002f, 1.f, 0.f, 0.2f},
+    {"Synth Kit 909", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.001f, 0.01f, 1.f, 0.03f, 3, 0.f, 0.f, 0.5f, 4},
+    {"Synth Kit Trap", 1, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.001f, 0.01f, 1.f, 0.03f, 3, 0.f, 0.f, 0.5f, 5},
+    {"PD Bass", 0, 1.f, 0, 0.f, 0.f, 0.f, 0.4f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 1800.f, 1.f, 0.8f, 0.2f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.003f, 0.3f, 0.8f, 0.1f, 4, 0.55f, 0.4f, 0.25f, 0},
+    {"PD Lead", 1, 1.f, 0, 0.f, 7.f, 0.25f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 5000.f, 0.8f, 0.f, 0.1f, 0.f, 0.f, 0.f, 6.f, false, 0.f, 0.008f, 0.3f, 0.8f, 0.2f, 4, 0.5f, 0.3f, 0.5f, 0},
+    {"PD Reso", 3, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 7000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.01f, 0.4f, 0.7f, 0.3f, 4, 0.25f, 0.6f, 0.8f, 0},
+    {"PD Pad", 0, 1.f, 0, 0.f, 9.f, 0.5f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 3500.f, 0.8f, 0.f, 0.1f, 0.f, 0.f, 0.f, 3.f, false, 0.f, 0.4f, 1.f, 0.85f, 1.1f, 4, 0.3f, 0.2f, 2.f, 0},
+    {"PD Pluck", 2, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 4000.f, 0.8f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 0.5f, 0.f, 0.2f, 4, 0.2f, 0.75f, 0.12f, 0},
+    {"PD Bell", 3, 1.f, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.5f, 1, 0.f, 1.f, 0.f, 0.f, 9000.f, 0.7f, 0.f, 0.1f, 0.f, 0.f, 0.f, 0.f, false, 0.f, 0.002f, 2.f, 0.f, 0.8f, 4, 0.8f, -0.5f, 1.2f, 0},
 };
 constexpr int kSynthCount = (int)(sizeof(kSynths) / sizeof(kSynths[0]));
 
@@ -125,7 +165,7 @@ public:
             const int n = std::min(kDl - 2, (int)(sr / freq(0.f)));
             float z = 0.f;
             for (int i = 0; i < n; i++) { const float x = rnd() * 2.f - 1.f; z += 0.55f * (x - z); dl_[i] = z; }   // a little low-passed noise burst
-            plN_ = std::max(2.f, sr / freq(0.f) - 0.5f);
+            plN_ = clampf(sr / freq(0.f) - 0.5f, 2.f, (float)kDl - 2.f);   // a very low note plays a little sharp instead of reading outside the delay line
             plDec_ = std::pow(std::max(0.001f, std::pow(p.pluckDec, 1.f - 0.5f * m.body)), 1.f / freq(0.f));
             plW_ = n;
         }
@@ -147,7 +187,7 @@ public:
             const int w1 = ed.w1 >= 0 ? ed.w1 : p.w1, w2 = ed.w2 >= 0 ? ed.w2 : p.w2, uniN = ed.uni > 0 ? ed.uni : p.uni;
             const float f = freq(bend + pe + vibDeg / 100.f);
             if (p.pluck) {
-                float rp = (float)plW_ - plN_; if (rp < 0) rp += kDl;
+                float rp = (float)plW_ - plN_; while (rp < 0.f) rp += (float)kDl;
                 const int i0 = (int)rp, i1 = (i0 + 1) % kDl; const float fr = rp - (float)i0;
                 const float x = dl_[i0 % kDl] * (1.f - fr) + dl_[i1] * fr;
                 const float k = clampf(0.5f + 0.4f * m.tone, 0.15f, 0.95f);   // the loop filter: TONE opens or darkens the string
@@ -156,7 +196,18 @@ public:
                 oL = oR = x * 1.4f;
             } else {
                 const float dt = f * dt1;
-                if (p.engine == 1) {   // wavetable
+                if (p.engine == 4) {   // phase distortion (the Casio CZ idea): a cosine read through a bent phase; how far it is bent (DCW) follows the envelope
+                    ph_[0] += dt; ph_[0] -= std::floor(ph_[0]);
+                    const float ph = ph_[0];
+                    float dcw = clampf(p.wtPos + p.wtEnv * std::exp(-t_ / std::max(0.03f, p.wtDec)) + 0.3f * m.tone + 0.2f * m.motion * std::sin(2.f * kPi * 0.4f * t_), 0.f, 1.f);
+                    dcw *= clampf(2400.f / std::max(f, 1.f), 0.25f, 1.f);   // the sharp shapes alias on high notes: they get less of the bend
+                    float y;
+                    if (w1 == 1) { const float k = 0.5f * (1.f - 0.97f * dcw); const float q = ph < 0.5f ? std::min(1.f, ph / k) * 0.5f : 0.5f + std::min(1.f, (ph - 0.5f) / k) * 0.5f; y = std::cos(2.f * kPi * q); }   // square
+                    else if (w1 == 2) { const float k = 1.f - 0.93f * dcw; y = (ph < k ? std::cos(2.f * kPi * ph / k) : 1.f) - (1.f - k); }                                                                 // pulse (the mean is taken off)
+                    else if (w1 == 3) { const float res = 1.f + 14.f * dcw; y = std::sin(2.f * kPi * res * ph) * (1.f - dcw * ph) * (1.f - ph * ph * ph * ph * ph * ph); }                                                                          // resonant: a faster sine hard-synced to the note, faded out over the period (to zero at its end, so there is no step)
+                    else { const float k = 0.5f * (1.f - 0.98f * dcw); const float q = ph < k ? ph * 0.5f / k : 0.5f + (ph - k) * 0.5f / (1.f - k); y = std::cos(2.f * kPi * q); }                       // saw
+                    oL = oR = y * p.l1;
+                } else if (p.engine == 1) {   // wavetable
                     ph_[0] += dt; ph_[0] -= std::floor(ph_[0]);
                     const float pos = clampf(p.wtPos + p.wtEnv * std::exp(-t_ / std::max(0.05f, p.wtDec)) + 0.25f * m.tone + 0.15f * m.motion * std::sin(2.f * kPi * 0.35f * t_), 0.f, 1.f) * (WaveTable::kFrames - 1);
                     const WaveTable& wt = WaveTable::get(); const int f0 = std::min(WaveTable::kFrames - 2, (int)pos); const float ff = pos - (float)f0;
@@ -265,6 +316,13 @@ private:
         const int kit = p_->kit;
         if (kit == 2) { d.dec *= 0.6f; d.f0 *= 1.15f; d.noise *= 1.1f; d.pdec *= 0.7f; }          // punch: tighter and higher
         else if (kit == 3) { d.dec *= 1.3f; d.f0 *= 0.8f; d.f1 *= 0.85f; d.noise *= 1.4f; d.hp *= 0.6f; }   // lo-fi: lower, noisier, duller
+        else if (kit == 4) { d.dec *= 0.85f; d.f0 *= 1.1f; d.f1 *= 1.15f; d.noise *= 1.2f; d.pdec *= 0.8f; d.hp = std::min(0.95f, d.hp + 0.08f); }   // 909: tighter, brighter, harder
+        else if (kit == 5) {   // trap: a long deep kick, tiny hats, loud snares and claps
+            if (pad_ < 2) { d.dec *= 1.7f; d.f1 *= 0.8f; d.pdec *= 1.3f; }
+            else if (pad_ == 6) { d.dec *= 0.55f; d.hp = std::min(0.95f, d.hp + 0.1f); }
+            else if (pad_ == 7) d.dec *= 0.8f;
+            else if (pad_ >= 2 && pad_ <= 4) { d.noise *= 1.25f; d.f0 *= 1.2f; }
+        }
         d.dec *= std::pow(2.f, 0.8f * m.body) * std::max(0.05f, padDecay_); const float pit = std::pow(2.f, 0.3f * m.tone + padPitch_ / 12.f); d.f0 *= pit; d.f1 *= pit; d.hp = clampf(d.hp + 0.25f * m.tone, 0.02f, 0.97f);
         float s = 0.f;
         if (d.tone > 0.f) {
@@ -280,7 +338,7 @@ private:
         }
         if (d.met > 0.f) {
             static const float r[6] = {1.f, 1.4471f, 1.617f, 1.9265f, 2.5028f, 2.6637f};
-            float mt = 0.f; const float base = p_->kit == 3 ? 280.f : 330.f * (pad_ == 11 ? 1.7f : pad_ == 14 ? 1.1f : 1.f);
+            float mt = 0.f; const float base = p_->kit == 3 ? 280.f : p_->kit == 4 ? 360.f : p_->kit == 5 ? 400.f : 330.f * (pad_ == 11 ? 1.7f : pad_ == 14 ? 1.1f : 1.f);
             for (int k = 0; k < 6; k++) { ph_[k % 5] += 0.f; mphd_[k] += base * r[k] / sr_; mphd_[k] -= std::floor(mphd_[k]); mt += mphd_[k] < 0.5f ? 1.f : -1.f; }
             s += mt / 6.f * d.met * std::exp(-t_ / (d.dec * (pad_ == 11 ? 1.f : 0.7f))) * (pad_ == 11 ? 0.8f : 0.5f);
         }

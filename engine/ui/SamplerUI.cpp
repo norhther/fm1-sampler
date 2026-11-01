@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD", "CHOP", "PRINT"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD", "CHOP", "PRINT", "COMB", "TRK COMB"};   // by Page
 static_assert(sizeof(kPageTab) / sizeof(*kPageTab) == SamplerApp::kPages, "one tab label for every page");
 }  // namespace
 
@@ -996,7 +996,7 @@ void SamplerUI::fxSheet() {
     button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { fxOpen_ = false; }, 10);
     button({box.x + box.w - 250, box.y + 6, 80, 28}, "MASTER", !fxTrack_, [this] { fxTrack_ = false; }, 10);
     button({box.x + box.w - 166, box.y + 6, 92, 28}, "TRACK " + std::to_string(app_.track() + 1), fxTrack_, [this] { fxTrack_ = true; }, 10);
-    text(box.x + 14, box.y + box.h - 10, T_CAPTION, DIM, "ON THE FM-1: HOLD FX AND TURN PRESETS, LET GO TO OPEN. FX + ALGORITHM: MIX / TRACK", 0, false);
+    text(box.x + 14, box.y + box.h - 10, T_CAPTION, DIM, "FM-1: HOLD FX + TURN PRESETS, LET GO TO OPEN", 0, false);
     const FxParams fp = fxTrack_ ? app_.trackParams(app_.track()) : app_.masterParams();
     const auto& cat = SamplerApp::fxCatalog();
     const float colW = (box.w - 16 - 16) / 3, rh = 28; float colY[3] = {box.y + 46, box.y + 46, box.y + 46};

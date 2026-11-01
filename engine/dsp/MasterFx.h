@@ -5,6 +5,8 @@
 // Order: drive, EQ, chorus, flanger, phaser, tremolo, wah, ring mod, width, DJ filter, crusher, gate, repeat / reverse / freeze, tape stop, compressor.
 // The tempo-synced ones (tremolo, gate, repeat, reverse) read the beat clock of the session.
 #pragma once
+#include <array>
+#include <cmath>
 #include "Common.h"
 #include <vector>
 
@@ -16,6 +18,7 @@ struct FxParams {
     float crush = 0, tapeStop = 0, tsDown = 1.8f, tsUp = 1.8f;   // tape stop: depth, seconds to run down, seconds to spin up
     float spring = 0, springDamp = 0.5f, phone = 0, punch = 0;   // OP-1 style: spring reverb (mix, damping), phone (telephone band + grit), punch (transients + saturation)
     float fold = 0, autopan = 0, vinyl = 0, vowel = 0;   // FX 4: wave folder, auto pan (one turn every two beats), vinyl (crackle, hiss, dull top), vowel (a formant filter that walks A E I O U)
+    float comb = 0, combTune = 0.5f, octave = 0.5f, fshift = 0.5f;   // FX 5: comb filter (amount, the note it rings at), octaver (centre off, left an octave down, right an octave up), frequency shifter (centre off)
     int repeat = 0;    // 0 off, 1..4: 1/4, 1/8, 1/16, 1/32 of a beat... (note values: 1/4 = one beat)
     int reverse = 0;   // the same slices, played backwards
     int gate = 0;      // 0 off, 1..3: 1/8, 1/16, 1/32
@@ -40,10 +43,11 @@ public:
             || p_.drive > 0.004f || eqOn() || p_.tremolo > 0.004f || p_.wah > 0.004f || p_.ringmod > 0.004f
             || std::fabs(p_.filter - 0.5f) >= 0.02f || p_.crush >= 0.005f || p_.tapeStop > 0.02f || tsOn_ || p_.spring > 0.004f || p_.phone > 0.004f || p_.punch > 0.004f
             || p_.fold > 0.004f || p_.autopan > 0.004f || p_.vinyl > 0.004f || p_.vowel > 0.004f
+            || p_.comb > 0.004f || std::fabs(p_.octave - 0.5f) >= 0.02f || std::fabs(p_.fshift - 0.5f) >= 0.02f
             || p_.repeat > 0 || p_.reverse > 0 || p_.gate > 0 || p_.freeze > 0;
     }
     void feedOnly(const float* x, int n) {
-        repOn_ = false; tsOn_ = false;
+        repOn_ = false; tsOn_ = false; cbOn_ = ocOn_ = fsOn_ = false;   // the comb, octaver and shifter start clean when they come back
         const size_t N = rep_.size() / 2;
         for (int i = 0; i < n; i++) {
             cho_[0][(size_t)choW_] = x[2 * i]; cho_[1][(size_t)choW_] = x[2 * i + 1]; choW_ = (choW_ + 1) & 4095;
@@ -70,6 +74,9 @@ public:
         crush(x, n);
         phone(x, n);
         vowel(x, n);
+        fshift(x, n);
+        octaver(x, n);
+        comb(x, n);
         vinyl(x, n);
         autopan(x, n, beat0, beatsPerSample);
         gate(x, n, beat0, beatsPerSample);
@@ -104,6 +111,64 @@ private:
             const float d = x[2 * i + c]; float w = 0.f;
             for (int b = 0; b < 3; b++) { float lp, hp; vw_[b].run(c, d, lp, hp); w += (d - hp - lp) * wg[b]; }   // d - hp - lp: the band-pass, unity at its centre
             x[2 * i + c] = d + (w * 1.1f - d) * mix;
+        }
+    }
+    // ---- comb: a short feedback delay tuned to a note: the sound rings at that pitch (metal, flute, a plucked string); the loop is damped, the highs die first ----
+    void comb(float* x, int n) {
+        if (p_.comb < 0.004f) { cbOn_ = false; return; }
+        if (!cbOn_) { cbOn_ = true; for (auto& b : cb_) b.fill(0.f); cbW_ = 0; cbZ_[0] = cbZ_[1] = 0.f; }
+        const float amt = clampf(p_.comb, 0.f, 1.f), hz = 60.f * std::pow(2.f, clampf(p_.combTune, 0.f, 1.f) * 5.f), D = clampf((float)sr_ / hz - 0.82f, 3.f, (float)kCombLen - 2.f);   // 0.82: the delay of the damping one-pole is part of the loop
+        const float g = 0.4f + 0.55f * amt, mix = std::min(1.f, amt * 3.f), norm = std::sqrt(1.f - g * g) * 1.1f;   // sqrt(1-g^2): the average level stays where it was
+        for (int i = 0; i < n; i++) {
+            float rp = (float)cbW_ - D; if (rp < 0.f) rp += (float)kCombLen;
+            const int i0 = (int)rp % kCombLen, i1 = (i0 + 1) % kCombLen; const float fr = rp - std::floor(rp);
+            for (int c = 0; c < 2; c++) {
+                const float d = cb_[c][(size_t)i0] * (1.f - fr) + cb_[c][(size_t)i1] * fr;
+                cbZ_[c] += 0.55f * (d - cbZ_[c]);
+                const float in = x[2 * i + c]; float y = in + g * cbZ_[c];
+                if (!std::isfinite(y)) { y = 0.f; cbZ_[c] = 0.f; }   // a bad sample must not live in the loop for ever
+                cb_[c][(size_t)cbW_] = y;
+                x[2 * i + c] = in + (std::tanh(y * norm) - in) * mix;
+            }
+            cbW_ = (cbW_ + 1) % kCombLen;
+        }
+    }
+    // ---- octaver: a pitch shifter (two taps of a delay line that slide against the write head and cross-fade): left of the centre the sound is mixed with its octave below, right of it with its octave above ----
+    void octaver(float* x, int n) {
+        const float u = p_.octave - 0.5f;
+        if (std::fabs(u) < 0.02f) { ocOn_ = false; return; }
+        if (!ocOn_) { ocOn_ = true; for (auto& b : oc_) b.fill(0.f); ocW_ = 0; ocPh_ = 0.f; }
+        const float W = 0.045f * (float)sr_, ratio = u < 0.f ? 0.5f : 2.f, step = (1.f - ratio) / W, m = std::min(1.f, std::fabs(u) * 3.f);
+        for (int i = 0; i < n; i++) {
+            float wet[2] = {0.f, 0.f};
+            for (int tap = 0; tap < 2; tap++) {
+                float ph = ocPh_ + 0.5f * (float)tap; ph -= std::floor(ph);
+                float rp = (float)ocW_ - ph * W; while (rp < 0.f) rp += (float)kOctLen;
+                const int i0 = (int)rp % kOctLen, i1 = (i0 + 1) % kOctLen; const float fr = rp - std::floor(rp), w = std::sin(kPi * ph) * std::sin(kPi * ph);   // the two windows add up to 1
+                for (int c = 0; c < 2; c++) wet[c] += (oc_[c][(size_t)i0] * (1.f - fr) + oc_[c][(size_t)i1] * fr) * w;
+            }
+            for (int c = 0; c < 2; c++) { oc_[c][(size_t)ocW_] = x[2 * i + c]; x[2 * i + c] = x[2 * i + c] * (1.f - 0.5f * m) + wet[c] * 0.9f * m; }
+            ocW_ = (ocW_ + 1) % kOctLen; ocPh_ += step; ocPh_ -= std::floor(ocPh_);
+        }
+    }
+    // ---- frequency shifter: every partial moves by the same number of Hz (not the same ratio), so a note turns into a bell, then into noise. A Hilbert pair of all-pass chains makes the 90 degree twin of the sound ----
+    void fshift(float* x, int n) {
+        const float u = (p_.fshift - 0.5f) * 2.f;
+        if (std::fabs(u) < 0.04f) { fsOn_ = false; return; }
+        if (!fsOn_) { fsOn_ = true; for (auto& c : ap_) for (auto& a : c) a = Ap2(); fsD_[0] = fsD_[1] = 0.f; fsRamp_ = 0; }
+        static const float cI[4] = {0.6923878f, 0.9360654323f, 0.9882295227f, 0.9987488453f}, cQ[4] = {0.4021921162f, 0.8561710882f, 0.9722909546f, 0.9952884791f};
+        const float hz = std::copysign(u * u * 800.f, u), dth = 2.f * kPi * hz / (float)sr_, mix0 = std::min(1.f, std::fabs(u) * 4.f), rampN = 0.03f * (float)sr_;
+        for (int i = 0; i < n; i++) {
+            const float mix = mix0 * std::min(1.f, (float)(fsRamp_++) / rampN);   // the all-pass chains need a few ms to settle: fade the effect in
+            fsPh_ += dth; fsPh_ -= 2.f * kPi * std::floor(fsPh_ / (2.f * kPi));
+            const float co = std::cos(fsPh_), si = std::sin(fsPh_);
+            for (int c = 0; c < 2; c++) {
+                const float v = x[2 * i + c]; float a = v, b = v;
+                for (int k = 0; k < 4; k++) { a = ap_[c][k].run(a, cI[k] * cI[k]); b = ap_[c][4 + k].run(b, cQ[k] * cQ[k]); }
+                const float aD = fsD_[c]; fsD_[c] = a;   // the first path is one sample late: that makes the pair 90 degrees apart over the whole range
+                const float w = aD * co + b * si;
+                x[2 * i + c] = v + (w - v) * mix;
+            }
         }
     }
     // ---- vinyl: the top is dulled, a little hiss, and pops and crackle at random (more of them as the knob goes up) ----
@@ -419,6 +484,11 @@ private:
     float cmpEnv_ = 0;
     float puF_ = 0, puS_ = 0;                                                   // punch: fast and slow level
     float phHp_[2] = {0, 0}, phHp2_[2] = {0, 0}, phLp1_[2] = {0, 0}, phLp2_[2] = {0, 0}, phHold_[2] = {0, 0}; int phCnt_ = 0; uint32_t phRng_ = 5;   // phone
+    static constexpr int kCombLen = 2048, kOctLen = 8192;
+    std::array<float, kCombLen> cb_[2]; int cbW_ = 0; float cbZ_[2] = {0, 0}; bool cbOn_ = false;   // comb
+    std::array<float, kOctLen> oc_[2]; int ocW_ = 0; float ocPh_ = 0.f; bool ocOn_ = false;   // octaver
+    struct Ap2 { float x1 = 0, x2 = 0, y1 = 0, y2 = 0; float run(float x, float a) { const float y = a * (x + y2) - x2; x2 = x1; x1 = x; y2 = y1; y1 = y; return y; } };   // an all-pass of the second order in z^-2
+    Ap2 ap_[2][8]; float fsD_[2] = {0, 0}, fsPh_ = 0.f; int fsRamp_ = 0; bool fsOn_ = false;   // frequency shifter
     Svf vw_[3]; bool vwOn_ = false; float vyLp_[2] = {0, 0}, vyPop_ = 0; uint32_t vyRng_ = 11;   // vowel, vinyl
     static constexpr int kSpAp = 20; static constexpr size_t kSpD = 4096;       // spring: allpass stages, loop delay
     std::vector<float> spD_ = std::vector<float>(kSpD, 0.f); float spZ_[kSpAp] = {}; size_t spW_ = 0; float spLp_ = 0; bool spOn_ = false;
