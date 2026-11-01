@@ -1,3 +1,4 @@
+#include "PatternGen.h"
 #include "SamplerApp.h"
 #include "../ui/Theme.h"
 #include <Common.h>
@@ -856,6 +857,19 @@ void SamplerApp::seqDice() {
         out.push_back({i * st, st * (rnd() % 100 < 22 ? 2 : 1) * 3 / 4, note, 70 + (int)(rnd() % 50)});
     }
     s_.seqSet(track_, out.data(), (int)out.size());
+    if (ts_[track_].seqState == 0) { ts_[track_].seqState = 1; applyPattern(track_); }
+}
+void SamplerApp::seqGen() {
+    int sc[12]; int n = scaleSteps(scale_.scale, sc);
+    if (n == 0) { static const int pent[] = {0, 3, 5, 7, 10}; std::copy(pent, pent + 5, sc); n = 5; }
+    const int bars = seqBarsOf(track_), st = stepTicks(), steps = patternTicks(bars) / st;
+    genSeed_ = genSeed_ * 1664525u + (uint32_t)nowMs_ + 1013904223u;
+    const auto notes = patgen::generate(genKind_, steps, st, sc, n, scale_.root, genSeed_);
+    std::vector<Session::SeqView> out; out.reserve(notes.size());
+    for (const auto& g : notes) out.push_back({g.tick, g.len, g.note, g.vel});
+    s_.seqSet(track_, out.data(), (int)out.size());
+    say(std::string(patgen::name(genKind_)) + ": " + std::to_string(out.size()) + " NOTES");
+    genKind_ = (genKind_ + 1) % patgen::COUNT;   // the next press is the next generator
     if (ts_[track_].seqState == 0) { ts_[track_].seqState = 1; applyPattern(track_); }
 }
 void SamplerApp::seqResizeAt(int tick, int note, int len) { s_.seqResize(track_, tick, note, len); }

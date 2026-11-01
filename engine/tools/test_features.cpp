@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <Sequencer.h>
 #include <Arp.h>
+#include <PatternGen.h>
 #include <Tombola.h>
 #include <Midi.h>
 #include <Theme.h>
@@ -205,6 +206,23 @@ static void testLibrary() {
         CHECK(sl.size() == 4 && sl[0] == 0 && okS == 3 && okE == 3 && en.size() == 4,   // 4: the silence before the first hit is a chop too
                "autochop: %zu chops, %d starts on the attack (+-10 ms), %d ends at the decay", sl.size(), okS, okE);
     }
+}
+// the note generators: every one writes notes inside the pattern and the key range, repeats for a seed and changes with it
+static void testPatternGen() {
+    const int sc[7] = {0, 2, 4, 5, 7, 9, 11}, st = 48, steps = 64;
+    for (int k = 0; k < patgen::COUNT; k++) {
+        int bad = 0, empty = 0, same = 0, distinct = 0; std::vector<patgen::Note> first;
+        for (uint32_t seed = 1; seed <= 6; seed++) {
+            const auto a = patgen::generate(k, steps, st, sc, 7, 2, seed), b = patgen::generate(k, steps, st, sc, 7, 2, seed);
+            if (a.empty()) empty++;
+            for (const auto& g : a) if (g.note < 0 || g.note > 127 || g.tick < 0 || g.tick >= steps * st || g.len < 1 || g.vel < 1 || g.vel > 127) bad++;
+            if (a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](const patgen::Note& x, const patgen::Note& y) { return x.tick == y.tick && x.note == y.note && x.vel == y.vel; })) same++;
+            if (seed == 1) first = a; else if (a.size() != first.size() || !std::equal(a.begin(), a.end(), first.begin(), [](const patgen::Note& x, const patgen::Note& y) { return x.tick == y.tick && x.note == y.note; })) distinct++;
+        }
+        CHECK(bad == 0 && empty == 0 && same == 6 && distinct >= 3, "generator %s: in range (bad %d), never empty (%d), repeatable (%d/6), varies with the seed (%d/5)", patgen::name(k), bad, empty, same, distinct);
+    }
+    int acc = 0, slides = 0; for (uint32_t seed = 1; seed <= 20; seed++) for (const auto& g : patgen::generate(patgen::ACID, steps, st, sc, 7, 0, seed)) { acc += g.vel >= 120; slides += g.len > st; }
+    CHECK(acc > 20 && slides > 20, "ACID writes accents and slides (%d, %d)", acc, slides);
 }
 // the piano roll: pinch with two fingers zooms (horizontal = time, vertical = pitch), the buttons zoom too, a pinch never writes a note
 static void testSynths() {
@@ -1057,6 +1075,7 @@ int main() {
         CHECK(true, "a session can be destroyed right after it started (4 times)");
     }
     testSynths();
+    testPatternGen();
     testOp1();
     testLock();
     testMidiIn();

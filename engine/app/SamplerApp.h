@@ -174,6 +174,8 @@ public:
     void tombolaClear() { s_.tombolaClear(); }
     int tombolaSides() const { return 3 + (int)std::lround(tShape_ * 5.f); }
     void seqDice();                                       // a random pattern in the current scale
+    void seqGen();                                        // the next generator (TURING, EUCLID, MARKOV, MORPH, AWAKE, POLY, BOUNCE, ACID) writes a new pattern in the current scale
+    int genKind() const { return genKind_; }
     void seqResizeAt(int tick, int note, int len);        // touch: stretch the note that starts at `tick`
     int stepTicks() const { const int g = gridTicks(seqGrid_); return g ? g : kPpq / 4; }
     int seqGridIndex() const { return seqGrid_; }
@@ -185,6 +187,7 @@ public:
     void cycleQuant() { setQuant((quantDiv() + 1) % 5, quantTrip()); say("QUANTIZE: " + quantText()); }
     std::string quantText() const { static const char* n[5] = {"OFF", "1/4", "1/8", "1/16", "1/32"}; return std::string(n[quantDiv()]) + (quantTrip() ? " TRIPLET" : ""); }
     void cycleSeqGrid() { seqGrid_ = seqGrid_ >= kGrids - 1 || seqGrid_ < 1 ? 1 : seqGrid_ + 1; applyTempo(); }   // 1/4, 1/8, 1/8T ... 1/32T (the grid of the roll and of the quantize)
+    int genKind_ = 0; uint32_t genSeed_ = 1;
     int seqBarsOf(int t) const { return ts_[t].seqBars + 1; }
     void seqAddBarCopy() { if (ts_[track_].seqBars < 15) { ts_[track_].seqBars++; barsLocalAt_[track_] = nowMs_; s_.seqAddBar(track_, true); } }   // one more bar holding a copy of the last one
     void seqSetBarCount(int bars) { ts_[track_].seqBars = std::min(15, std::max(0, bars - 1)); barsLocalAt_[track_] = nowMs_; applyPattern(track_); }   // add or remove bars (1..16)

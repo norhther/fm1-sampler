@@ -1,3 +1,4 @@
+#include "PatternGen.h"
 #include "SamplerUI.h"
 #include <algorithm>
 #include "../dsp/Tombola.h"
@@ -651,6 +652,7 @@ void SamplerUI::sequencerView(Rect r) {
     }
     b(st_.seqOne[t] ? "ONCE" : "LOOP", st_.seqOne[t], [this, t] { app_.setOneShot(t, !st_.seqOne[t]); });   // the pattern repeats (LOOP) or plays one pass and stops (ONCE)
     b("DICE", false, [this] { app_.seqDice(); });
+    b(patgen::name(app_.genKind()), false, [this] { app_.seqGen(); });   // Tessera's generators, one after the other
     b("CLEAR", false, [this] { app_.seqClear(); showUndo("PATTERN CLEARED"); });   // it can be undone: no question, an UNDO that stays a few seconds
 }
 

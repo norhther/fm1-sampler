@@ -142,7 +142,9 @@ Host-tested only (test_app all green, screenshots of both screens checked). **No
 - **FM6** (Felucca's six-operator FM, msfa / Dexed core) with its 15 factory patches.
 - **Felucca-Engines** (MIT, Leo Kuroshita), float ports: **ANALOG** (saw/square/tri/sine/PWM, hard sync, sub), **TRIO** (three oscillators, ring mod, sync, multimode filter), **LOFI** (chip voice: 4/8/1-bit, wave RAM, stepped envelope, sweep, arp) and **NOISE** (analog, dust, shift-register and metallic noise). 28 patches.
 - **DRUM-X** (JIANT, GPL-3.0): nine synthesised kits. Pads 0-7 are the eight sounds on patch A, pads 8-15 the same on patch B.
-- 220 synths in all. Not ported yet: Felucca GRAIN and PHYS, JIANT STRING, the TB-3PO line generator and the break player.
+- **ORACLE** (Tessera, GPL-3.0, Theo Dainis): a Prophet-5 style voice (two oscillators, Poly-Mod, four-pole ladder, sync, VINTAGE drift) with its 24 sounds.
+- **Pattern generators** on the pattern page (button beside DICE, one press = the next generator): TURING, EUCLID, MARKOV, MORPH, AWAKE, POLY, BOUNCE (ideas from Tessera) and ACID (a 303 line with accents and slides, after X0X's TB-3PO). Seeded, in the current scale.
+- 253 synths in all. Not ported yet: Felucca GRAIN and PHYS, JIANT STRING, the break player, Tessera's EVOLVE / FORM / cords, and SID.
 
 ## v0.44
 
