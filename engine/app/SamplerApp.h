@@ -123,7 +123,7 @@ public:
     void selectPad(int pad) { ts_[track_].selPad = std::min(15, std::max(0, pad)); }
     void resampleNow();                                   // the sound you hear (bars of the loop or of the pattern) becomes a sample on this track
     void applyEdit(int t);
-    void setSliceStarts(const std::vector<float>& pts) { s_.setSliceStarts(track_, pts); }
+    void setSliceStarts(const std::vector<float>& pts, const std::vector<float>& ends = {}) { s_.setSliceStarts(track_, pts, ends); }
     // pattern banks A..H and the song (a chain of banks played one after the other on every track)
     int patternSlot(int t) const { return st_.seqSlot[t]; }
     void selectPattern(int slot) { s_.seqSelectPattern(track_, slot, false); }

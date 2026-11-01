@@ -197,6 +197,14 @@ static void testLibrary() {
         int good = 0; double want = 0.01; for (size_t i = 0; i < sl.size() && i < 16; i++) { good += std::fabs(sl[i] / (double)sr - want) < 0.03; want += slot[i]; }
         CHECK(sl.size() == 16 && good == 16, "%s: the slicer finds all 16 hits (%d of 16 on time)", kit, good);
     }
+    {   // a hit with a slow attack: the chop starts where the attack begins (not at its peak) and ends when the hit has died away
+        const int sr2 = 44100, n = sr2 * 3; std::vector<float> d((size_t)n * 2, 0.f); const double at[3] = {0.5, 1.2, 1.9};
+        for (double t0 : at) for (int i = 0; i < sr2 * 0.6; i++) { const double t = i / (double)sr2, env = t < 0.02 ? t / 0.02 : std::exp(-(t - 0.02) / 0.05); const float v = (float)(env * std::sin(2 * M_PI * 220 * t)); const size_t k = ((size_t)(t0 * sr2) + i) * 2; d[k] = v; d[k + 1] = v; }
+        std::vector<int> en; const auto sl = findSlices(d, n, sr2, 8, 1.f, &en);
+        int okS = 0, okE = 0; for (size_t i = 0; i < sl.size(); i++) for (double t0 : at) if (std::fabs(sl[i] / (double)sr2 - t0) < 0.01) { okS++; const double len = (en[i] - sl[i]) / (double)sr2; okE += len > 0.1 && len < 0.45; }
+        CHECK(sl.size() == 4 && sl[0] == 0 && okS == 3 && okE == 3 && en.size() == 4,   // 4: the silence before the first hit is a chop too
+               "autochop: %zu chops, %d starts on the attack (+-10 ms), %d ends at the decay", sl.size(), okS, okE);
+    }
 }
 // the piano roll: pinch with two fingers zooms (horizontal = time, vertical = pitch), the buttons zoom too, a pinch never writes a note
 static void testSynths() {
@@ -1497,7 +1505,7 @@ int main() {
         { std::vector<float> tail(heard.begin() + (long)(0.6 * sr) * 2, heard.end()); CHECK(rms(tail, 0, tail.size()) < 0.003, "KEY: HOLD: the chop stops with the key (rms %.4f)", rms(tail, 0, tail.size())); }
         a6.setChopFull(true); run6(0.2);
         a6.playNote(60, true); run6(0.1); a6.playNote(60, false); heard.clear(); run6(0.5);
-        CHECK(rms(heard, 0, heard.size()) > 0.01, "KEY: WHOLE CHOP: it keeps sounding after the key is up (rms %.4f)", rms(heard, 0, heard.size()));
+        CHECK(rms(heard, 0, heard.size()) > 0.005, "KEY: WHOLE CHOP: it keeps sounding after the key is up (rms %.4f)", rms(heard, 0, heard.size()));
         // the TRIGGER page
         a6.gotoPage(SamplerApp::P_TRIG); { auto k = a6.knobs(); int v = 0; for (auto& kn : k) v += kn.valid; CHECK(v == 4 && SamplerApp::modeOf(SamplerApp::P_TRIG) == 2, "the TRIGGER page: four knobs, in the SEQ tab"); }
         // the full screen editor

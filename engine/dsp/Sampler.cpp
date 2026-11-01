@@ -76,7 +76,7 @@ bool Sampler::load(const std::string& path) {
         float m = 0.f; for (long i = a; i < e; i += step) m = std::max(m, std::fabs(buf->d[(size_t)i * 2]));
         peaks_[(size_t)b] = m;
     }
-    slices_ = findSlices(buf->d, buf->frames, buf->sr, 16);
+    slices_ = findSlices(buf->d, buf->frames, buf->sr, 16, 1.f, &sliceEnds_);
     rootGuess_ = detectPitch(buf->d, buf->frames, buf->sr);
     const size_t slash = path.find_last_of("/\\"), dot = path.rfind('.');
     label_ = path.substr(slash == std::string::npos ? 0 : slash + 1);
@@ -96,6 +96,7 @@ void Sampler::resolveWindow(Voice& v, const SampleBuf*& buf, double& ws, double&
         if (mode_ == KIT) {
             const int n = (int)slices_.size(), i = v.slice % n;
             ws = slices_[(size_t)i]; we = i + 1 < n ? slices_[(size_t)i + 1] : buf->frames;
+            if (sliceEnds_.size() == slices_.size() && sliceEnds_[(size_t)i] > ws + 16) we = std::min<double>(sliceEnds_[(size_t)i], buf->frames);   // its own end
         } else { ws = rangeA_ * buf->frames; we = rangeB_ * buf->frames; }
     } else {
         buf = proc_.get();   // a stretched copy of [procA, procB]: the window is the same range inside it

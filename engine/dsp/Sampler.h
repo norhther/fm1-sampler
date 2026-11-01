@@ -34,7 +34,8 @@ public:
     void setRoot(int midi) { root_ = std::min(108, std::max(12, midi)); }   // the key that plays the sample at its own pitch (60 = C4, how the library is tuned)
     void setChopFull(bool on) { chopFull_ = on; }   // KIT: a pad plays its whole chop when the key goes down (true), or only as long as the key is held (false)
     const std::vector<int>& slices() const { return slices_; }
-    void setSlices(std::vector<int> s) { if (s.size() >= 2) slices_ = std::move(s); }
+    const std::vector<int>& sliceEnds() const { return sliceEnds_; }   // same size as slices() or empty (a chop then ends where the next one starts)
+    void setSlices(std::vector<int> s, std::vector<int> e = {}) { if (s.size() >= 2) { slices_ = std::move(s); sliceEnds_ = e.size() == slices_.size() ? std::move(e) : std::vector<int>(); } }
     // per pad (KIT mode and the synth drum kits: pad = note - 60 mod 16): level, tuning in semitones, decay length, pan, choke group (0 = none; a pad cuts the sounding pads of its group)
     struct Pad { float vol = 1.f, pitch = 0.f, decay = 1.f, pan = 0.f; int group = 0; };
     void setPad(int pad, const Pad& p) { if (pad >= 0 && pad < 16) pads_[pad] = p; }
@@ -42,7 +43,7 @@ public:
     void setLevel(float g) { level_ = clampf(g, 0.f, 3.f); }           // sample level
     void setFine(float cents) { fine_ = clampf(cents, -100.f, 100.f); }   // fine tuning
     // audio thread: the sample was edited (reversed, trimmed ...): the new buffer with its overview and slices, built on the worker
-    void replaceOriginal(std::shared_ptr<const SampleBuf> b, std::vector<float> peaks, std::vector<int> slices) { allOff(); orig_ = std::move(b); proc_.reset(); peaks_ = std::move(peaks); if (slices.size() >= 2) slices_ = std::move(slices); }
+    void replaceOriginal(std::shared_ptr<const SampleBuf> b, std::vector<float> peaks, std::vector<int> slices) { allOff(); orig_ = std::move(b); proc_.reset(); peaks_ = std::move(peaks); if (slices.size() >= 2) { slices_ = std::move(slices); sliceEnds_.clear(); } }
     static std::vector<float> overview(const SampleBuf& b);
     void setSynthMacros(const SynthMacros& m) { mac_ = m; }
     void setSynthEdit(const SynthEdit& e) { edit_ = e; }   // TONE, BODY, MOTION, GRIT of a built-in synth
@@ -82,7 +83,7 @@ private:
     int sr_;
     std::shared_ptr<const SampleBuf> orig_, proc_;
     float procA_ = 0, procB_ = 1, rangeA_ = 0, rangeB_ = 1, bend_ = 0, atk_ = 0.01f, dec_ = 0.3f, sus_ = 0.8f, rel_ = 0.3f;
-    bool chopFull_ = false; int mode_ = MELODIC; std::vector<int> slices_; std::string label_; std::vector<float> peaks_;
+    bool chopFull_ = false; int mode_ = MELODIC; std::vector<int> slices_, sliceEnds_; std::string label_; std::vector<float> peaks_;
     Voice voices_[kVoices]; std::vector<std::unique_ptr<PaulStream>> paul_; bool paulBusy_[kVoices] = {};
     uint32_t bornCounter_ = 0, rng_ = 7;
     bool loadSynth(int idx);

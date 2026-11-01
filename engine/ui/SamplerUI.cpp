@@ -223,9 +223,19 @@ void SamplerUI::waveDraw(Rect w) {
         rrect({w.x + i * bw + 0.5f, cy - std::max(1.f, v * (w.h / 2 - 8)), std::max(1.f, bw - 1), std::max(2.f, v * (w.h - 16))}, 0, in ? TEXT : OUTLINE);
     }
     if (pk.empty()) text(w.x + w.w / 2, cy, T_BODY, DIM, "NO SAMPLE", 1, false);
-    if (ts.algo == 3 && !app_.isSynth(t)) {   // KIT: where the pads start
-        const auto sl = app_.session().slicesOf(t);
-        for (size_t i = 0; i < sl.size(); i++) { const float sx = w.x + 2 + sl[i] * (w.w - 4); line(sx, w.y + 6, sx, w.y + w.h - 6, theme::withAlpha(ACCENT, 170), 1); text(sx + 3, w.y + w.h - 14, 8.f, ACCENT, std::to_string(i + 1), 0, false); }
+    if (ts.algo == 3 && !app_.isSynth(t)) {   // KIT: every chop from its start to its end, the selected one shaded
+        std::vector<float> cs, ce; chopsNow(cs, ce);
+        if (chopIdx_ < 0 && chopHold_ > 0) chopHold_--;
+        const int sel = std::min(chopSel_, (int)cs.size() - 1);
+        auto X = [&](float v) { return w.x + 2 + v * (w.w - 4); };
+        for (int i = 0; i < (int)cs.size(); i++) {
+            const bool on = i == sel; const float sx = X(cs[(size_t)i]), ex = X(ce[(size_t)i]);
+            if (on) rrect({sx, w.y + 6, std::max(1.f, ex - sx), w.h - 12}, 0, theme::withAlpha(ACCENT, 45));
+            line(sx, w.y + 6, sx, w.y + w.h - 6, on ? ACCENT : theme::withAlpha(ACCENT, 170), on ? 2.f : 1.f);
+            text(sx + 3, w.y + w.h - 14, 8.f, ACCENT, std::to_string(i + 1), 0, false);
+            const uint32_t ec = on ? ACCENT : theme::withAlpha(DIM, 170);
+            line(ex, w.y + 6, ex, w.y + w.h - 6, ec, on ? 2.f : 1.f); rrect({ex - 6, w.y + 6, 6, 9}, 1, ec);   // the end has its flag on the left of the line
+        }
     }
     for (int j = 0; j < st_.voiceN[t]; j++) {   // where the sounding voices are reading
         const float vx = w.x + 2 + st_.voicePos[t][j] * (w.w - 4);
@@ -234,21 +244,44 @@ void SamplerUI::waveDraw(Rect w) {
     }
 }
 
-// KIT: tap the waveform to cut a new pad there, tap a mark to remove it (two stay), drag a mark to move it
+void SamplerUI::chopsNow(std::vector<float>& s, std::vector<float>& e) const {
+    if (chopIdx_ >= 0 || chopHold_ > 0) { s = chopS_; e = chopE_; return; }
+    s = app_.session().slicesOf(app_.track()); e = app_.session().sliceEndsOf(app_.track());
+    if (e.size() != s.size()) { e.clear(); for (size_t i = 0; i < s.size(); i++) e.push_back(i + 1 < s.size() ? s[i + 1] : 1.f); }
+}
+void SamplerUI::chopDelete() {
+    std::vector<float> s, e; chopsNow(s, e); if (s.size() <= 2) return;
+    const int sel = std::min(chopSel_, (int)s.size() - 1);
+    s.erase(s.begin() + sel); e.erase(e.begin() + sel);
+    chopS_ = s; chopE_ = e; chopHold_ = 8; chopSel_ = std::min(sel, (int)s.size() - 1);
+    app_.setSliceStarts(s, e);
+}
+// KIT: every chop has its own START and END handle; drag one and nothing else moves. Tap a handle to select its chop, tap empty wave to cut a new chop
 void SamplerUI::chopEdit(Rect w) {
-    const int t = app_.track();
-        auto pts = std::make_shared<std::vector<float>>(app_.session().slicesOf(t));
-        const float wx = w.x + 2, ww = w.w - 4;
-        hit({w.x, w.y + 22, w.w, w.h - 22},
-            [this, pts, wx, ww](float x, float) { chopIdx_ = -1; chopMoved_ = false; int best = -1; float bd = 14.f; for (size_t i = 0; i < pts->size(); i++) { const float d = std::fabs(wx + (*pts)[i] * ww - x); if (d < bd) { bd = d; best = (int)i; } }
-                if (best < 0) { pts->push_back(clamp01((x - wx) / ww)); std::sort(pts->begin(), pts->end()); for (size_t i = 0; i < pts->size(); i++) if (std::fabs(wx + (*pts)[i] * ww - x) < 1.5f) best = (int)i; chopNew_ = true; } else chopNew_ = false;
-                chopIdx_ = best; },
-            [this, pts, wx, ww](float x, float) { if (chopIdx_ < 0 || chopIdx_ >= (int)pts->size()) return; chopMoved_ = true; (*pts)[(size_t)chopIdx_] = clamp01((x - wx) / ww); },
-            [this, pts, t]() {
-                if (chopIdx_ < 0) return;
-                if (!chopMoved_ && !chopNew_ && pts->size() > 2) pts->erase(pts->begin() + chopIdx_);   // a tap on a mark removes it (the last two stay)
-                else if (!chopMoved_ && !chopNew_) return;
-                app_.setSliceStarts(*pts); chopIdx_ = -1; });
+    const float wx = w.x + 2, ww = w.w - 4;
+    hit({w.x, w.y + 22, w.w, w.h - 22},
+        [this, wx, ww](float x, float) {
+            chopsNow(chopS_, chopE_); chopHold_ = 0; chopIdx_ = -1; chopMoved_ = false; chopNew_ = false; chopEndH_ = false;
+            const int n = (int)chopS_.size(), sel = std::min(chopSel_, n - 1); float bd = 14.f;
+            for (int k = 0; k < n; k++) {   // the selected chop first, so when handles sit on top of each other it wins
+                const int i = k == 0 ? sel : (k - 1 < sel ? k - 1 : k);
+                for (int h = 0; h < 2; h++) { const float d = std::fabs(wx + (h ? chopE_[(size_t)i] : chopS_[(size_t)i]) * ww - x); if (d < bd) { bd = d; chopIdx_ = i; chopEndH_ = h == 1; } }
+            }
+            if (chopIdx_ >= 0) return;
+            const float v = clamp01((x - wx) / ww); float nx = 1.f; for (float st : chopS_) if (st > v + 0.002f) nx = std::min(nx, st);
+            std::vector<std::pair<float, float>> c; for (int i = 0; i < n; i++) c.push_back({chopS_[(size_t)i], chopE_[(size_t)i]});
+            c.push_back({v, std::max(nx, v + 0.002f)}); std::stable_sort(c.begin(), c.end(), [](auto& a, auto& b) { return a.first < b.first; });
+            chopS_.clear(); chopE_.clear(); for (int i = 0; i < (int)c.size(); i++) { chopS_.push_back(c[(size_t)i].first); chopE_.push_back(c[(size_t)i].second); if (c[(size_t)i].first == v) chopIdx_ = i; }
+            chopNew_ = true; },
+        [this, wx, ww](float x, float) {
+            if (chopIdx_ < 0 || chopIdx_ >= (int)chopS_.size()) return;
+            const float v = clamp01((x - wx) / ww); chopMoved_ = true;
+            if (chopEndH_) chopE_[(size_t)chopIdx_] = std::max(v, chopS_[(size_t)chopIdx_] + 0.002f); else chopS_[(size_t)chopIdx_] = std::min(v, chopE_[(size_t)chopIdx_] - 0.002f); },
+        [this]() {
+            if (chopIdx_ < 0) return;
+            chopSel_ = chopIdx_;
+            if (chopMoved_ || chopNew_) { chopHold_ = 8; app_.setSliceStarts(chopS_, chopE_); }
+            chopIdx_ = -1; });
 }
 
 void SamplerUI::sampleArea(Rect r) {
@@ -628,13 +661,14 @@ void SamplerUI::chopFullScreen() {
     add("EXIT", false, [this] { chopScreen_ = false; });
     add("AUTO CHOP", false, [this] { chopEven_ = false; app_.autoChop(); });
     add("EVEN CHOP", false, [this] { chopEven_ = true; app_.evenChop(); });
+    add("DELETE CHOP", false, [this] { chopDelete(); });
     add("CHOPS: " + std::to_string(SamplerApp::chopCount(ts.sliceCount)), false, [this] { app_.cycleChopCount(); if (chopEven_) app_.evenChop(); else app_.autoChop(); });
     add(std::string("SENS: ") + sens[ts.sliceSens < 0.3f ? 0 : ts.sliceSens < 0.6f ? 1 : 2], false, [this] { app_.cycleChopSens(); chopEven_ = false; app_.autoChop(); });
     add(ts.chopFull ? "KEY: WHOLE CHOP" : "KEY: HOLD", ts.chopFull != 0, [this, ts] { app_.setChopFull(!ts.chopFull); });
     const float w0 = (W_ - 2 * m - gap * (items.size() - 1)) / items.size();
     for (size_t i = 0; i < items.size(); i++) button({m + i * (w0 + gap), m, w0, h}, items[i].first, on[i], items[i].second, 9.5f, i == 0);
     const auto sl = app_.session().slicesOf(t); const int n = std::min<int>(16, (int)sl.size());
-    text(m, m + h + 12, T_CAPTION, DIM, "TAP THE WAVEFORM: NEW CUT. DRAG A MARK: MOVE IT. TAP A MARK: REMOVE IT. THE NUMBERS BELOW PLAY EACH CHOP.", 0, false);
+    text(m, m + h + 12, T_CAPTION, DIM, "DRAG A START OR END FLAG: ONLY THAT EDGE MOVES. TAP A FLAG: SELECT. TAP THE WAVE: NEW CHOP. THE NUMBERS BELOW PLAY EACH CHOP.", 0, false);
     text(W_ - m, m + h + 12, T_CAPTION, ACCENT, ts.chopFull ? "A KEY PLAYS THE WHOLE CHOP" : "THE CHOP SOUNDS WHILE THE KEY IS HELD", 2, true);
     const float padH = 44, wy = m + h + 22;
     const Rect w{m, wy, W_ - 2 * m, H_ - m - padH - 8 - wy};
@@ -646,9 +680,9 @@ void SamplerUI::chopFullScreen() {
         for (int i = 0; i < n; i++) {   // down plays the chop, up lets it go: what KEY: HOLD / WHOLE CHOP means
             const Rect c{m + i * (pw + gap), H_ - m - padH, pw, padH};
             const bool lit = (padMask_ >> i) & 1;
-            rrect(c, R_CONTROL, lit ? ACCENT : SURFACE); stroke(c, R_CONTROL, OUTLINE, 1);
+            rrect(c, R_CONTROL, lit ? ACCENT : SURFACE); stroke(c, R_CONTROL, i == chopSel_ ? ACCENT : OUTLINE, i == chopSel_ ? 2 : 1);
             text(c.x + c.w / 2, c.y + c.h / 2, 12, lit ? ON_ACCENT : TEXT, std::to_string(i + 1), 1, true);
-            hit(c, [this, i](float, float) { padMask_ |= 1u << i; app_.padHit(i, 100, true); }, [](float, float) {}, [this, i]() { padMask_ &= ~(1u << i); app_.padHit(i, 0, false); });
+            hit(c, [this, i](float, float) { chopSel_ = i; padMask_ |= 1u << i; app_.padHit(i, 100, true); }, [](float, float) {}, [this, i]() { padMask_ &= ~(1u << i); app_.padHit(i, 0, false); });
         }
     }
 }
