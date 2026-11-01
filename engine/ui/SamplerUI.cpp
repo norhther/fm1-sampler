@@ -452,7 +452,7 @@ void SamplerUI::sequencerView(Rect r) {
         else { rollRowsF_ = 10.f; rollBase_ = 55.f; }
     }
     // toolbar: undo, redo, zoom in time and pitch, fit, grid, select
-    const float tbh = 26, bw9 = (r.w - 7 * 4) / 8.9f;   // the last two buttons (GRID, SELECT) are a bit wider (zooming the rows is the vertical pinch)
+    const float tbh = 26, bw9 = (r.w - 7 * 4) / 9.3f;   // the last two buttons (GRID, SELECT) are a bit wider (zooming the rows is the vertical pinch)
     int tx = 0; float tbx = r.x;
     auto tb = [&](const std::string& label, bool on, std::function<void()> f, float wmul = 1.f) { button({tbx, r.y, bw9 * wmul, tbh}, label, on, std::move(f), 9.5f); tbx += bw9 * wmul + 4; tx++; };
     tb("UNDO", st_.seqUndoN[t] > 0, [this] { app_.seqUndo(); });
@@ -467,7 +467,8 @@ void SamplerUI::sequencerView(Rect r) {
     // the roll
     const float keyW = drumView_ ? 76.f : 34.f, rulerH = 14;
     const float panelH = selMode_ ? 86.f : 0.f, slotH = 26.f;
-    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46 - panelH - slotH - 4};
+    const float tapeH = app_.loopExists() ? 26.f : 0.f;   // the row that says where on the tape TAPE puts the pattern
+    Rect roll{r.x, r.y + tbh + 4, r.w, r.h - tbh - 4 - 46 - panelH - slotH - 4 - tapeH};
     rrect(roll, R_CARD, SURFACE); stroke(roll, R_CARD, OUTLINE, 1);
     if (drumView_) { rollRowsF_ = 8.f; rollBase_ = 60.f + 8.f * (drumView_ - 1); }   // one row per pad, eight at a time
     rollZoom_ = std::min(zoomMax, std::max(1.f, rollZoom_)); rollRowsF_ = std::min(60.f, std::max(5.f, rollRowsF_));
@@ -618,7 +619,21 @@ void SamplerUI::sequencerView(Rect r) {
     int bx = 0;
     auto b = [&](const std::string& label, bool on, std::function<void()> f, bool accent = false) { button({r.x + barsW + 6 + bx * (bw + 6), by, bw, 38}, label, on, std::move(f), 10.5f, accent); bx++; };
     b(st_.keyTrig[t] ? "KEY TRIG" : "KEYS", st_.keyTrig[t], [this, t] { app_.setKeyTrigger(t, !st_.keyTrig[t]); }, st_.keyTrig[t]);   // OP-1 style: a key plays the pattern, transposed by its distance from C4. STOP / PLAY / REC are the buttons of the right panel
-    b("TAPE", false, [this] { app_.seqBounce(); });   // one pass of this pattern recorded on the tape (sets the loop length)
+    b(st_.bounce == 1 ? "WAITING..." : st_.bounce == 2 ? "REC TAPE" : "TAPE", st_.bounce > 0, [this] { app_.seqBounce(); }, st_.bounce > 0);   // lit while it waits for its bar or records; tap again to cancel
+    if (tapeH > 0) {   // TAPE lands the pattern on bar 1, 2, 3 ... of the tape (the lit bars are what it would fill), or on ALL of it
+        const int bb = app_.bounceBar(), tb = std::max(1, st_.loopBars), pb = std::min(tb, std::max(1, nb));
+        const float sy = r.y + r.h - 70, sh = 24, lw = 74, aw = 44, cell = (r.w - lw - aw - 8) / tb;
+        text(r.x + 2, sy + sh / 2, 8.5f, DIM, "TAPE LANDS ON", 0, true);
+        button({r.x + lw + 76 - 76 + 28, sy, aw, sh}, "ALL", bb == 0, [this] { app_.setBounceBar(0); }, 9.5f);
+        for (int k = 1; k <= tb; k++) {
+            const Rect c{r.x + lw + 28 + aw + 4 + (k - 1) * cell, sy, cell - 3, sh};
+            const bool fits = k + pb - 1 <= tb, lit = bb != 0 && k >= bb && k < bb + pb;
+            rrect(c, R_CONTROL, lit ? ACCENT : SURFACE);
+            if (!lit) stroke(c, R_CONTROL, bb == 0 ? ACCENT : OUTLINE, 1);
+            text(c.x + c.w / 2, c.y + sh / 2, 9.5f, lit ? ON_ACCENT : fits ? TEXT : DIM, std::to_string(k), 1, true);
+            if (fits) tap(c, [this, k] { app_.setBounceBar(k); });
+        }
+    }
     b(st_.seqOne[t] ? "ONCE" : "LOOP", st_.seqOne[t], [this, t] { app_.setOneShot(t, !st_.seqOne[t]); });   // the pattern repeats (LOOP) or plays one pass and stops (ONCE)
     b("DICE", false, [this] { app_.seqDice(); });
     b("CLEAR", false, [this] { app_.seqClear(); showUndo("PATTERN CLEARED"); });   // it can be undone: no question, an UNDO that stays a few seconds
@@ -832,11 +847,11 @@ void SamplerUI::pagePanel(Rect r) {
         if (!p.valid) continue;
         text(r.x, y + 8, T_CAPTION, DIM, p.name, 0, true);
         text(r.x + r.w, y + 10, T_VALUE, p.isChoice ? ACCENT : TEXT, p.value, 2, true);
-        Rect s{r.x, y + 26, r.w, 14};
+        Rect s{r.x, y + std::min(26.f, rh - 16), r.w, 14};   // never below its own row (the last row of a short panel spilled out)
         if (!p.segs.empty()) {   // a few choices: one button each, the lit one is the state
             const float sw = (r.w - 4.f * (p.segs.size() - 1)) / p.segs.size();
             for (size_t j = 0; j < p.segs.size(); j++)
-                button({r.x + j * (sw + 4), y + 20, sw, 30}, p.segs[j], (int)j == p.segCur, [this, i, j] { auto kk = app_.knobs(); if (kk[(size_t)i].pick) kk[(size_t)i].pick((int)j); }, 9.5f, (int)j == p.segCur);
+                button({r.x + j * (sw + 4), y + std::min(20.f, rh - 32), sw, 30}, p.segs[j], (int)j == p.segCur, [this, i, j] { auto kk = app_.knobs(); if (kk[(size_t)i].pick) kk[(size_t)i].pick((int)j); }, 9.5f, (int)j == p.segCur);
             continue;
         }
         rrect(s, 0, SURFACE); stroke(s, 0, OUTLINE, 1);
@@ -845,7 +860,7 @@ void SamplerUI::pagePanel(Rect r) {
         } else {
             rrect({s.x, s.y, std::max(2.f, s.w * clamp01(p.norm)), s.h}, 0, theme::KNOB[i & 3]);
         }
-        Rect hr{s.x, y + 14, s.w, 40};
+        Rect hr{s.x, s.y - 12, s.w, std::min(40.f, rh)};
         hit(hr, [this, i, hr](float x, float) { app_.knobs()[(size_t)i].set(clamp01((x - hr.x) / hr.w)); },
             [this, i, hr](float x, float) { app_.knobs()[(size_t)i].set(clamp01((x - hr.x) / hr.w)); });
     }

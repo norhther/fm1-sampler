@@ -740,11 +740,20 @@ void SamplerApp::newLoop(int bars, bool sequencer) {
     applyTempo(); gotoPage(P_TAPEV); loopRecord();
 }
 void SamplerApp::seqBounce() {
-    if (!st_.seqCount[track_]) { say("PATTERN IS EMPTY"); return; }
-    if (st_.bounce) { say("ALREADY RECORDING"); return; }
+    if (st_.bounce) { s_.seqBounceCancel(); say("PATTERN TO TAPE CANCELLED"); return; }   // a second tap cancels
+    if (!st_.seqCount[track_]) { say("PATTERN IS EMPTY: HOLD SEQ AND PLAY KEYS"); return; }
+    if (st_.freeRecording || st_.freeArmed) { say("FINISH THE TAPE TAKE FIRST"); return; }
+    if (st_.countBeats > 0) { say("WAIT FOR THE COUNT-IN"); return; }
     ts_[track_].seqState = 1;
-    s_.seqBounce(track_);
-    say(loopAny_ ? "TO TAPE AT THE LOOP START" : "PATTERN TO TAPE");
+    const int tb = std::max(1, st_.loopBars), pb = std::min(tb, std::max(1, st_.seqBars[track_]));
+    const int bar = loopAny_ ? std::min(bounceBar_, tb - pb + 1) : 0;   // no tape yet: the pattern sets the loop
+    s_.seqBounce(track_, bar);
+    say(!loopAny_ ? "PATTERN TO TAPE" : bar ? "PATTERN TO TAPE FROM BAR " + std::to_string(bar) : "TO TAPE AT THE LOOP START");
+}
+void SamplerApp::bounceBarStep(int d) {   // ALL, 1 ... last bar the pattern fits from
+    const int tb = std::max(1, st_.loopBars), pb = std::min(tb, std::max(1, st_.seqBars[track_]));
+    const int n = tb - pb + 2;
+    bounceBar_ = ((std::min(bounceBar_, n - 1) + d) % n + n) % n;
 }
 void SamplerApp::seqToggleAt(int tick, int note, int len) { s_.seqToggle(track_, tick, len > 0 ? len : stepTicks(), note, 100); }
 // the dice: a new random pattern in the current scale (one undo step); denser on the beats, sometimes a long note

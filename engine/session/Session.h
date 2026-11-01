@@ -140,7 +140,8 @@ public:
     void seqRest(int track);                  // step entry: skip one step
     void seqCursorMove(int track, int steps); // step entry: move the cursor
     void seqCursorSet(int track, int tick);
-    void seqBounce(int track);                // record the pattern onto the tape for one loop cycle (a loop of the pattern length if there is none), then mute it
+    void seqBounceCancel();                   // stop a bounce that waits or records (a new tape clip it made is dropped)
+    void seqBounce(int track, int bar = 0);                // record the pattern onto the tape for one loop cycle (a loop of the pattern length if there is none), then mute it (bar > 0: one pass of the pattern from that bar of an existing tape)
     void seqSetBars(int track, int bars);     // 1..16; a longer pattern gets empty bars, a shorter one drops the notes behind its new end
     void seqClear(int track);
     void setSwing(float s);                                                  // 0.5 = straight .. 0.75: every second grid line of the pattern plays later

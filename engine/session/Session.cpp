@@ -91,7 +91,7 @@ struct Session::Impl {
     // count-in: clicks for countIn bars, then the take (kind 1) or the sequencer recording (kind 2) starts
     int countIn = 0, countKind = 0; bool counting = false; double countLeft = 0;
     // bounce: the pattern of one track is recorded onto its tape clip for exactly one loop cycle
-    int bounceTrack = -1, bounceSrc = 1; int64_t bounceLeft = 0; bool bounceArmed = false, bounceNew = false;
+    int bounceTrack = -1, bounceSrc = 1, bounceBar = 0; int64_t bounceLeft = 0, bounceLen = 0; double bounceAt = 0; bool bounceArmed = false, bounceNew = false;   // bounceBar: 0 = the whole loop from its start, n = one pass of the pattern from bar n of the tape
     std::vector<TickHit> hits;
     double pos = 0; int32_t loopSamples = 0;
     std::atomic<float> tapeSpeed{1.f}; double tapePos = 0;   // ONE tape pointer for every loop clip, so they never drift apart
@@ -437,11 +437,18 @@ struct Session::Impl {
         }
     }
     // ---- bounce: pattern -> tape ----
-    void bounceStart(int ti) {
+    void bounceStart(int ti, int bar) {
         Track& t = *tracks[(size_t)ti];
         if (t.snCount == 0 || freeRec || freeArmed || counting || bounceTrack >= 0) return;
         bounceSrc = loopSrc; loopSrc = 1;   // the tape takes the sound of the track, not the microphone
         bounceTrack = ti; bounceNew = loopSamples == 0;
+        bounceBar = 0; bounceLen = 0; bounceAt = 0;
+        if (!bounceNew && bar > 0) {   // one pass of the pattern from a bar of the tape (it must fit before the loop end)
+            const double bs = 4 * samplesPerBeat();
+            const int pb = std::min(t.seqBars, std::max(1, loopBars));
+            bounceBar = std::min(bar, loopBars - pb + 1);
+            bounceAt = (bounceBar - 1) * bs; bounceLen = (int64_t)std::lround(pb * bs);
+        }
         if (t.seqState != 1) seqState(ti, 1);
         for (auto& tr : tracks) releaseAll(*tr);
         if (bounceNew) {   // no loop yet: it gets the length of the pattern
@@ -901,7 +908,7 @@ struct Session::Impl {
             pos += n;
             if (freeRec) { a_freeSec = (float)(pos / sr); if (takeBars > 0 && pos >= takeBars * 4 * samplesPerBeat()) { freeStop(); } }   // the bars asked for are full: the take ends by itself
             else if (loopSamples > 0 && pos >= loopSamples) pos -= loopSamples;
-            if (bounceArmed && loopSamples > 0 && pos < pos0) { bounceArmed = false; { Track& bt = *tracks[(size_t)bounceTrack]; if (!bt.keyTrig || bt.seqRunning) { bt.startPending = true; bt.restartNow = true; bt.pendTrans = bt.seqTrans; } } tapeCheckpoint(bounceTrack); tracks[(size_t)bounceTrack]->clipRec = true; bounceLeft = loopSamples; a_bounce = 2; }   // recording covers every position of the loop once
+            if (bounceArmed && loopSamples > 0 && (bounceBar == 0 ? pos < pos0 : (pos0 < bounceAt && bounceAt <= pos) || (bounceAt == 0 && pos < pos0))) { bounceArmed = false; { Track& bt = *tracks[(size_t)bounceTrack]; if (!bt.keyTrig || bt.seqRunning) { bt.startPending = true; bt.restartNow = true; bt.pendTrans = bt.seqTrans; } } tapeCheckpoint(bounceTrack); tracks[(size_t)bounceTrack]->clipRec = true; bounceLeft = bounceBar ? bounceLen : loopSamples; a_bounce = 2; }   // recording covers every position of the loop once
         }
         freeBeat = playing ? pos / spb : freeBeat + n / spb;
         a_beat.store(freeBeat);
@@ -1122,7 +1129,8 @@ void Session::setSong(const uint8_t* chain, int n, bool on) {
 void Session::seqRest(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, 1); }); }
 void Session::seqCursorMove(int t, int steps) { if (t >= 0 && t < kTracks) d->post([=] { d->seqStepMove(t, steps); }); }
 void Session::seqCursorSet(int t, int tick) { if (t >= 0 && t < kTracks) d->post([=] { d->seqCursorTo(t, tick); }); }
-void Session::seqBounce(int t) { if (t >= 0 && t < kTracks) d->post([=] { d->bounceStart(t); }); }
+void Session::seqBounceCancel() { d->post([=] { d->bounceCancel(); }); }
+void Session::seqBounce(int t, int bar) { if (t >= 0 && t < kTracks) d->post([=] { d->bounceStart(t, bar); }); }
 void Session::setSwing(float s) { d->post([=] { d->swing = clampf(s, 0.5f, 0.75f); }); }
 void Session::setQuantize(int g) { d->post([=] { d->seqGrid = std::min(kGrids - 1, std::max(0, g)); }); }
 int Session::seqNotes(int t, SeqView* out, int maxNotes) const {

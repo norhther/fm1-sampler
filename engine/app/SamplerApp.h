@@ -89,7 +89,10 @@ public:
     void seqUndo() { s_.seqUndo(track_); say("UNDO"); }
     void seqRedo() { s_.seqRedo(track_); say("REDO"); }
     void seqClear() { s_.seqClear(track_); say("PATTERN CLEARED"); }
-    void seqBounce();                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
+    void seqBounce();
+    int bounceBar() const { return bounceBar_; }   // 0 = ALL (fill the loop), n = one pass from bar n of the tape
+    void bounceBarStep(int d);
+    void setBounceBar(int b) { bounceBar_ = b; }                             // pattern -> tape for one loop cycle (what REC does while the pattern plays)
     // the pattern runs on its own: PLAY starts it from the first tick (on the beat or the bar), STOP silences it, the transport goes on
     bool seqRunning(int t) const { return st_.seqRun[t] || st_.seqPend[t]; }
     void seqRunToggle() { s_.seqRun(track_, !seqRunning(track_)); }
@@ -330,7 +333,7 @@ private:
     Page lastPage_[kModes] = {P_HOME, P_FX, P_SQ, P_MIX, P_TAPEV};   // each mode comes back to the page it was left on
     uint32_t seqDownAt_ = 0; bool seqHeld_ = false, seqRecStarted_ = false;   // SEQ held = record the pattern while the keys are played
     void modeButton(int mode);
-    int seqSeen_[kTracks] = {}, lastBounceDone_ = 0;
+    int seqSeen_[kTracks] = {}, lastBounceDone_ = 0, bounceBar_ = 0;
     int lastSampleVersion_ = 0, lastSampleFails_ = 0;
     uint32_t commitAt_ = 0; int commitTrack_ = -1;
     std::string toast_; uint32_t toastUntil_ = 0;
