@@ -2,17 +2,18 @@
 // X0X's TR-808 (8W8's circuit models by athousanddetails; port by charlesvestal/fm1-x0x, GPL-3.0) as a one-hit synth voice (engine 10).
 // The 16 pads are 8W8's lanes: BD SD LT MT HT LC MC HC RS CL MA CP CB CH OH CY (conga = the tom track's switch, clave the rim's, maracas the clap's).
 #pragma once
+#include <cmath>
 #include "drum808.h"
 
 class Drum808Voice {
 public:
-    void start(int pad, float vel, float sr) {
+    void start(int pad, float vel, float sr, float semis = 0.f) {   // semis: the pad's pitch, the hit played faster or slower like a sample
         static const uint8_t track[16] = {D8_BD, D8_SD, D8_LT, D8_MT, D8_HT, D8_LT, D8_MT, D8_HT, D8_RS, D8_RS, D8_CP, D8_CP, D8_CB, D8_CH, D8_OH, D8_CY};
         static const uint8_t sw[16] = {0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0};
         drum808_init(&d_);
         const int t = track[pad & 15]; d_.sw[t] = sw[pad & 15];
         drum808_trigger(&d_, t, 0.35f + 0.65f * vel);
-        k_ = sr / 44100.f; pos_ = kBlock;
+        k_ = sr / 44100.f / std::exp2(semis / 12.f); pos_ = kBlock;
     }
     // the engine is fixed at 44.1 kHz: on another host rate the voice is resampled by linear interpolation
     float next() {

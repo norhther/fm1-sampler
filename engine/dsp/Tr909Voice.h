@@ -3,12 +3,13 @@
 // 16 pads: BD SD LT MT HT RS CP CH OH CR RD, then a long BD, a high SD, a high HT, CP and CH again for a fuller row of keys.
 // The hat, ride and crash are ER-99's recordings (assets/909 in fm1-x0x, GPL-3.0), mu-law in x0x_drum_samples.h.
 #pragma once
+#include <cmath>
 #include <cstring>
 #include "drum909.h"
 
 class Tr909Voice {
 public:
-    void start(int pad, float vel, float sr) {
+    void start(int pad, float vel, float sr, float semis = 0.f) {   // semis: the pad's pitch, the hit played faster or slower like a sample
         static const uint8_t voice[16] = {DR_BD, DR_SD, DR_LT, DR_MT, DR_HT, DR_RS, DR_CP, DR_CH, DR_OH, DR_CR, DR_RD, DR_BD, DR_SD, DR_HT, DR_CP, DR_CH};
         drum909_init(&d_);
         const int p = pad & 15, v = voice[p];
@@ -16,7 +17,7 @@ public:
         if (p == 12) setNamed(DR_SD, "Tune", 110);     // a high snare
         if (p == 13) setNamed(DR_HT, "Tune", 120);
         drum909_trigger(&d_, v, 0.35f + 0.65f * vel);
-        k_ = sr / 44100.f; acc_ = 1.f; pos_ = kBlock;
+        k_ = sr / 44100.f / std::exp2(semis / 12.f); acc_ = 1.f; pos_ = kBlock;
     }
     float next() {   // the engine runs at 44.1 kHz: linear interpolation to the host rate
         acc_ += 1.f / k_;

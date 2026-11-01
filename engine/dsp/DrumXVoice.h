@@ -8,12 +8,12 @@
 class DrumXVoice {
 public:
     // lane 0..7 of kit (1-based), patch morph 0..1 (0 A, 1 B), tune in semitones
-    void start(int kit, int lane, float morph, float tune, float sr, uint32_t seed) {
+    void start(int kit, int lane, float morph, float tune, float sr, uint32_t seed, float decay = 1.f) {
         const DrumXLane& L = kDrumXKits[((kit - 1) % kDrumXKitCount + kDrumXKitCount) % kDrumXKitCount].lane[lane & 7];
         sr_ = sr; mode_ = L.mode; live_ = true; t_ = 0.f; rng_ = seed * 2654435761u + 0x2545F491u; ph_ = ph2_ = ph3_ = 0.f; flt_ = fel::Svf(); lp_ = 0.f; blk_ = 0;
         float q[5]; for (int i = 0; i < 5; i++) q[i] = L.a[i] + (L.b[i] - L.a[i]) * morph;
         const float d = q[2];
-        ta_ = 0.003f * std::exp2(9.f * d / 127.f);
+        ta_ = 0.003f * std::exp2(9.f * d / 127.f) * std::max(0.05f, decay);
         tn_ = (mode_ >> 4 & 1) ? ta_ * 0.25f : ta_;
         tp_ = ((mode_ >> 5 & 3) == 1) ? clampf(ta_ * 0.5f, 0.004f, 0.25f) : clampf(ta_ / 6.f, 0.001f, 0.04f);
         midi_ = 24.f + 0.75f * q[0] + tune; depth_ = q[1] * 0.375f; ng_ = q[3] / 127.f; color_ = q[4];

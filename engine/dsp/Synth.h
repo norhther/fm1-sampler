@@ -407,12 +407,12 @@ public:
         if (p.engine == 8) { pad_ = ((note - 60) % 16 + 16) % 16; if (p.kit >= 1 && p.kit <= kSloopKitCount) dk_.start(kSloopKits[p.kit - 1].s[pad_], kSloopKits[p.kit - 1].crush, vel, sr, padPitch, seed); else done_ = true; return; }
         if (p.engine == 3) { pad_ = ((note - 60) % 16 + 16) % 16; padPitch_ = padPitch; padDecay_ = padDecay; return; }
         if (p.engine == 19) { or_.start((int)p.x[0], note, vel, sr, seed); return; }
-        if (p.engine == 18) { pad_ = ((note - 60) % 16 + 16) % 16; dx_.start(p.kit, pad_ & 7, pad_ >= 8 ? 1.f : 0.f, 0.f, sr, seed); return; }
+        if (p.engine == 18) { pad_ = ((note - 60) % 16 + 16) % 16; dx_.start(p.kit, pad_ & 7, pad_ >= 8 ? 1.f : 0.f, padPitch, sr, seed, padDecay); return; }
         if (p.engine >= 14 && p.engine <= 17) { fl_.start(p.engine - 14, p.x, sr, seed); return; }
         if (p.engine == 13) { fm_.start((int)p.x[0], (int)note_, vel, sr); return; }
         if (p.engine == 12) { an_.start(p.x, vel, sr, seed); return; }
-        if (p.engine == 11) { pad_ = ((note - 60) % 16 + 16) % 16; d9_.start(pad_, vel, sr); return; }
-        if (p.engine == 10) { pad_ = ((note - 60) % 16 + 16) % 16; d8_.start(pad_, vel, sr); return; }
+        if (p.engine == 11) { pad_ = ((note - 60) % 16 + 16) % 16; d9_.start(pad_, vel, sr, padPitch); return; }
+        if (p.engine == 10) { pad_ = ((note - 60) % 16 + 16) % 16; d8_.start(pad_, vel, sr, padPitch); return; }
         if (p.engine == 9) { ac_.start(p.x, (int)note_, vel, sr); return; }
         if (p.engine >= 5 && p.engine <= 7) { dv_.start(p.x, p.engine, vel, sr, seed); return; }
         if (p.engine == 2) {

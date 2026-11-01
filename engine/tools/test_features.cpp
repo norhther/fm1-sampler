@@ -225,6 +225,20 @@ static void testPatternGen() {
     int acc = 0, slides = 0; for (uint32_t seed = 1; seed <= 20; seed++) for (const auto& g : patgen::generate(patgen::ACID, steps, st, sc, 7, 0, seed)) { acc += g.vel >= 120; slides += g.len > st; }
     CHECK(acc > 20 && slides > 20, "ACID writes accents and slides (%d, %d)", acc, slides);
 }
+// a pad's pitch and decay change the hit on every kit engine (it did nothing on the X0X and DRUM-X kits)
+static void testPadPitch() {
+    const int sr = SAMPLERATE;
+    for (const char* nm : {"Sloop 808", "X0X 808 Kit", "X0X 909 Kit", "DX Drum-X Kit", "Synth Kit 808"}) {
+        int idx = -1; for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == nm) idx = i;
+        auto zc = [&](float semis) {   // zero crossings of pad 0's first 250 ms: higher when it is pitched up
+            Sampler sm(sr); sm.load("synth:" + std::to_string(idx)); Sampler::Pad p; p.pitch = semis; sm.setPad(0, p);
+            std::vector<float> o((size_t)sr / 4 * 2, 0.f); sm.noteOn(60, 110); for (int b = 0; b < sr / 4 / 256; b++) sm.render(o.data() + (size_t)b * 512, 256);
+            int c = 0; for (size_t k = 1; k < o.size() / 2; k++) if ((o[2 * k] < 0) != (o[2 * (k - 1)] < 0)) c++; return c;
+        };
+        const int lo = zc(-12.f), mid = zc(0.f), hi = zc(12.f);
+        CHECK(lo < mid && mid < hi, "%s: pad pitch -12 / 0 / +12 moves the hit (%d, %d, %d zero crossings)", nm, lo, mid, hi);
+    }
+}
 // the library's synth groups: every synth is in a kind, each kind has some, and the obvious ones are where you look for them
 static void testSynthCategories() {
     int cnt[kSynthCats] = {0};
@@ -1091,6 +1105,7 @@ int main() {
     testSynths();
     testPatternGen();
     testSynthCategories();
+    testPadPitch();
     testOp1();
     testLock();
     testMidiIn();
