@@ -1429,6 +1429,7 @@ int main() {
                     if (b == sr / 256 * 2 + 60) { level = rms(x); } }
                 return level; };
             CHECK(spin(0.2f) > spin(4.f) * 1.3, "a long spin-up is still quiet when a short one is already back (%.3f vs %.3f)", spin(0.2f), spin(4.f));
+            CHECK(spin(0.f) > 0.3, "SPIN-UP 0 S: the tape is back at once (rms %.3f)", spin(0.f));
         }
         // the tape does not need the instrument: a one bar take, then the track is emptied
         a5.selectTrack(0); run5(0.2);

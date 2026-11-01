@@ -327,7 +327,7 @@ private:
     void tapeStop(float* x, int n) {
         const size_t N = ts_.size() / 2;
         const float brake = p_.tapeStop;
-        const float down = 1.f / (std::max(0.05f, p_.tsDown) * (float)sr_), up = 1.f / (std::max(0.05f, p_.tsUp) * (float)sr_);   // speed per sample: 1 -> 0 in tsDown s, 0 -> 1 in tsUp s
+        const float down = 1.f / (std::max(0.05f, p_.tsDown) * (float)sr_), up = p_.tsUp <= 0.f ? 1.f : 1.f / (std::max(0.05f, p_.tsUp) * (float)sr_);   // speed per sample: 1 -> 0 in tsDown s, 0 -> 1 in tsUp s (0 = at once)
         const int xf = 1024;                                                              // hand-over from the spun-up tape to the live signal
         if (!tsOn_ && brake >= 0.02f) { tsOn_ = true; tsPos_ = (double)tsW_; tsSpeed_ = 1.f; tsRel_ = 0; }
         const float target = brake < 0.02f ? 1.f : 1.f - brake;

@@ -319,7 +319,7 @@ void SamplerApp::applyFx() {
 }
 void SamplerApp::applyMasterFx() {
     FxParams p; p.chorus = chorus_; p.flanger = flanger_; p.phaser = phaser_; p.comp = comp_; p.width = width_; p.filter = djFilter_; p.crush = crush_; p.repeat = repeat_; p.gate = gate_;
-    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStopHeld_ ? tsDepth_ : tapeStop_; p.tsDown = 0.3f * std::pow(20.f, tsDown_); p.tsUp = 0.1f * std::pow(40.f, tsUp_); p.spring = spring_; p.springDamp = springDamp_; p.phone = phone_; p.punch = punch_; p.reverse = reverse_; p.freeze = freeze_;
+    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStopHeld_ ? tsDepth_ : tapeStop_; p.tsDown = 0.3f * std::pow(20.f, tsDown_); p.tsUp = tsUp_ < 0.02f ? 0.f : 0.1f * std::pow(40.f, tsUp_); p.spring = spring_; p.springDamp = springDamp_; p.phone = phone_; p.punch = punch_; p.reverse = reverse_; p.freeze = freeze_;
     s_.setMasterFx(p);
 }
 void SamplerApp::applyTempo() {
@@ -578,7 +578,7 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         break;
     case P_TSTOP:
         k[0] = cont("STOP TIME", &tsDown_, [](float v) { return fmt("%.1f S", 0.3 * std::pow(20.0, v)); }, [=] { applyMasterFx(); });
-        k[1] = cont("SPIN-UP TIME", &tsUp_, [](float v) { return fmt("%.1f S", 0.1 * std::pow(40.0, v)); }, [=] { applyMasterFx(); });
+        k[1] = cont("SPIN-UP TIME", &tsUp_, [](float v) { return v < 0.02f ? std::string("0 S") : fmt("%.1f S", 0.1 * std::pow(40.0, v)); }, [=] { applyMasterFx(); });   // knob all the way down: no spin-up, the tape is back at full speed at once
         k[2] = cont("DEPTH", &tsDepth_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
         k[3] = choice("BUTTON", &tsLatch_, {"HOLD", "LATCH"}, [=] { tapeStopHeld_ = false; applyMasterFx(); });
         break;
