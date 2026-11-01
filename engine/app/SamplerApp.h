@@ -24,7 +24,7 @@ public:
     static constexpr int kTracks = 16;   // the most; a session starts with 8 and ADD TRACK opens the next ones
     static constexpr int kFmTracks = 8;  // the FM-1 screen and keys only show the first eight
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, P_FX4, P_TFX5, P_CHOP, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, P_FX4, P_TFX5, P_CHOP, P_PRINT, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -75,6 +75,7 @@ public:
     bool chopsAvailable() const;
     int chopSel() const { return chopSel_; }
     void setChopSel(int i) { chopSel_ = std::max(0, i); }
+    void setPrintFx(int t, bool on);              // PRINT FX of a track: with a tape already on it, the tape runs through the track's effects once (a few seconds)
     void chopSplit(); void chopRemove(); void chopNudge(bool end, int steps); void chopSetPos(bool end, float v);
     int chopStepIdx() const { return chopStep_; }
     // the FX browser (phone and FM-1: hold FX, turn PRESETS): go to the page of an effect and light its knob there
@@ -217,6 +218,7 @@ public:
         float tfEqLow = 0.5f, tfEqMid = 0.5f, tfEqHigh = 0.5f, tfComp = 0.f, duckAmt = 0.f;   // MIX mode: track EQ and compressor, how far the sidechain pushes this track down
         float padVol[16], padPitch[16], padDecay[16]; int padGroup[16] = {}; int selPad = 0;   // per pad of a kit (PADS page)
         TrackState() { for (int i = 0; i < 16; i++) { padVol[i] = 2.f / 3.f; padPitch[i] = 0.5f; padDecay[i] = 0.5f; } }
+        int printFx = 0;   // PRINT FX: this track's tape holds the sound after its cassette and effects
         int keyTrig = 0, trigQ = 1, seqOne = 0, chopFull = 0;      // the keys start the pattern (OP-1 style), and when: at once, on the beat, on the bar
         int seqState = 0, seqBars = 3;   // sequencer: OFF / PLAY / REC, pattern length - 1 (1..16 bars)
     };
@@ -343,6 +345,7 @@ private:
     std::vector<int> songChain_; bool songOn_ = false; void applySong(); uint32_t barsLocalAt_[kTracks] = {};
     int duckSrc_ = 0, limiter_ = 0; float duckRel_ = 0.3f;   // sidechain source (0 off, 1..8) and its release, master limiter (0 off, then ceilings)
     void applyMaster();
+    void applyFmPalette();                       // the FM-1 screen takes the colours of the phone's theme (Theme.h)
     int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;
     float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f, fold_ = 0.f, autopan_ = 0.f, vinyl_ = 0.f, vowel_ = 0.f;   // OP-1 FX page, FX 4 page
     int trackCount_ = kFmTracks; std::string defaultState_;
@@ -384,6 +387,7 @@ private:
     // FM-1 gestures
     uint32_t modUsed_ = 0;                       // held buttons that were used as a modifier: their tap action is skipped on release
     int knobTarget_ = KT_MASTER; bool knobPicked_ = true; int battery_ = -1, lastTouchPage_ = -1, lastTouchKnob_ = -1;
+    uint32_t printPendMask_ = 0, printReqAt_[kTracks] = {};   // PRINT FX: the tracks with a bake asked for, and when
     uint32_t lastPongAt_ = 0; int chopSel_ = 0, chopStep_ = 1, chTrack_ = -1; std::vector<float> chS_, chE_; uint32_t chAt_ = 0;
     bool chopsRead(std::vector<float>& s, std::vector<float>& e);
     void chopsWrite(const std::vector<float>& s, const std::vector<float>& e);

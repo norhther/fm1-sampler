@@ -1075,6 +1075,7 @@ int main() {
         btn(SamplerApp::HOME); btn(SamplerApp::EDIT); CHECK(app.page() == SamplerApp::P_TEQ, "mix mode returns to the page it was left on");
         btn(SamplerApp::GLO); CHECK(app.page() == SamplerApp::P_KEY, "GLO: shortcut to the key");
         btn(SamplerApp::SEL); CHECK(app.page() == SamplerApp::P_LEN, "SEL: shortcut to the length");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PRINT, "SEQ from the loop length steps on to the print page");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ tap: sequencer mode, pattern page");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TEMPO, "SEQ again: tempo");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
@@ -1085,6 +1086,7 @@ int main() {
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SEQ, "SEQ again: tape fx");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SAVE, "SEQ again: loop source");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_LEN, "SEQ again: loop length");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PRINT, "SEQ again: print fx");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ again: back to the pattern");
         app.gotoPage(SamplerApp::P_FX);
     }
@@ -1601,6 +1603,59 @@ int main() {
         a7.selectTrack(0); a7.gotoPage(SamplerApp::P_SQ); a7.seqClear(); a7.seqSetBarCount(1); a7.seqToggleAt(0, 60, 96); a7.seqToggleAt(4 * 48, 62, 96); run7(0.4); led = 0; run7(0.6);
         CHECK(lit(4) && !lit(2) && !lit(6), "pattern page: step 5 has a note (steps 3 and 7 dark)");
         CHECK(std::string(SamplerApp::fmHint(SamplerApp::P_CHOP)).size() > 10 && SamplerApp::fmGesture(0) && !SamplerApp::fmGesture(9), "the phone has hints for the gestures");
+    }
+    // ---- PRINT FX: the tape of a track holds the sound after its effects ----
+    {
+        // a sustained synth through a trance gate on the track; "depth" = quietest 20 ms of the loop against the loudest (1 = steady, near 0 = chopped)
+        auto scenario = [&](bool print, bool bakeLater, double* depthLive, double* depthDry, double* rmsLive, double* rmsDry, double* depthUndo, int* flagAfterUndo = nullptr, bool offDuringBake = false, int* engineMask = nullptr) {
+            Session s8(sr); s8.setDataDir("/tmp/fm1sampler_t8"); s8.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+            SamplerApp a8(s8, [](const uint8_t*, size_t) {}); a8.setTourDone(true);
+            for (size_t i = 0; i < a8.library().size(); i++) if (a8.library()[i].label == "Saw Lead") { a8.loadEntry((int)i); break; }
+            std::vector<float> ob(512), ib(512, 0.f), heard; uint32_t tn = 0;
+            auto run8 = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(ob.begin(), ob.end(), 0.f); s8.process(ob.data(), ib.data(), 256); heard.insert(heard.end(), ob.begin(), ob.end()); std::this_thread::sleep_for(std::chrono::microseconds(300)); tn += 6; a8.tick(tn); } };
+            auto measure = [&](double sec, double* depth, double* rms) {   // the last `sec` seconds of what was heard
+                const size_t n = (size_t)(sec * sr) * 2, from = heard.size() > n ? heard.size() - n : 0; double lo = 1e9, hi = 0, sum = 0; size_t cnt = 0;
+                const size_t w = (size_t)(0.02 * sr) * 2;
+                for (size_t i = from; i + w <= heard.size(); i += w) { double e = 0; for (size_t j = 0; j < w; j++) e += (double)heard[i + j] * heard[i + j]; e = std::sqrt(e / (double)w); lo = std::min(lo, e); hi = std::max(hi, e); sum += e; cnt++; }
+                *depth = hi > 1e-6 ? lo / hi : 1.0; *rms = cnt ? sum / (double)cnt : 0.0;
+            };
+            run8(1.5);
+            FxParams gate; gate.gate = 1;
+            if (print) a8.setPrintFx(0, true);
+            s8.setTrackFx(0, gate); run8(0.3);
+            a8.loopRecord(); a8.playNote(60, true); run8(4.0); a8.loopRecord(); a8.playNote(60, false); run8(1.0);   // the first take ends while the note still sounds: a steady loop
+            if (bakeLater) { heard.clear(); run8(2.5); measure(2.0, depthLive, rmsLive); a8.setPrintFx(0, true); if (offDuringBake) { a8.setPrintFx(0, false); run8(6.0); } else { for (int i = 0; i < 30 && !(a8.status().printMask & 1); i++) run8(0.5); run8(0.5); } }
+            else { heard.clear(); run8(2.5); measure(2.0, depthLive, rmsLive); }   // the effects are still on
+            s8.setTrackFx(0, FxParams()); run8(0.5); heard.clear(); run8(2.5); measure(2.0, depthDry, rmsDry);   // the effects switched off: only the tape is left
+            if (bakeLater && !offDuringBake) { a8.globalUndo(); run8(0.5); heard.clear(); run8(2.5); double r; measure(2.0, depthUndo, &r); if (flagAfterUndo) *flagAfterUndo = a8.state(0).printFx; }
+            if (engineMask) *engineMask = (int)a8.status().printMask & 1;
+        };
+        double dl = 0, dd = 0, rl = 0, rd = 0, du = 0;
+        scenario(true, false, &dl, &dd, &rl, &rd, &du);
+        CHECK(dd < 0.08 && rd > 0.002, "PRINT FX ON: the gate is on the tape after the effects are off (depth %.2f, level %.4f)", dd, rd);
+        double dl2 = 0, dd2 = 0, rl2 = 0, rd2 = 0;
+        scenario(false, false, &dl2, &dd2, &rl2, &rd2, &du);
+        CHECK(dd2 > 0.15 && dl2 < 0.08, "PRINT FX OFF: the tape is dry, the gate lives in the effects (depth with fx %.2f, without %.2f)", dl2, dd2);
+        double dl3 = 0, dd3 = 0, rl3 = 0, rd3 = 0, du3 = 1;
+        scenario(false, true, &dl3, &dd3, &rl3, &rd3, &du3);
+        CHECK(dd3 < 0.08 && rd3 > 0.6 * rl3 && rd3 < 1.5 * rl3, "PRINT NOW bakes the tape through the effects (depth %.2f, level %.4f against %.4f before)", dd3, rd3, rl3);
+        CHECK(du3 > 0.15, "...and UNDO takes the bake back (depth %.2f)", du3);
+        { double a = 0, b = 0, c = 0, d = 0, e = 1; int flag = -1, mask = -1; scenario(false, true, &a, &b, &c, &d, &e, &flag, false, &mask);
+          CHECK(flag == 0, "after UNDO of a print the app's PRINT FX switch says OFF too (%d)", flag); }
+        { double a = 0, b = 0, c = 0, d = 0, e = 1; int mask = -1; scenario(false, true, &a, &b, &c, &d, &e, nullptr, true, &mask);
+          CHECK(mask == 0, "PRINT FX turned off while the tape is being printed: the print is dropped (engine mask %d)", mask); }
+    }
+    // ---- the FM-1 screen wears the theme of the phone ----
+    {
+        Session sT(sr); sT.setDataDir("/tmp/fm1sampler_t9");
+        int clearCol = -1; SamplerApp aT(sT, [&](const uint8_t* m, size_t n) { if (n >= 10 && m[6] == 2) clearCol = (m[7] << 14) | (m[8] << 7) | m[9]; else if (n > 8 && m[6] == 10) { size_t i = 7; while (i + 2 < n - 1) { const size_t len = (size_t)(m[i] << 7 | m[i + 1]); if (i + 2 + len > n - 1) break; if (m[i + 2] == 2 && len >= 4) clearCol = (m[i + 3] << 14) | (m[i + 4] << 7) | m[i + 5]; i += 2 + len; } } });
+        aT.setTourDone(true); uint32_t tn = 0;
+        auto settle = [&] { clearCol = -1; for (int i = 0; i < 40; i++) { tn += 40; aT.tick(tn); } };
+        auto rgb565 = [](int r, int g, int b) { return (r >> 3) << 11 | (g >> 2) << 5 | (b >> 3); };
+        aT.setTheme(1); settle(); CHECK(clearCol == rgb565(237, 235, 228), "LIGHT theme: the FM-1 background is the paper of the phone (%d)", clearCol);
+        aT.setTheme(6); settle(); CHECK(clearCol == rgb565(2, 10, 4), "TERMINAL theme: the FM-1 background is black glass (%d)", clearCol);
+        aT.setTheme(5); settle(); CHECK(clearCol == rgb565(22, 12, 38), "SYNTHWAVE theme: deep purple (%d)", clearCol);
+        aT.setTheme(0);
     }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;

@@ -37,7 +37,9 @@ struct Session::Impl {
         Arp arp; bool arpOn = false;
         Lowpass filt; bool filtOn = false;
         Session::Lfo lfo; float lfoPhase = 0, lfoSH = 0, lfoVal = 0;
-        TapeInsert tape;
+        TapeInsert tape; float tapeP[6] = {0.f, 1.f, 0.f, 0.f, 0.f, 1.f};   // the cassette's settings, as given (a bake runs its own cassette)
+        uint32_t bakeTok = 0;   // a bake on its way carries the token it started with; switching print off (or starting another) changes it, and the bake is dropped
+        bool printFx = false;   // the tape of this track holds the instrument AFTER its cassette and effects: it records what they make of it and plays back past them
         float vol = 0.8f, pan = 0.f, send[2] = {0.f, 0.f};
         std::vector<Note> pending;   // notes of this block (without the arpeggiator)
         // offline stretch / pitch
@@ -129,6 +131,7 @@ struct Session::Impl {
     static constexpr int kSlots = Track::kSlots;
     std::atomic<uint64_t> a_bank[kTracks][kSlots][kSeqMax]; std::atomic<int> a_bankN[kTracks][kSlots], a_bankBars[kTracks][kSlots], a_slot[kTracks], a_slotPending[kTracks], a_songPos{0}, a_songOn{0}, a_songLen{0};
     std::vector<uint8_t> song; bool songOn = false, songWas = false; int songPos = 0, songTick = 0, songBase = -1;   // song: a chain of pattern banks, one step after the other, for every track
+    std::atomic<int> a_printDone{0}, a_printBusy{0}; std::atomic<uint32_t> a_printMask{0}; std::atomic<bool> aborting{false}; uint64_t tapeGen = 0;   // tapeGen: bumps with every change of the tapes, so a job that worked on a copy knows the copy is stale
     std::atomic<int> a_countBeats{0}, a_bounce{0}, a_bounceDone{0}, a_seqCursor[kTracks], a_seqUndoN[kTracks], a_seqRedoN[kTracks];
     std::atomic<uint64_t> a_seq[kTracks][kSeqMax]; std::atomic<int> a_seqN[kTracks], a_seqBars[kTracks], a_seqState[kTracks];
     std::atomic<int> a_seqFlags[kTracks], a_seqTrans[kTracks], a_seqPos[kTracks];   // a_seqFlags: run | start pending << 1 | key trigger << 2; a_seqPos: tick inside the pattern that is playing, -1 when it is not
@@ -300,25 +303,26 @@ struct Session::Impl {
     }
     void gRecord(int track, int kind) { gPush(glog, glogN, {track, kind}); gredoN = 0; tapeRedo.clear(); gPublish(); }
     // tape undo: the clips (and the loop length) as they were before a first take, an overdub, a pattern bounce or a change of the tempo
-    struct TapeSnap { int track = -1; int32_t loop = 0; int bars = 1; float bpm = 120.f; std::vector<float> clip[kTracks]; };   // track -1: every clip and the loop length
+    struct TapeSnap { int track = -1; int32_t loop = 0; int bars = 1; float bpm = 120.f; std::vector<float> clip[kTracks]; bool print[kTracks] = {}; };   // track -1: every clip and the loop length
     static constexpr int kTapeHist = 6;
     std::deque<TapeSnap> tapeHist, tapeRedo;
     TapeSnap tapeSnapOf(int track) const {
         TapeSnap s; s.track = track; s.loop = loopSamples; s.bars = loopBars; s.bpm = bpm;
-        for (int i = 0; i < kTracks; i++) if ((track < 0 || track == i) && tracks[(size_t)i]->clipHas) s.clip[i] = tracks[(size_t)i]->clip;
+        for (int i = 0; i < kTracks; i++) { s.print[i] = tracks[(size_t)i]->printFx; if ((track < 0 || track == i) && tracks[(size_t)i]->clipHas) s.clip[i] = tracks[(size_t)i]->clip; }
         return s;
     }
     void tapeApply(const TapeSnap& s) {
-        for (int i = 0; i < kTracks; i++) if (s.track < 0 || s.track == i) { Track& t = *tracks[(size_t)i]; t.clipRec = false; t.recPrevOk = false; t.clip = s.clip[i]; t.clipHas = !t.clip.empty(); }
+        tapeGen++;
+        for (int i = 0; i < kTracks; i++) if (s.track < 0 || s.track == i) { Track& t = *tracks[(size_t)i]; t.clipRec = false; t.recPrevOk = false; t.clip = s.clip[i]; t.clipHas = !t.clip.empty(); t.printFx = s.print[i]; }
         if (s.track < 0 || (loopSamples == 0 && s.loop > 0)) { if (loopSamples != s.loop) { pos = 0; tapePos = 0; } loopSamples = s.loop; a_loop = s.loop; loopBars = s.bars; a_bars = s.bars; bpm = s.bpm; a_bpm = s.bpm; }
         clearIfEmpty();
     }
-    void tapePush(TapeSnap s) { const int tr = s.track; tapeHist.push_back(std::move(s)); if ((int)tapeHist.size() > kTapeHist) tapeHist.pop_front(); gRecord(tr, 2); }
+    void tapePush(TapeSnap s) { tapeGen++; const int tr = s.track; tapeHist.push_back(std::move(s)); if ((int)tapeHist.size() > kTapeHist) tapeHist.pop_front(); gRecord(tr, 2); }
     void tapeCheckpoint(int track) { tapePush(tapeSnapOf(track)); }
     void dropTapeCheckpoint(int track) {   // an overdub that recorded only silence leaves no undo step
         if (glogN > 0 && glog[glogN - 1].kind == 2 && glog[glogN - 1].track == track && !tapeHist.empty() && tapeHist.back().track == track) { glogN--; tapeHist.pop_back(); gPublish(); }
     }
-    void tapeCheckpointEmpty() { TapeSnap s; s.bpm = bpm; tapePush(std::move(s)); }   // a first take: before it there was no tape
+    void tapeCheckpointEmpty() { TapeSnap s; s.bpm = bpm; for (int i = 0; i < kTracks; i++) s.print[i] = tracks[(size_t)i]->printFx; tapePush(std::move(s)); }   // a first take: before it there was no tape
     bool tapeUndoStep() {
         if (tapeHist.empty()) return false;
         TapeSnap s = std::move(tapeHist.back()); tapeHist.pop_back();
@@ -724,6 +728,27 @@ struct Session::Impl {
         }
     }
 
+    // PRINT NOW: the tape of a track played through its cassette and effects once, offline, in place. The last second runs through first (its output is
+    // thrown away) so a tail that would run over the end of the loop is already in the effects when the loop starts: the loop closes without a seam.
+    // False when it was told to stop (the session is going away).
+    static bool bakeInPlace(std::vector<float>& clip, int sr, const float* tp, const FxParams& fp, double spb, const std::atomic<bool>& abort) {
+        const size_t frames = clip.size() / 2; if (!frames) return true;
+        TapeInsert tape(sr); tape.setParams(tp[0], tp[1], tp[2], tp[3], tp[4], tp[5]);
+        MasterFx fx(sr, 1.f); fx.set(fp);
+        auto run = [&](float* x, size_t first, size_t count) {
+            for (size_t f = 0; f < count; f += 256) {
+                const int n = (int)std::min<size_t>(256, count - f);
+                tape.process(x + 2 * f, n);
+                if (fx.active()) fx.process(x + 2 * f, n, (double)(first + f) / spb, 1.0 / spb); else fx.feedOnly(x + 2 * f, n);
+                if (abort.load()) return false;
+            }
+            return true;
+        };
+        const size_t warm = std::min<size_t>(frames, (size_t)sr);
+        std::vector<float> w(clip.end() - (long)(warm * 2), clip.end());
+        return run(w.data(), frames - warm, warm) && run(clip.data(), 0, frames);
+    }
+
     // ---- one block of `n` frames ----
     void block(float* out, const float* in, int n) {
         std::fill(out, out + n * 2, 0.f);
@@ -804,7 +829,11 @@ struct Session::Impl {
             } else a_voiceN[ti].store(0);
             if (t.filtOn) for (int i = 0; i < n; i++) { bus[2 * i] = t.filt.process(0, bus[2 * i]); bus[2 * i + 1] = t.filt.process(1, bus[2 * i + 1]); }
             // the sound of the track itself (before the loop is added), for the free take
-            if (freeRec && loopSrc == 1 && ti == freeTrack) for (int i = 0; i < n * 2; i++) freeBuf[freeBase + (size_t)i] += bus[(size_t)i];
+            if (freeRec && loopSrc == 1 && ti == freeTrack && !t.printFx) for (int i = 0; i < n * 2; i++) freeBuf[freeBase + (size_t)i] += bus[(size_t)i];
+            // the tape of this track: one pass over the block that adds the clip to the bus and records into it. A normal track runs it here (the
+            // instrument dry; the cassette and the effects come after and treat the tape too). A PRINTED track runs it after its effects instead:
+            // what they make of the instrument lands on the tape, and the tape plays back past them (nothing is treated twice)
+            auto tapePass = [&] {
             if (tl) {
                 for (int i = 0; i < n; i++) {
                     const int32_t k0 = (p0 + i) % loopSamples;
@@ -848,8 +877,14 @@ struct Session::Impl {
                     } else t.recPrevOk = false;
                 }
             }
+            };
+            if (!t.printFx) tapePass();
             t.tape.process(bus.data(), n);
             if (t.fx->active()) t.fx->process(bus.data(), n, beat0, 1.0 / spb); else t.fx->feedOnly(bus.data(), n);
+            if (t.printFx) {
+                if (freeRec && loopSrc == 1 && ti == freeTrack) for (int i = 0; i < n * 2; i++) freeBuf[freeBase + (size_t)i] += bus[(size_t)i];   // the first take, printed
+                tapePass();
+            }
             const float dkR = std::exp(-1.f / (std::max(0.02f, duckRel) * (float)sr)); float de = std::max(duckEnv0, duckTrig && ti != duckSrc ? 1.f : 0.f);
             const float da = ti == duckSrc ? 0.f : duckAmt[ti];
             const float g = t.vol * lfoGain;
@@ -924,7 +959,7 @@ struct Session::Impl {
 };
 
 Session::Session(int sampleRate) : d(new Impl(sampleRate)) {}
-Session::~Session() { d->stopWorker(); }
+Session::~Session() { d->aborting = true; d->stopWorker(); }
 
 void Session::process(float* out, const float* in, int frames) {
     const auto t0 = std::chrono::steady_clock::now();
@@ -942,6 +977,7 @@ void Session::process(float* out, const float* in, int frames) {
     uint32_t cm = 0, rm = 0;
     for (int i = 0; i < kTracks; i++) { cm |= (uint32_t)d->tracks[(size_t)i]->clipHas << i; rm |= (uint32_t)d->tracks[(size_t)i]->clipRec << i; }
     d->a_clip_mask = cm; d->a_cliprec_mask = rm;
+    { uint32_t pm = 0; for (int i = 0; i < kTracks; i++) pm |= (uint32_t)d->tracks[(size_t)i]->printFx << i; d->a_printMask = pm; }
     const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count(), budget = frames * 1e6 / d->sr;
     const uint32_t cur = (uint32_t)(1000.0 * us / budget);
     d->a_cpu = (d->a_cpu.load() * 7 + cur) / 8;
@@ -987,7 +1023,35 @@ void Session::setArp(int t, bool on, int rate, int pattern, int octaves, float g
     });
 }
 void Session::setTape(int t, float sat, float tone, float wobble, float hiss, float mix, float bits) {
-    if (t >= 0 && t < kTracks) d->post([=] { d->tracks[(size_t)t]->tape.setParams(sat, tone, wobble, hiss, mix, bits); });
+    if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; const float v[6] = {sat, tone, wobble, hiss, mix, bits}; std::copy(v, v + 6, tr.tapeP); tr.tape.setParams(sat, tone, wobble, hiss, mix, bits); });
+}
+// PRINT FX: the tape of the track holds the sound after its cassette and effects. Switching on with a tape already there runs that tape through them once (a bake,
+// one undo step) and flips the switch when it is done; switching off only flips it
+void Session::setPrintFx(int t, bool on, bool bake) {
+    if (t < 0 || t >= kTracks) return;
+    d->post([=] {
+        auto& tr = *d->tracks[(size_t)t];
+        if (!on) { if (tr.printFx || tr.bakeTok) { tr.printFx = false; tr.bakeTok = 0; } return; }   // off: also drops a bake on its way
+        if (tr.printFx) return;
+        if (!bake || !tr.clipHas || tr.clipRec) { tr.printFx = true; return; }
+        auto clip = std::make_shared<std::vector<float>>(tr.clip);   // the worker prints this copy
+        FxParams fp = tr.fx->params(); float tp[6]; std::copy(tr.tapeP, tr.tapeP + 6, tp);
+        fp.tapeStop = 0.f; fp.repeat = 0; fp.reverse = 0; fp.freeze = 0;   // what is held right now (a stop, a repeat, a freeze) is a gesture, not a setting: it is not baked across the loop
+        const double spb = d->samplesPerBeat(); const uint64_t gen0 = d->tapeGen; const uint32_t tok = ++tr.bakeTok ? tr.bakeTok : (tr.bakeTok = 1);
+        d->a_printBusy++;
+        d->job([=] {
+            bool ok = false;
+            try { ok = Impl::bakeInPlace(*clip, d->sr, tp, fp, spb, d->aborting); } catch (...) { ok = false; }   // out of memory on a phone: the tape stays as it was
+            d->post([=] {
+                auto& t2 = *d->tracks[(size_t)t];
+                if (ok && t2.bakeTok == tok && d->tapeGen == gen0 && t2.clipHas && !t2.clipRec && t2.clip.size() == clip->size()) {   // nothing touched the tape meanwhile
+                    d->tapeCheckpoint(t); t2.clip = std::move(*clip); t2.printFx = true; d->a_printDone++;
+                }
+                if (t2.bakeTok == tok) t2.bakeTok = 0;
+                d->a_printBusy--;
+            });
+        });
+    });
 }
 
 // ---- mixer ----
@@ -1035,14 +1099,14 @@ void Session::setLoopTempo(float newBpm) {
         const float nb = clampf(newBpm, 30.f, 300.f), old = d->bpm;
         if (std::fabs(nb - old) < 0.05f) return;
         const double ratio = std::min(2.0, std::max(0.5, (double)nb / old));
-        const int32_t L = d->loopSamples; const int bars = d->loopBars;
+        const int32_t L = d->loopSamples; const int bars = d->loopBars; const uint64_t gen0 = d->tapeGen;
         std::vector<std::pair<int, std::vector<float>>> in;
         for (int i = 0; i < kTracks; i++) if (d->tracks[(size_t)i]->clipHas && d->tracks[(size_t)i]->clip.size() == (size_t)L * 2) in.push_back({i, d->tracks[(size_t)i]->clip});
-        d->job([this, in = std::move(in), ratio, L, bars]() mutable {
+        d->job([this, in = std::move(in), ratio, L, bars, gen0]() mutable {
             const int32_t L2 = (int32_t)std::lround(L / ratio);
             for (auto& c : in) { c.second = stretchPitch(c.second, d->sr, ratio, 0.0); c.second.resize((size_t)L2 * 2, 0.f); }
-            d->post([this, in = std::move(in), L, L2, bars]() mutable {
-                if (d->loopSamples != L) return;   // the loop changed while it was being stretched
+            d->post([this, in = std::move(in), L, L2, bars, gen0]() mutable {
+                if (d->loopSamples != L || d->tapeGen != gen0) return;   // the tape changed while it was being stretched (a longer loop, an overdub, a print)
                 d->tapeCheckpoint(-1);
                 for (auto& t : d->tracks) { t->clipRec = false; t->recPrevOk = false; }
                 for (auto& c : in) { Impl::Track& t = *d->tracks[(size_t)c.first]; t.clip = std::move(c.second); t.clipHas = true; }
@@ -1463,7 +1527,7 @@ Session::Status Session::status() const {
         s.clipPos[i] = d->a_clipPos; s.lfoValue[i] = d->a_lfo[i];
         s.voiceN[i] = std::min(kVoiceMax, d->a_voiceN[i].load()); for (int j = 0; j < s.voiceN[i]; j++) s.voicePos[i][j] = d->a_voicePos[i][j];
     }
-    s.beatPos = d->a_beat; s.metro = d->a_metro; s.countBeats = d->a_countBeats; s.bounce = d->a_bounce; s.bounceDone = d->a_bounceDone;
+    s.beatPos = d->a_beat; s.metro = d->a_metro; s.countBeats = d->a_countBeats; s.bounce = d->a_bounce; s.bounceDone = d->a_bounceDone; s.printBusy = d->a_printBusy; s.printDone = d->a_printDone; s.printMask = d->a_printMask;
     for (int i = 0; i < kTracks; i++) { s.seqCursor[i] = d->a_seqCursor[i]; s.seqUndoN[i] = d->a_seqUndoN[i]; s.seqRedoN[i] = d->a_seqRedoN[i]; }
     for (int i = 0; i < kTracks; i++) { s.seqState[i] = d->a_seqState[i]; { const int f = d->a_seqFlags[i]; s.seqRun[i] = f & 1; s.seqPend[i] = f >> 1 & 1; s.keyTrig[i] = f >> 2 & 1; s.seqOne[i] = f >> 3 & 1; s.seqTrans[i] = d->a_seqTrans[i]; s.seqPos[i] = d->a_seqPos[i]; } s.seqBars[i] = d->a_seqBars[i]; s.seqCount[i] = d->a_seqN[i]; }
     s.globalUndoN = d->a_gUndoN; s.globalRedoN = d->a_gRedoN;

@@ -1,4 +1,5 @@
 #include "SamplerApp.h"
+#include "../ui/Theme.h"
 #include <Common.h>
 #include <algorithm>
 #include <fstream>
@@ -12,9 +13,10 @@
 
 namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
-// The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
-constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5", "CHOP"};
+// The palette of the FM-1 screen: the colours of the phone's theme (SamplerApp::applyFmPalette sets them whenever the theme changes). The names are the dark theme's:
+// BLACK is the background of whatever theme it is, PAPER the text, ONACC the text on an ACCENT fill, BAR the empty track of a bar.
+uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38), ONACC = 0;
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5", "CHOP", "PRINT FX"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM", "NEAPM", "NEAPJ", "PERSN", "HUNGJ", "LYDDM", "ALTRD", "LYDAG", "DOR#4", "SPAN8", "INSEN", "IWATO", "YO", "EGYPT", "MAJBL", "PROMT", "ENIGM", "OCTWH", "LOCR2", "MAJ6P", "MIN6P"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -107,6 +109,7 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "Wave fold, auto pan, vinyl crackle and a vowel filter on the whole mix.",                 // FX4
     "Track effects, part 5: wave fold, auto pan, vinyl, vowel. Only this track.",              // TFX5
     "Edit the chops of a KIT sample: pick a chop, move its start and end. Set the algorithm to KIT/SLICE first.",   // CHOP
+    "Put this track's effects on its tape. ON: what its effects do while you record or overdub is recorded, and the tape plays back past them.",   // PRINT
 };
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }
@@ -114,10 +117,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX", "TAPE"}; return n[m % kModes]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][9] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2, P_CHOP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
+    static const Page p[kModes][9] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2, P_CHOP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN, P_PRINT}};
     return p[m % kModes];
 }
-int SamplerApp::modePageCount(int m) { static const int n[kModes] = {9, 9, 6, 9, 4}; return n[m % kModes]; }
+int SamplerApp::modePageCount(int m) { static const int n[kModes] = {9, 9, 6, 9, 5}; return n[m % kModes]; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -131,6 +134,7 @@ const char* SamplerApp::noteName(int r) { return kNote[((r % 12) + 12) % 12]; }
 SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
     loadSettings();
     cells_.resize(320); rects_.assign(320, ~0ull);
+    applyFmPalette();
     for (int& h : heldNote_) h = -1;
     for (int i = 0; i < kTracks; i++) { ts_[i].vol = 0.8f; }
     refreshLibrary();
@@ -226,6 +230,7 @@ void SamplerApp::importFile(const std::string& wav) {
 // ---- parameters ----
 void SamplerApp::applyAll(int t) {
     applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t); applyPads(t); applyEdit(t); applySynthEdit(t);
+    s_.setPrintFx(t, ts_[t].printFx != 0, false);   // the switch only: a saved tape is already printed (or not)
 }
 void SamplerApp::applyShape(int t, bool reslice) {
     const TrackState& x = ts_[t];
@@ -634,6 +639,15 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
                   [this](float v) { chopStep_ = (int)std::lround(cl(v) * 2); });
         break;
     }
+    case P_PRINT: {   // the effects of this track on its tape
+        k[0] = choice("PRINT FX", &x.printFx, {"OFF", "ON"}, [=] { setPrintFx(t, ts_[t].printFx != 0); }, true);
+        Knob q; q.name = "TAPE OF THIS TRACK"; q.valid = true; q.isChoice = true; q.norm = x.printFx ? 1.f : 0.f;
+        const bool tape = st_.track_has_clip[t];
+        q.value = (printPendMask_ >> t & 1) ? "PRINTING..." : !tape ? (x.printFx ? "RECORDS WITH THE FX" : "NO TAPE YET") : x.printFx ? "HAS THE FX" : "DRY, FX AT PLAYBACK";
+        q.step = [](int) {}; q.set = [](float) {};
+        k[1] = q;
+        break;
+    }
     case P_SHAPE:
         if (isSynth(t)) {   // the four macros of a built-in synth
             k[0] = cont("TONE", &x.synTone, [](float v) { return fmt("%+.0f", (v - 0.5f) * 200.f); }, [=] { applyShape(t); }, 0.02f);
@@ -1036,6 +1050,7 @@ const char* SamplerApp::fmHint(Page p) {
         return "Hold EDIT + key 1-8: mute that track (add SEL: solo it).  Hold HOME + key: go to that track.  Hold FX + PRESETS: browse effects.";
     case P_FX: case P_FX2: case P_FX3: case P_FX4: case P_TONE: case P_MOD: case P_LIVE: case P_LIVE2: case P_TSTOP:
         return "Hold FX + turn PRESETS to browse the effects, let go of FX to open one.  Hold FX + turn ALGORITHM: whole mix / this track.";
+    case P_PRINT: return "PRINT FX ON: the effects you play while you record or overdub this track go onto its tape (K1 turns it on).";
     case P_KEY: return "Hold GLO + turn PRESETS: what the analog knob moves (master volume, track volume, DJ filter, last turned knob).";
     case P_HOME: case P_SHAPE: case P_PADS: return "Hold HOME + key 1-8: go to that track.  The CHOP page (press HOME again) edits chops with K1-K4.";
     default: return "";
@@ -1105,6 +1120,25 @@ void SamplerApp::chopRemove() {
     chopsWrite(s, e); say("CHOP " + std::to_string(i + 1) + " DELETED");
 }
 
+void SamplerApp::setPrintFx(int t, bool on) {
+    if (t < 0 || t >= kTracks) return;
+    ts_[t].printFx = on ? 1 : 0;
+    const bool tape = st_.track_has_clip[t];
+    s_.setPrintFx(t, on);
+    printPendMask_ &= ~(1u << t);
+    if (on && tape) { printPendMask_ |= 1u << t; printReqAt_[t] = nowMs_ ? nowMs_ : 1; say("PRINTING THE TAPE THROUGH THE FX..."); }
+    else say(on ? "THE TAPE RECORDS WITH THE FX" : "PRINT OFF: A PRINTED TAPE GETS THE FX AGAIN");
+}
+
+// the FM-1 screen wears the theme of the phone
+void SamplerApp::applyFmPalette() {
+    auto c = [](uint32_t a) { return rgb((int)(a >> 16 & 255), (int)(a >> 8 & 255), (int)(a & 255)); };
+    auto mix = [](uint32_t a, uint32_t b) { return (uint32_t)(((a >> 16 & 255) + (b >> 16 & 255)) / 2) << 16 | (uint32_t)(((a >> 8 & 255) + (b >> 8 & 255)) / 2) << 8 | (uint32_t)(((a & 255) + (b & 255)) / 2); };
+    BLACK = c(theme::BG); PAPER = c(theme::TEXT); DIM = c(theme::DIM); ACCENT = c(theme::ACCENT); ONACC = c(theme::ON_ACCENT);
+    BAR = c(mix(theme::BG, theme::OUTLINE)); PANEL = c(theme::SURFACE);   // the empty track of a bar: halfway between the background and the line colour, so it shows in every theme
+    needClear_ = true;   // every pixel is repainted
+}
+
 // ---- tick ----
 void SamplerApp::tick(uint32_t now) {
     nowMs_ = now;
@@ -1117,6 +1151,12 @@ void SamplerApp::tick(uint32_t now) {
     loopAny_ = false;
     for (int t = 0; t < kTracks; t++) loopAny_ |= st_.track_has_clip[t];
     for (int t = 0; t < kTracks; t++) if (st_.seqState[t] != seqSeen_[t]) { seqSeen_[t] = st_.seqState[t]; ts_[t].seqState = st_.seqState[t]; }   // the engine changed it (a bounce mutes the pattern)
+    for (int t = 0; t < kTracks; t++) {   // the engine is the truth for PRINT FX (an undo of a print, a loaded tape and a bake that was dropped all change it behind our back)
+        const int eng = (int)(st_.printMask >> t & 1), pend = (int)(printPendMask_ >> t & 1);
+        if (pend && eng) { printPendMask_ &= ~(1u << t); say("TAPE PRINTED WITH THE FX"); }
+        else if (pend && st_.printBusy == 0 && nowMs_ - printReqAt_[t] > 2500) { printPendMask_ &= ~(1u << t); ts_[t].printFx = 0; say("THE TAPE CHANGED WHILE PRINTING. TURN PRINT FX ON AGAIN"); }
+        else if (!pend && ts_[t].printFx != eng) ts_[t].printFx = eng;
+    }
     if (st_.bounceDone != lastBounceDone_) { lastBounceDone_ = st_.bounceDone; say("PATTERN IS ON THE TAPE (MUTED)"); }
     if (st_.loopSamples <= 0 && tempoPending_ > 0) { tempoPending_ = 0; tempoSent_ = false; }   // the tape was cleared: nothing to stretch
     if (tempoPending_ > 0 && !tempoSent_ && now >= tempoApplyAt_) { s_.setLoopTempo(tempoPending_); tempoSent_ = true; tempoSentAt_ = now; }
@@ -1279,7 +1319,7 @@ void SamplerApp::draw(uint32_t now) {
     for (int i = 0; i < kFmTracks; i++) {
         const bool sel = i == track_, used = hasSample(i);
         snprintf(b, sizeof b, "%d", i + 1);
-        drawText(i, i * 30 + 9, 2, 2, sel ? BLACK : used ? PAPER : DIM, sel ? ACCENT : BLACK, b, 1);
+        drawText(i, i * 30 + 9, 2, 2, sel ? ONACC : used ? PAPER : DIM, sel ? ACCENT : BLACK, b, 1);
         rect(8 + i, i * 30 + 9, 20, 12, 2, st_.track_clip_rec[i] ? ACCENT : st_.track_has_clip[i] ? PAPER : BLACK);
     }
     drawText(20, 6, 26, 2, ACCENT, BLACK, kPage[page_], 9);

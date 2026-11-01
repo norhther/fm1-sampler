@@ -71,6 +71,23 @@ On the phone the same four modes are the buttons above the page tabs.
 | OCT -/+ | handled by the firmware (octave) |
 | keys | KIT algorithm: all 27 keys are pads (note 60 + key, 16 slices repeat over the keys), every key lit, tonality and octave ignored. Otherwise the firmware is kept on a plain chromatic keyboard (scale OFF, SysEx 06 always sends 7; notes 53+key) so keys outside the tonality still play; the app adds the octave, builds triads itself in CHORD mode and lights ONLY keys that belong to the scale (root of each octave blinks; scale OFF: only roots); a sounding key goes dark. |
 
+## Gestures, chops, print FX, themes
+Hold a button and use a key, an encoder or the analog knob (HOME, FX, EDIT, GLO and SEL act when let go, unless they were used as a modifier). The phone lists them under MENU > HELP > FM-1 HINTS, and an "FM-1" chip shows on the pages that have some.
+
+| Gesture | Does |
+|---|---|
+| hold EDIT + key 1-8 | mute that track (add SEL: solo it) |
+| hold HOME + key 1-8 | go to that track |
+| hold FX + turn PRESETS | browse the effects on the FM-1 screen, let go of FX to open that page with its knob lit |
+| hold FX + turn ALGORITHM | the browser lists the whole mix / the selected track |
+| hold GLO + turn PRESETS | what the analog knob moves: master volume, track volume, DJ filter, the knob you turned last (all but the master wait until the knob reaches the value) |
+
+**CHOP page** (SOUND tab, last page, KIT/SLICE sample): K1 picks the chop, K2 its start, K3 its end, K4 the step (fine, normal, coarse). REC splits the chop in two, a tap on GLO deletes it, the keys play the pads. The key LEDs show one lit key per chop, the pattern page shows the steps of the bar that plays (the step under the playhead flips), and with EDIT or HOME held keys 1-8 show the tracks.
+
+**PRINT FX** (TAPE tab, last page): by default the tape holds each instrument dry and its effects are applied on every playback, so an effect you play while overdubbing is not kept. Switch PRINT FX on for a track and the tape records the instrument after its cassette and track effects (everything of the track effect pages) and plays back past them, so nothing is applied twice. Switching it on with a tape already on the track runs that tape through the effects once (one undo step). The master effects (reverse, tape stop, the master LIVE pages) and the reverb / delay sends are not printed.
+
+**Themes**: the FM-1 screen uses the colours of the phone's theme (MENU > LOOK).
+
 ## Beat clock, sequencer, master fx
 - Effects: FX 2 / LIVE FX run on the master, TRACK FX runs one `MasterFx` per track (`active()` skips it at rest values, `feedOnly()` keeps the repeat memory warm).
 - The beat clock is the transport position (it restarts with the loop) and runs free while stopped, so the metronome also ticks before a take; the take starts the clock at its first note. Sequencer notes, metronome, trance gate and beat repeat all read it (`engine/dsp/Sequencer.h`: 192 ticks per beat, `tickHits` lists the ticks of an audio block with sample offsets).

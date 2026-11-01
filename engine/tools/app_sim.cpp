@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
     system("mkdir -p /tmp/fm1sampler_test");
     Fm1Screen scr;
     SamplerApp app(s, [&](const uint8_t* m, size_t n) { scr.sysex(m, n); });
+    if (const char* th = getenv("SIM_THEME")) app.setTheme(atoi(th));   // the FM-1 screen wears the phone's theme
     std::vector<float> buf(512), in(512, 0.f), all;
     uint32_t now = 0; double mf = 0, mic = 0;
     auto run = [&](int ms) {

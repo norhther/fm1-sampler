@@ -52,6 +52,8 @@ public:
         int seqUndoN[kTracks], seqRedoN[kTracks];   // how many steps back / forward are possible
         int bounce;              // 0 idle, 1 waiting for the loop start, 2 recording the pattern to tape
         int bounceDone;          // counts up when a bounce finished
+        int printDone, printBusy;   // PRINT FX: counts up when a bake finished; > 0 while one runs
+        uint32_t printMask;         // PRINT FX: the tracks whose tape holds the sound after the effects (bit per track)
     };
     struct SeqView { int tick, len, note, vel, prob = 100, ratchet = 1, nudge = 0, cut = 0; };
     struct SeqRef { int tick, note; };   // a note of a pattern is told by its start and its pitch
@@ -94,6 +96,7 @@ public:
     void setStretch(int track, float speed, float semitones, bool commit);     // commit: the knob rested, (re)build the stretched copy offline
     void setLfo(int track, const Lfo& l);
     void setArp(int track, bool on, int rate /*0..11*/, int pattern /*0..4*/, int octaves /*1..4*/, float gate /*0.05..0.95*/);
+    void setPrintFx(int track, bool on, bool bake = true);   // the tape of the track holds the sound after its cassette and effects (see Session.cpp)
     void setTape(int track, float sat, float tone, float wobble, float hiss, float mix, float bits);
 
     // ---- mixer and effects ----

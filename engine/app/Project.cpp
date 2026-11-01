@@ -87,7 +87,7 @@ std::string SamplerApp::stateText() {
         io.f(k + "fineN", x.fineN); io.f(k + "levelN", x.levelN);
         io.f(k + "tfEqLow", x.tfEqLow); io.f(k + "tfEqMid", x.tfEqMid); io.f(k + "tfEqHigh", x.tfEqHigh); io.f(k + "tfComp", x.tfComp); io.f(k + "duckAmt", x.duckAmt);
         io.i(k + "edW1", x.edW1, 0, 4); io.i(k + "edW2", x.edW2, 0, 4); io.i(k + "edType", x.edType, 0, 2); io.i(k + "edUni", x.edUni, 0, 3); io.i(k + "edVoice", x.edVoice, 0, 3); io.f(k + "edDet2", x.edDet2); io.f(k + "edCut", x.edCut); io.f(k + "edRes", x.edRes);
-        io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
+        io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8); io.i(k + "printFx", x.printFx, 0, 1);
         io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
         io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.f(k + "tfFold", x.tfFold); io.f(k + "tfAutopan", x.tfAutopan); io.f(k + "tfVinyl", x.tfVinyl); io.f(k + "tfVowel", x.tfVowel); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
         int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15); io.i(k + "keyTrig", x.keyTrig, 0, 1); io.i(k + "trigQ", x.trigQ, 0, 2); io.i(k + "seqOne", x.seqOne, 0, 1); io.i(k + "chopFull", x.chopFull, 0, 1);
@@ -128,7 +128,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         io.f(k + "vol", x.vol); io.f(k + "pan", x.pan); io.f(k + "sendR", x.sendR); io.f(k + "sendD", x.sendD);
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
         for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
-        io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8);
+        io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8); io.i(k + "printFx", x.printFx, 0, 1);
         io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
         io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.f(k + "tfFold", x.tfFold); io.f(k + "tfAutopan", x.tfAutopan); io.f(k + "tfVinyl", x.tfVinyl); io.f(k + "tfVowel", x.tfVowel); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
         int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15); io.i(k + "keyTrig", x.keyTrig, 0, 1); io.i(k + "trigQ", x.trigQ, 0, 2); io.i(k + "seqOne", x.seqOne, 0, 1); io.i(k + "chopFull", x.chopFull, 0, 1);
@@ -306,14 +306,14 @@ bool SamplerApp::importMidi(const std::string& path) {
 void SamplerApp::loadSettings() {
     const KV kv = parse(readFile(s_.dataDir() + "/settings.txt")); Io io{false, &kv, {}};
     int th = 0, fs = 0, ms = 0, po = 0, au = 0, lh = 0, ac = 0, td = 0; io.i("theme", th, 0, theme::kThemes - 1); io.i("fullscreen", fs, 0, 1); io.i("midiSync", ms, 0, 2); io.i("phoneOut", po, 0, 1); io.i("audition", au, 0, 1); io.i("leftHanded", lh, 0, 1); io.i("access", ac, 0, 1); io.i("tourDone", td, 0, 1);
-    midiSync_ = ms; phoneOut_ = po != 0; audition_ = au != 0; leftHanded_ = lh != 0; access_ = ac != 0; tourDone_ = td != 0; theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_);
+    midiSync_ = ms; phoneOut_ = po != 0; audition_ = au != 0; leftHanded_ = lh != 0; access_ = ac != 0; tourDone_ = td != 0; theme_ = th; fullscreen_ = fs != 0; theme::apply(theme_); applyFmPalette();
 }
 void SamplerApp::saveSettings() {
     if (s_.dataDir().empty()) return;
     std::error_code ec; fs::create_directories(s_.dataDir(), ec);
     std::ofstream f(s_.dataDir() + "/settings.txt"); f << "theme=" << theme_ << "\nfullscreen=" << (fullscreen_ ? 1 : 0) << "\nmidiSync=" << midiSync_ << "\nphoneOut=" << (phoneOut_ ? 1 : 0) << "\naudition=" << (audition_ ? 1 : 0) << "\nleftHanded=" << (leftHanded_ ? 1 : 0) << "\naccess=" << (access_ ? 1 : 0) << "\ntourDone=" << (tourDone_ ? 1 : 0) << "\n";
 }
-void SamplerApp::setTheme(int id) { theme_ = std::min(theme::kThemes - 1, std::max(0, id)); theme::apply(theme_); saveSettings(); }
+void SamplerApp::setTheme(int id) { theme_ = std::min(theme::kThemes - 1, std::max(0, id)); theme::apply(theme_); applyFmPalette(); saveSettings(); }
 
 // ---- other gear on the MIDI bus ----
 void SamplerApp::midiExternal(const uint8_t* b, size_t n, uint64_t nowNs) {
