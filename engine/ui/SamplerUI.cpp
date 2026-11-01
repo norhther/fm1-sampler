@@ -625,7 +625,7 @@ void SamplerUI::sequencerView(Rect r) {
         button({ex + sw + gap, sy, sw, slotH}, st_.songOn ? "SONG*" : "SONG", st_.songOn, [this] { songOpen_ = true; }, 9.5f);
     }
     // bars: add or remove one at the end (new bars are empty; the notes behind a removed end are dropped, UNDO brings them back)
-    const float by = r.y + r.h - 38, bwBar = 34, lblW = 64, cpW = 44, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 5 * 6) / 5;
+    const float by = r.y + r.h - 38, bwBar = 34, lblW = 64, cpW = 44, barsW = 2 * bwBar + cpW + lblW + 3 * 4, bw = (r.w - barsW - 6 * 6) / 6;   // six buttons: KEY TRIG, TAPE, LOOP, DICE, the generator, CLEAR
     const int nb = app_.seqBarsOf(t);
     button({r.x, by, bwBar, 38}, "-", false, [this, nb] { app_.seqSetBarCount(nb - 1); }, 16);
     text(r.x + bwBar + 4 + lblW / 2, by + 13, 13, TEXT, std::to_string(nb) + (nb == 1 ? " BAR" : " BARS"), 1, true);
@@ -638,7 +638,7 @@ void SamplerUI::sequencerView(Rect r) {
     b(st_.bounce == 1 ? "WAITING..." : st_.bounce == 2 ? "REC TAPE" : "TAPE", st_.bounce > 0, [this] { app_.seqBounce(); }, st_.bounce > 0);   // lit while it waits for its bar or records; tap again to cancel
     if (tapeH > 0) {   // TAPE lands the pattern on bar 1, 2, 3 ... of the tape (the lit bars are what it would fill), or on ALL of it
         const int bb = app_.bounceBar(), tb = std::max(1, st_.loopBars), pb = std::min(tb, std::max(1, nb));
-        const float sy = r.y + r.h - 70, sh = 24, lw = 74, aw = 44, cell = (r.w - lw - aw - 8) / tb;
+        const float sy = r.y + r.h - 70, sh = 24, lw = 74, aw = 44, cell = (r.w - lw - 28 - aw - 4) / tb;
         text(r.x + 2, sy + sh / 2, 8.5f, DIM, "TAPE LANDS ON", 0, true);
         button({r.x + lw + 76 - 76 + 28, sy, aw, sh}, "ALL", bb == 0, [this] { app_.setBounceBar(0); }, 9.5f);
         for (int k = 1; k <= tb; k++) {
@@ -1002,13 +1002,19 @@ void SamplerUI::fxSheet() {
     text(box.x + 14, box.y + box.h - 10, T_CAPTION, DIM, "FM-1: HOLD FX + TURN PRESETS, LET GO TO OPEN", 0, false);
     const FxParams fp = fxTrack_ ? app_.trackParams(app_.track()) : app_.masterParams();
     const auto& cat = SamplerApp::fxCatalog();
-    const float colW = (box.w - 16 - 16) / 3, rh = 28; float colY[3] = {box.y + 46, box.y + 46, box.y + 46};
-    // three columns of kinds, the biggest kind first, each into the shortest column; a kind is a caption and its effects
+    // three columns of kinds, the biggest kind first, each into the shortest column; a kind is a caption and its effects.
+    // The rows shrink (28 .. 20) until everything fits above the footer; if even that is not enough there are four columns.
     std::vector<std::string> kinds; for (const auto& f : cat) if (std::find(kinds.begin(), kinds.end(), f.cat) == kinds.end()) kinds.push_back(f.cat);
     auto count = [&](const std::string& k) { int n = 0; for (const auto& f : cat) if (k == f.cat) n++; return n; };
     std::stable_sort(kinds.begin(), kinds.end(), [&](const std::string& a, const std::string& b) { return count(a) > count(b); });
+    const float top = box.y + 46, limit = box.y + box.h - 24;
+    auto tallest = [&](int cols, float rowH) { float y[4] = {0, 0, 0, 0}; for (const auto& kd : kinds) { float& m = *std::min_element(y, y + cols); m += 18 + count(kd) * rowH + 8; } return *std::max_element(y, y + cols); };
+    int cols = 3; float rh = 28;
+    while (rh > 20 && top + tallest(cols, rh) > limit) rh -= 2;
+    if (top + tallest(cols, rh) > limit) { cols = 4; rh = 26; while (rh > 20 && top + tallest(cols, rh) > limit) rh -= 2; }
+    const float colW = (box.w - 16 - 8 * (cols - 1)) / (float)cols; float colY[4] = {top, top, top, top};
     for (const auto& kd : kinds) {
-        const int col = (int)(std::min_element(colY, colY + 3) - colY); float& y = colY[col]; const float x = box.x + 8 + col * (colW + 8);
+        const int col = (int)(std::min_element(colY, colY + cols) - colY); float& y = colY[col]; const float x = box.x + 8 + col * (colW + 8);
         text(x + 2, y + 8, T_CAPTION, DIM, kd, 0, true); y += 18;
         for (const auto& f : cat) {
             if (kd != f.cat) continue;

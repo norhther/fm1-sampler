@@ -11,6 +11,7 @@
 #include <Sequencer.h>
 #include <Arp.h>
 #include <PatternGen.h>
+#include <SynthCategory.h>
 #include <Tombola.h>
 #include <Midi.h>
 #include <Theme.h>
@@ -224,6 +225,19 @@ static void testPatternGen() {
     int acc = 0, slides = 0; for (uint32_t seed = 1; seed <= 20; seed++) for (const auto& g : patgen::generate(patgen::ACID, steps, st, sc, 7, 0, seed)) { acc += g.vel >= 120; slides += g.len > st; }
     CHECK(acc > 20 && slides > 20, "ACID writes accents and slides (%d, %d)", acc, slides);
 }
+// the library's synth groups: every synth is in a kind, each kind has some, and the obvious ones are where you look for them
+static void testSynthCategories() {
+    int cnt[kSynthCats] = {0};
+    for (int i = 0; i < kSynthCount; i++) cnt[synthCategory(kSynths[i])]++;
+    int empty = 0, big = 0; for (int c = 0; c < kSynthCats; c++) { if (cnt[c] == 0) empty++; if (cnt[c] > 70) big++; }
+    CHECK(empty == 0 && big == 0, "synth kinds: none empty (%d), none over 70 (%d): bass %d leads %d pads %d keys %d bells %d organs %d brass %d kits %d animals %d fx %d", empty, big, cnt[0], cnt[1], cnt[2], cnt[3], cnt[4], cnt[5], cnt[6], cnt[7], cnt[8], cnt[9]);
+    auto cat = [](const char* nm) { for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == nm) return synthCategory(kSynths[i]); return -1; };
+    CHECK(cat("Sub Bass") == 0 && cat("303 Classic") == 0 && cat("Mono Lead") == 1 && cat("Warm Pad") == 2 && cat("Pluck") == 3 && cat("FM Bell") == 4 && cat("Organ") == 5 && cat("Brass") == 6 && cat("Sloop 808") == 7 && cat("Owl") == 8 && cat("Riser") == 9,
+          "synths land in their kind (bass, lead, pad, keys, bell, organ, brass, kit, animal, fx)");
+    Session sess(SAMPLERATE); SamplerApp a(sess, [](const uint8_t*, size_t) {}); int inKind = 0, synths = 0;
+    for (const auto& e : a.library()) if (e.path.rfind("synth:", 0) == 0) { synths++; inKind += e.group.rfind("Syn ", 0) == 0; }
+    CHECK(synths == kSynthCount && inKind == synths, "the library lists every synth under a Syn group (%d of %d)", inKind, synths);
+}
 // the piano roll: pinch with two fingers zooms (horizontal = time, vertical = pitch), the buttons zoom too, a pinch never writes a note
 static void testSynths() {
     const int sr = SAMPLERATE;
@@ -315,7 +329,7 @@ static void testSynths() {
     system("rm -rf /tmp/fm1sampler_t6; mkdir -p /tmp/fm1sampler_t6");
     Session s(sr); s.setDataDir("/tmp/fm1sampler_t6"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
-    int first = -1, count = 0; for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].group == "Synths") { if (first < 0) first = i; count++; }
+    int first = -1, count = 0; for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].path.rfind("synth:", 0) == 0) { if (first < 0) first = i; count++; }
     CHECK(count == kSynthCount, "library has the Synths group (%d)", count);
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 0;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
@@ -358,7 +372,7 @@ static void testOp1() {
     CHECK(n3 == n, "one undo brings the previous pattern back (%d notes)", n3);
     {   // live TAPE STOP: hold = the sound runs down, let go = it spins up again
         std::vector<float> all2; auto runA = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); all2.insert(all2.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
-        for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Organ" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+        for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Organ" && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) app.loadEntry(i);
         for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }   // the worker loads the synth in real time
         app.seqClear(); run(0.3);
         app.playNote(60, true); runA(1.0);
@@ -612,7 +626,7 @@ static void testSound() {
     for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Warm Pad") app.loadEntry(i);
     run(2.0); { auto k = app.knobs(); k[1].step(1); }
     CHECK(app.state(0).rootN > 0.f, "AUTO TUNE answers (%s)", app.knobs()[1].value.c_str());
-    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Pluck" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Pluck" && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) app.loadEntry(i);
     run(1.5); app.gotoPage(SamplerApp::P_SHAPE);
     CHECK(std::string(app.knobs()[0].name) == "TONE" && std::string(app.knobs()[3].name) == "GRIT", "a synth track shows its macros (%s .. %s)", app.knobs()[0].name.c_str(), app.knobs()[3].name.c_str());
 }
@@ -792,7 +806,7 @@ static void testMixer() {
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
-    auto load = [&](int track, const char* name) { app.selectTrack(track); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == name && app.library()[(size_t)i].group == "Synths") app.loadEntry(i); };
+    auto load = [&](int track, const char* name) { app.selectTrack(track); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == name && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) app.loadEntry(i); };
     wait(2.0); load(1, "Organ"); load(0, "Synth Kit 808"); wait(2.0);
     app.gotoPage(SamplerApp::P_TEQ); CHECK(std::string(app.knobs()[0].name) == "EQ LOW" && std::string(app.knobs()[3].name) == "COMPRESSOR" && SamplerApp::modeOf(SamplerApp::P_TEQ) == 3, "MIX mode has the track EQ page");
     app.gotoPage(SamplerApp::P_DUCK); CHECK(std::string(app.knobs()[0].name) == "DUCK FROM" && std::string(app.knobs()[3].name) == "LIMITER", "...and the duck and limiter page");
@@ -857,7 +871,7 @@ static void testSynthEdit() {
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     run(2.5); app.selectTrack(2); app.gotoPage(SamplerApp::P_SYN1);
     CHECK(std::string(app.knobs()[0].name) != "WAVE", "a sample track has no synth knobs");
-    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) app.loadEntry(i);
     for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
     app.gotoPage(SamplerApp::P_SYN1); CHECK(std::string(app.knobs()[0].name) == "WAVE" && std::string(app.knobs()[3].name) == "UNISON" && SamplerApp::modeOf(SamplerApp::P_SYN1) == 0, "a synth track has the OSC page");
     app.gotoPage(SamplerApp::P_SYN2); CHECK(std::string(app.knobs()[0].name) == "CUTOFF" && std::string(app.knobs()[3].name) == "VOICES", "...and the FILTER page");
@@ -868,13 +882,13 @@ static void testSynthEdit() {
     const std::string name = app.savePatch(); CHECK(name == "Saw Bass 2", "SAVE PATCH names it after the synth (%s)", name.c_str());
     int pe = -1; for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == name && app.library()[(size_t)i].group == "My Patches") pe = i;
     CHECK(pe >= 0, "the patch is in the library under My Patches");
-    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Brass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Brass" && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) app.loadEntry(i);
     for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
     app.gotoPage(SamplerApp::P_SYN2); { auto k = app.knobs(); k[3].set(0.f); } app.gotoPage(SamplerApp::P_SYN1); { auto k = app.knobs(); k[0].set(0.f); }
     app.loadEntry(pe); for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
     CHECK(app.sampleLabel(2) == "Saw Bass" && app.isSynth(2) && app.state(2).edW1 == 1 && app.state(2).edVoice == 3 && app.state(2).synTone > 0.89f && app.state(2).edCut > 0.79f, "loading the patch brings the synth and its settings back (%s, wave %d, voices %d, tone %.2f)", app.sampleLabel(2).c_str(), app.state(2).edW1, app.state(2).edVoice, app.state(2).synTone);
     CHECK(app.saveProject("Patch Test") , "a project with a patch on a track saves"); for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
-    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Brass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Brass" && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) app.loadEntry(i);
     for (int i = 0; i < 10; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
     app.loadProject("Patch Test"); for (int i = 0; i < 60; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
     CHECK(app.sampleLabel(2) == "Saw Bass", "...and loads with the synth on the track (%s)", app.sampleLabel(2).c_str());
@@ -971,7 +985,7 @@ static void testLock() {
     std::vector<float> buf(512), in(512, 0.f), all; uint32_t now = 1000;
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto wait = [&](double sec) { for (int i = 0; i < (int)(sec * 20); i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); } };
-    run(2.5); app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].group == "Synths") app.loadEntry(i);
+    run(2.5); app.selectTrack(4); for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) app.loadEntry(i);
     wait(1.0); app.setSend(4, 0, 0.f); app.setSend(4, 1, 0.f);
     app.gotoPage(SamplerApp::P_SQ); app.seqClear(); app.seqSetBarCount(1); app.seqToggleAt(0, 60, 192); { auto k = app.knobs(); k[0].set(1.f / 3); } s.play(true); wait(0.5);
     auto zc = [&]() { all.clear(); run(2.6); double d = 0, a = 1e-9; for (size_t i = 2; i < all.size(); i += 2) { d += std::fabs(all[i] - all[i - 2]); a += std::fabs(all[i]); } return d / a; };   // how bright: the movement of the waveform against its size
@@ -1076,6 +1090,7 @@ int main() {
     }
     testSynths();
     testPatternGen();
+    testSynthCategories();
     testOp1();
     testLock();
     testMidiIn();

@@ -137,6 +137,11 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.46
+
+- **Synth kinds**: the 253 synths are no longer one long list; the library has a chip per kind: Syn Bass, Syn Leads, Syn Pads, Syn Keys, Syn Bells, Syn Organs, Syn Brass, Syn Kits, Syn Animals, Syn FX.
+- **Fixes**: the effects browser no longer runs off the bottom (the rows shrink, or there are four columns); the pattern page's button row and its TAPE LANDS ON bars fit the screen.
+
 ## v0.45
 
 - **FM6** (Felucca's six-operator FM, msfa / Dexed core) with its 15 factory patches.

@@ -1,4 +1,5 @@
 #include "PatternGen.h"
+#include "SynthCategory.h"
 #include "SamplerApp.h"
 #include "../ui/Theme.h"
 #include <Common.h>
@@ -162,7 +163,8 @@ void SamplerApp::refreshLibrary() {
             std::string stem = file.substr(0, file.rfind('.'));
             lib_.push_back({stem, f, dir + "/" + f + "/" + file, f == "Drums"});
         }
-    for (int i = 0; i < kSynthCount; i++) lib_.push_back({kSynths[i].name, "Synths", "synth:" + std::to_string(i), kSynths[i].kit > 0});
+    for (int c = 0; c < kSynthCats; c++)   // the synths by kind: bass, leads, pads ... (a chip each), in the order of the list inside a kind
+        for (int i = 0; i < kSynthCount; i++) if (synthCategory(kSynths[i]) == c) lib_.push_back({kSynths[i].name, synthCatName(c), "synth:" + std::to_string(i), kSynths[i].kit > 0});
     { std::error_code ec; std::vector<std::string> names; for (auto& e : std::filesystem::directory_iterator(s_.dataDir() + "/patches", ec)) if (e.path().extension() == ".txt") names.push_back(e.path().stem().string());
       std::sort(names.begin(), names.end());
       for (auto& nm : names) {
@@ -197,7 +199,7 @@ void SamplerApp::loadEntry(int i, bool preview) {
         auto iv = [&](const char* k, int& v, int hi) { auto it = kv.find(k); if (it != kv.end()) v = std::min(hi, std::max(0, std::atoi(it->second.c_str()))); };
         fv("a", t.a); fv("d", t.d); fv("s", t.s); fv("r", t.r); fv("tone", t.synTone); fv("body", t.synBody); fv("motion", t.synMotion); fv("grit", t.synGrit);
         iv("w1", t.edW1, 4); iv("w2", t.edW2, 4); iv("type", t.edType, 2); iv("uni", t.edUni, 3); iv("voice", t.edVoice, 3); fv("det2", t.edDet2); fv("cut", t.edCut); fv("res", t.edRes);
-        int base = -1; for (size_t j = 0; j < lib_.size(); j++) if (lib_[j].group == "Synths" && lib_[j].label == kv["synth"]) base = (int)j;
+        int base = -1; for (size_t j = 0; j < lib_.size(); j++) if (lib_[j].path.rfind("synth:", 0) == 0 && lib_[j].label == kv["synth"]) base = (int)j;
         previewAfterLoad_ = preview;
         if (base >= 0) { if (lib_[(size_t)base].kit) t.algo = 3; s_.loadSamplePath(lib_[(size_t)base].path, lib_[(size_t)base].kit, track_); }
         return;
@@ -213,7 +215,7 @@ std::string SamplerApp::resolvePath(int entry) const {
     if (entry < 0 || entry >= (int)lib_.size()) return "";
     const Entry& e = lib_[(size_t)entry];
     if (e.path.rfind("patch:", 0) != 0) return e.path;
-    std::ifstream f(s_.dataDir() + "/patches/" + e.path.substr(6) + ".txt"); std::string line; while (std::getline(f, line)) if (line.rfind("synth=", 0) == 0) { for (auto& l : lib_) if (l.group == "Synths" && l.label == line.substr(6)) return l.path; }
+    std::ifstream f(s_.dataDir() + "/patches/" + e.path.substr(6) + ".txt"); std::string line; while (std::getline(f, line)) if (line.rfind("synth=", 0) == 0) { for (auto& l : lib_) if (l.path.rfind("synth:", 0) == 0 && l.label == line.substr(6)) return l.path; }
     return "";
 }
 std::string SamplerApp::savePatch() {
