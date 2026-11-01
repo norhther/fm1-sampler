@@ -137,6 +137,13 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.45
+
+- **FM6** (Felucca's six-operator FM, msfa / Dexed core) with its 15 factory patches.
+- **Felucca-Engines** (MIT, Leo Kuroshita), float ports: **ANALOG** (saw/square/tri/sine/PWM, hard sync, sub), **TRIO** (three oscillators, ring mod, sync, multimode filter), **LOFI** (chip voice: 4/8/1-bit, wave RAM, stepped envelope, sweep, arp) and **NOISE** (analog, dust, shift-register and metallic noise). 28 patches.
+- **DRUM-X** (JIANT, GPL-3.0): nine synthesised kits. Pads 0-7 are the eight sounds on patch A, pads 8-15 the same on patch B.
+- 220 synths in all. Not ported yet: Felucca GRAIN and PHYS, JIANT STRING, the TB-3PO line generator and the break player.
+
 ## v0.44
 
 Vinyl scratch effect (master FX 6, TRACK FX 7); 103 more synth patches (74 -> 177) and 7 more library instruments, from the other open FM-1 firmwares: GHOULBOX (hurdy-gurdy, tonewheel organ and formant voice engines, dungeon patches, CC0 instrument samples), SLOOP (32 synthesised drum kits), X0X (TB-303, TR-808, TR-909), JIANT FM (ANIMAL: bird, insect, frog and mammal calls). fm1-sampler is now GPL-3.0-only (below). Not heard on a phone or an FM-1 yet.
