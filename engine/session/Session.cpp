@@ -55,7 +55,7 @@ struct Session::Impl {
         SeqNote sn[kSeqMax]; int snCount = 0, seqState = 0, seqBars = 1; bool sounding[128] = {}; int openIdx[128] = {};
         // play / stop and key trigger: the pattern runs from `seqPhase` (a tick of the loop), transposed by seqTrans; a start waits for the beat or the bar of the metronome
         bool seqRunning = true, oneShot = false, keyTrig = false, startPending = false, restartNow = false; int64_t seqPhase = 0, seqRan = 0;   // oneShot: the pattern plays one pass and stops; seqRan counts the ticks since the start
-        int seqTrans = 0, pendTrans = 0, trigQ = 1, heldKeys = 0; int8_t sndT[128] = {};
+        float tuneOf[128] = {}; int seqTrans = 0, pendTrans = 0, trigQ = 1, heldKeys = 0; int8_t sndT[128] = {};
         int seqCursor = 0, stepHeld = 0; bool stepDown[128] = {};   // step entry
         struct SeqSnap { SeqNote sn[kSeqMax]; int count = 0, bars = 1; };   // undo / redo: whole patterns
         static constexpr int kHist = 16;
@@ -270,7 +270,7 @@ struct Session::Impl {
                     if (t.pskip[i]) continue;
                     if (t.sounding[e.note]) noteTo(t, clampNote(e.note + t.sndT[e.note]), 0, h.offset, evs);
                     t.lockCut = e.cut;   // a note with a filter lock closes the track filter, a note without one lets it go
-                    t.sounding[e.note] = true; t.sndT[e.note] = (int8_t)t.seqTrans; noteTo(t, clampNote(e.note + t.seqTrans), e.vel, h.offset, evs);
+                    const bool kit = t.sampler && t.sampler->kitSample(); t.sounding[e.note] = true; t.sndT[e.note] = kit ? 0 : (int8_t)t.seqTrans; t.tuneOf[e.note] = kit ? (float)t.seqTrans : 0.f; noteTo(t, clampNote(e.note + (kit ? 0 : t.seqTrans)), e.vel, h.offset, evs);   // chops: a key moves the PITCH of the pattern, not the chop it plays
                 }
             }
         }
@@ -788,7 +788,7 @@ struct Session::Impl {
                 for (auto& e : evs) {
                     const int off = std::min(n, std::max(cur, e.offset));
                     if (off > cur) { t.sampler->render(bus.data() + 2 * cur, off - cur); cur = off; }
-                    if (e.vel) { t.sampler->noteOn(e.note, e.vel); if (ti == duckSrc) duckTrig = true; } else t.sampler->noteOff(e.note);
+                    if (e.vel) { t.sampler->setTune(t.tuneOf[e.note & 127]); t.sampler->noteOn(e.note, e.vel); if (ti == duckSrc) duckTrig = true; } else { t.sampler->noteOff(e.note); t.tuneOf[e.note & 127] = 0.f; }
                 }
                 if (cur < n) t.sampler->render(bus.data() + 2 * cur, n - cur);
                 float vp[kVoiceMax]; const int vn = t.sampler->voicePositions(vp, kVoiceMax);

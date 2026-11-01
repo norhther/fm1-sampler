@@ -58,6 +58,8 @@ public:
     // the offline stretched / pitched copy of the range [a, b] (null: play the original)
     void setProcessed(std::shared_ptr<const SampleBuf> p, float a, float b);
     void setBend(float semitones) { bend_ = semitones; }
+    bool kitSample() const { return mode_ == KIT && synth_ < 0; }   // chops of a sample
+    void setTune(float semitones) { tune_ = semitones; }   // chops: the pitch of the hits that start from now on (the pattern moved by a key), the chop stays the same
     void noteOn(int note, int vel);
     void noteOff(int note);
     void allOff();
@@ -82,7 +84,7 @@ private:
 
     int sr_;
     std::shared_ptr<const SampleBuf> orig_, proc_;
-    float procA_ = 0, procB_ = 1, rangeA_ = 0, rangeB_ = 1, bend_ = 0, atk_ = 0.01f, dec_ = 0.3f, sus_ = 0.8f, rel_ = 0.3f;
+    float tune_ = 0.f, procA_ = 0, procB_ = 1, rangeA_ = 0, rangeB_ = 1, bend_ = 0, atk_ = 0.01f, dec_ = 0.3f, sus_ = 0.8f, rel_ = 0.3f;
     bool chopFull_ = false; int mode_ = MELODIC; std::vector<int> slices_, sliceEnds_; std::string label_; std::vector<float> peaks_;
     Voice voices_[kVoices]; std::vector<std::unique_ptr<PaulStream>> paul_; bool paulBusy_[kVoices] = {};
     uint32_t bornCounter_ = 0, rng_ = 7;

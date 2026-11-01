@@ -130,6 +130,7 @@ void Sampler::noteOn(int note, int vel) {
     v.on = true; v.gate = true; v.note = note; v.vel = clampf(vel / 127.f, 0.f, 1.f); v.born = ++bornCounter_;
     v.slice = padIdx;
     if (pad) { v.group = pad->group; v.padGain = pad->vol; v.padPitch = pad->pitch; const float a = (pad->pan + 1.f) * kPi / 4.f; v.panL = std::cos(a) * 1.414f; v.panR = std::sin(a) * 1.414f; }
+    if (kitSample()) v.padPitch += tune_;
     if (synth_ >= 0) {
         const bool legato = edit_.mono && kSynths[synth_].engine != 3;
         if (legato) { for (auto& o : voices_) if (&o != &v && o.on && !o.fading) fadeOut(o); }   // mono: one voice at a time
