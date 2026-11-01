@@ -97,7 +97,7 @@ private:
     void askTapeClear(int track);   // -1: the whole tape
     void confirmSheet(); void menuSheet(); void tourSheet(); void trackMenuSheet(); void mixerView(Rect r); void flowStrip(Rect r); void undoToast();
     void showUndo(const std::string& msg) { undoMsg_ = msg; undoMsgAt_ = now_ ? now_ : 1; }
-    bool menuOpen_ = false, tourOpen_ = false, tourSeen_ = false, haptic_ = false; int tourStep_ = 0, trackMenu_ = -1;
+    bool menuOpen_ = false, tourOpen_ = false, tourSeen_ = false, haptic_ = false; int tourStep_ = 0, trackMenu_ = -1, tapeTop_ = 0, tapeSeen_ = -1;   // tapeTop_: the first lane the tape page shows (8 at most at once)
     float textScale_ = 1.f; uint32_t undoMsgAt_ = 0;
     std::string announce_, lastToast_, undoMsg_;
     Rect rTracks_{0, 0, 0, 0}, rPanel_{0, 0, 0, 0}, rArea_{0, 0, 0, 0}, rRec_{0, 0, 0, 0}, rUndo_{0, 0, 0, 0}, rTempo_{0, 0, 0, 0};   // where things are, for the tour

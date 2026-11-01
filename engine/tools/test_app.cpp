@@ -115,6 +115,13 @@ int main() {
         auto eq = findSlices(std::vector<float>((size_t)N * 2, 0.1f), N, 44100, 16);
         CHECK(eq.size() == 16, "no hits: %zu equal slices", eq.size());
     }
+    {   // removing a track: the last extra one closes, the first eight are only emptied
+        app.addTrack(); app.addTrack(); const int n = app.trackCount();
+        app.removeTrack(n - 1); CHECK(app.trackCount() == n - 1, "last extra track closes (%d -> %d)", n, app.trackCount());
+        app.removeTrack(0); CHECK(app.trackCount() == n - 1, "track 1 is emptied, not closed");
+        while (app.trackCount() > SamplerApp::kFmTracks) app.removeTrack(app.trackCount() - 1);
+        app.removeTrack(app.trackCount() - 1); CHECK(app.trackCount() == SamplerApp::kFmTracks, "never fewer than %d tracks", SamplerApp::kFmTracks);
+    }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;
 }

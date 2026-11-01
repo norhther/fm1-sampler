@@ -406,16 +406,29 @@ void SamplerUI::tapeView(Rect r) {   // like the OP-1 tape: two reels and the he
     tri(r.x + 48, cy + 19, r.x + 58, cy + 19, r.x + 53, cy + 25, TEXT);
     const int m = (int)(nowS / 60); const double sec = nowS - m * 60;
     text(r.x + 108, cy - 4, 15, rec ? ACCENT : TEXT, num("%d:", m) + (sec < 10 ? "0" : "") + num("%.1f", sec), 0, true);
-    text(r.x + 108, cy + 14, T_CAPTION, DIM, has ? std::to_string(bars) + (bars == 1 ? " BAR  " : " BARS  ") + num("%.0f BPM  ", st_.bpm) + num("%.1f S", lenS) : rec ? "RECORDING THE FIRST TAKE" : "THE TAPE IS EMPTY: PRESS REC", 0, true);
-    { float bx = r.x + r.w - 104;   // right to left: CLEAR TAPE, SAVE LOOP, and before the first take how many bars it lasts
-      dangerButton({bx, r.y + 2, 104, 26}, "CLEAR TAPE", [this, has] { if (has) askTapeClear(-1); else app_.say("THE TAPE IS ALREADY EMPTY"); }, 9.5f); bx -= 76;
-      button({bx, r.y + 2, 72, 26}, "SAVE LOOP", false, [this] { app_.loopSave(); }, 9.f); bx -= 80;
-      if (!has && !rec && !st_.freeArmed) button({bx, r.y + 2, 76, 26}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
-      else if (has) button({bx, r.y + 2, 76, 26}, "UNDO TAKE", st_.globalUndoN > 0, [this] { app_.globalUndo(); }, 9.5f); }
-    const float labW = 34, ruler = 12, top = r.y + 48 + ruler, laneH = (r.y + r.h - top) / app_.trackCount(), xW = 38, wx = r.x + labW + 4, ww = r.w - labW - 4 - xW;   // xW: a gutter on the right for each lane's X, so it never covers the waveform
+    const std::string capS = has ? std::to_string(bars) + (bars == 1 ? " BAR  " : " BARS  ") + num("%.0f BPM  ", st_.bpm) + num("%.1f S", lenS) : rec ? "RECORDING THE FIRST TAKE" : "THE TAPE IS EMPTY: PRESS REC";
+    text(r.x + 108, cy + 14, T_CAPTION, DIM, capS, 0, true);
+    const float textEnd = r.x + 108 + 7 * 15.f * textScale_ * 0.55f + 4;   // the counter ("10:02.7") is on the same row as the buttons: they give way to it, the take button first
+    { float bx = r.x + r.w - 96;   // right to left: CLEAR TAPE, SAVE LOOP, and the take button (UNDO TAKE, or before the first take how many bars it lasts)
+      dangerButton({bx, r.y + 2, 96, 26}, "CLEAR TAPE", [this, has] { if (has) askTapeClear(-1); else app_.say("THE TAPE IS ALREADY EMPTY"); }, 9.5f); bx -= 70;
+      if (bx >= textEnd) button({bx, r.y + 2, 66, 26}, "SAVE LOOP", false, [this] { app_.loopSave(); }, 9.f); bx -= 74;
+      if (bx >= textEnd) {
+          if (has) button({bx, r.y + 2, 70, 26}, "UNDO TAKE", st_.globalUndoN > 0, [this] { app_.globalUndo(); }, 9.f);
+          else if (!rec && !st_.freeArmed) button({bx, r.y + 2, 70, 26}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.f); } }
+    const int nT = app_.trackCount(), vis = std::min(nT, 8);
+    const float labW = 34, ruler = 12, top = r.y + 48 + ruler, xW = 38, sbW = nT > vis ? 14.f : 0.f, laneH = (r.y + r.h - top) / vis, wx = r.x + labW + 4, ww = r.w - labW - 4 - xW - sbW;   // xW: a gutter on the right for each lane's X, so it never covers the waveform
     if (has) for (int b = 0; b < bars; b += std::max(1, bars / 16)) text(wx + ww * b / bars + 3, top - ruler / 2 - 1, 8, DIM, std::to_string(b + 1), 0, false);   // the ruler: where each bar starts
-    for (int t = 0; t < app_.trackCount(); t++) {
-        const Rect lane{r.x, top + t * laneH, r.w, laneH - 2};
+    if (tapeSeen_ != app_.track()) { tapeSeen_ = app_.track(); tapeTop_ = std::min(tapeTop_, app_.track()); tapeTop_ = std::max(tapeTop_, app_.track() - vis + 1); }   // a track picked elsewhere scrolls into view
+    tapeTop_ = std::max(0, std::min(tapeTop_, nT - vis));
+    if (sbW > 0) {   // a scroll bar: drag it (or tap it) to move through the tracks
+        const Rect sb{r.x + r.w - sbW + 2, top, sbW - 2, laneH * vis - 2};
+        rrect(sb, 3, SURFACE); const float th = std::max(24.f, sb.h * vis / nT), ty = sb.y + (sb.h - th) * tapeTop_ / (nT - vis);
+        rrect({sb.x, ty, sb.w, th}, 3, ACCENT);
+        auto go = [this, sb, th, nT, vis](float, float y) { tapeTop_ = std::max(0, std::min(nT - vis, (int)std::lround((y - sb.y - th / 2) / std::max(1.f, sb.h - th) * (nT - vis)))); };
+        hit({sb.x - 8, sb.y, sb.w + 10, sb.h}, go, go);
+    }
+    for (int t = tapeTop_; t < tapeTop_ + vis; t++) {
+        const Rect lane{r.x, top + (t - tapeTop_) * laneH, r.w - sbW, laneH - 2};
         const bool sel = t == app_.track(), clip = st_.track_has_clip[t];
         rrect(lane, 3, sel ? RAISED : SURFACE); if (sel) stroke(lane, 3, ACCENT, 1);
         text(r.x + labW / 2, lane.y + lane.h / 2, 11, sel ? ACCENT : DIM, std::to_string(t + 1), 1, true);
@@ -430,8 +443,8 @@ void SamplerUI::tapeView(Rect r) {   // like the OP-1 tape: two reels and the he
         if (clip) button({lane.x + lane.w - xW + 2, lane.y + 1, xW - 4, std::min(lane.h - 2, 18.f)}, "X", false, [this, t] { askTapeClear(t); }, 9);
     }
     if (has) {   // bar lines and the playhead over all lanes
-        for (int b = 0; b < bars; b++) line(wx + ww * b / bars, top, wx + ww * b / bars, top + laneH * app_.trackCount() - 2, OUTLINE, 1);
-        rrect({wx + lp * ww - 1, top - 2, 3, laneH * app_.trackCount()}, 0, rec ? ACCENT : TEXT);
+        for (int b = 0; b < bars; b++) line(wx + ww * b / bars, top, wx + ww * b / bars, top + laneH * vis - 2, OUTLINE, 1);
+        rrect({wx + lp * ww - 1, top - 2, 3, laneH * vis}, 0, rec ? ACCENT : TEXT);
     }
 }
 

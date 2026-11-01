@@ -111,6 +111,13 @@ public:
     bool tapeStopLatch() const { return tsLatch_ != 0; }
     int trackCount() const { return trackCount_; }
     bool addTrack() { if (trackCount_ >= kTracks) { say("ALL " + std::to_string(kTracks) + " TRACKS ARE OPEN"); return false; } trackCount_++; selectTrack(trackCount_ - 1); say("TRACK " + std::to_string(trackCount_) + " ADDED"); return true; }
+    // the last extra track (9 on) closes; the first eight stay and are emptied: sound, pattern and tape
+    bool removeTrack(int t) {
+        if (t < 0 || t >= trackCount_) return false;
+        s_.unloadSample(t); s_.seqClear(t); s_.clipClear(t); ts_[t].entry = -1;
+        const bool close = t == trackCount_ - 1 && trackCount_ > kFmTracks;
+        if (close) { trackCount_--; if (track() >= trackCount_) selectTrack(trackCount_ - 1); }
+        say(close ? "TRACK " + std::to_string(t + 1) + " REMOVED" : "TRACK " + std::to_string(t + 1) + " EMPTIED"); return true; }
     bool metronome() const { return metro_ != 0; }
     void toggleMetro() { metro_ = metro_ ? 0 : 1; applyTempo(); say(metro_ ? "METRONOME ON" : "METRONOME OFF"); }
     bool tapeStopHeld() const { return tapeStopHeld_; }

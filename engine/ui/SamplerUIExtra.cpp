@@ -108,7 +108,7 @@ void SamplerUI::trackMenuSheet() {
     const int t = trackMenu_;
     rrect({0, 0, W_, H_}, 0, withAlpha(BG, 215));
     tap({0, 0, W_, H_}, [this] { trackMenu_ = -1; });
-    const Rect box{W_ * 0.3f, H_ * 0.12f, W_ * 0.4f, H_ * 0.76f};
+    const Rect box{W_ * 0.3f, H_ * 0.03f, W_ * 0.4f, H_ * 0.94f};
     rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 1);
     tap(box, [] {});
     const std::string lab = app_.sampleLabel(t);
@@ -121,6 +121,8 @@ void SamplerUI::trackMenuSheet() {
     b("SOLO", app_.state(t).solo, [this, t] { app_.toggleSolo(t); });
     b("CLEAR ITS PATTERN", false, [this, t] { app_.seqClear(); showUndo("PATTERN OF TRACK " + std::to_string(t + 1) + " CLEARED"); trackMenu_ = -1; });
     if (st_.track_has_clip[t]) { dangerButton({box.x + 12, y, bw, bh}, "ERASE ITS TAPE", [this, t] { trackMenu_ = -1; askTapeClear(t); }, 10.5f); y += bh + 6; }
+    { const bool last = t == app_.trackCount() - 1 && app_.trackCount() > SamplerApp::kFmTracks;
+      dangerButton({box.x + 12, y, bw, bh}, last ? "REMOVE TRACK" : "EMPTY THIS TRACK", [this, t] { trackMenu_ = -1; app_.removeTrack(t); }, 10.5f); y += bh + 6; }
     b("CLOSE", false, [this] { trackMenu_ = -1; });
 }
 
