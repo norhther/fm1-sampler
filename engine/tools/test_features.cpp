@@ -611,8 +611,8 @@ static void testNoteEdit() {
     stopGo(); run(2.2); { auto on = onsetsOf(all, sr); on.erase(on.begin(), on.begin() + std::min<size_t>(on.size(), 0)); const int n = (int)on.size(); long g1 = n > 1 ? on[1] - on[0] : 0; CHECK(n >= 4 && std::labs(g1 - 24000) < 300, "ratchet 4: four hits for one note (%d onsets, gap %ld samples, expect 24000)", n, g1); }
     s.seqApply(4, h0, 1, Session::OP_RATCHET, 1); s.seqApply(4, h0, 1, Session::OP_PROB, 0); run(3.5); all.clear(); run(4.5);
     CHECK(onsetsOf(all, sr).empty(), "chance 0: the note never plays");
-    s.seqApply(4, h0, 1, Session::OP_PROB, 50); run(0.3); all.clear(); run(2.0 * 14);
-    { const int n = (int)onsetsOf(all, sr).size(); CHECK(n >= 3 && n <= 11, "chance 50 pct: it plays about half of the passes (%d of 14)", n); }
+    s.seqApply(4, h0, 1, Session::OP_PROB, 50); run(0.3); all.clear(); run(2.0 * 30);   // the dice are seeded, so the outcome is fixed, but a short run can start with a run of skips: 30 passes, a wide band
+    { const int n = (int)onsetsOf(all, sr).size(); CHECK(n >= 6 && n <= 24, "chance 50 pct: it plays about half of the passes (%d of 30)", n); }
     app.seqClear(); run(0.2); app.seqToggleAt(0, 66); app.seqToggleAt(384, 66); run(0.3); Session::SeqRef h1[1] = {{384, 66}}; s.seqApply(4, h1, 1, Session::OP_NUDGE, 12); run(0.3);
     all.clear(); run(2.0 * 5 + 0.5);
     { auto on = onsetsOf(all, sr); long a = on.size() > 3 ? on[2] - on[1] : 0, b = on.size() > 3 ? on[3] - on[2] : 0; long d = std::labs(a - b);
