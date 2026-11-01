@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD", "CHOP"};   // by Page
 static_assert(sizeof(kPageTab) / sizeof(*kPageTab) == SamplerApp::kPages, "one tab label for every page");
 }  // namespace
 
@@ -120,6 +120,7 @@ void SamplerUI::frame(uint32_t now) {
     }
     if (sheetOpen_) librarySheet();
     if (fxOpen_) fxSheet();
+    if (fmOpen_) fmSheet();
     if (projOpen_) projectSheet();
     if (songOpen_) songSheet();
     if (menuOpen_) menuSheet();
@@ -227,7 +228,7 @@ void SamplerUI::waveDraw(Rect w) {
     if (ts.algo == 3 && !app_.isSynth(t)) {   // KIT: every chop from its start to its end, the selected one shaded
         std::vector<float> cs, ce; chopsNow(cs, ce);
         if (chopIdx_ < 0 && chopHold_ > 0) chopHold_--;
-        const int sel = std::min(chopSel_, (int)cs.size() - 1);
+        const int sel = std::min(app_.chopSel(), (int)cs.size() - 1);
         auto X = [&](float v) { return w.x + 2 + v * (w.w - 4); };
         for (int i = 0; i < (int)cs.size(); i++) {
             const bool on = i == sel; const float sx = X(cs[(size_t)i]), ex = X(ce[(size_t)i]);
@@ -252,9 +253,9 @@ void SamplerUI::chopsNow(std::vector<float>& s, std::vector<float>& e) const {
 }
 void SamplerUI::chopDelete() {
     std::vector<float> s, e; chopsNow(s, e); if (s.size() <= 2) return;
-    const int sel = std::min(chopSel_, (int)s.size() - 1);
+    const int sel = std::min(app_.chopSel(), (int)s.size() - 1);
     s.erase(s.begin() + sel); e.erase(e.begin() + sel);
-    chopS_ = s; chopE_ = e; chopHold_ = 8; chopSel_ = std::min(sel, (int)s.size() - 1);
+    chopS_ = s; chopE_ = e; chopHold_ = 8; app_.setChopSel(std::min(sel, (int)s.size() - 1));
     app_.setSliceStarts(s, e);
 }
 // KIT: every chop has its own START and END handle; drag one and nothing else moves. The chop to edit is picked with the numbered buttons, never from the wave. Tap empty wave to cut a new chop
@@ -263,7 +264,7 @@ void SamplerUI::chopEdit(Rect w) {
     hit({w.x, w.y + 22, w.w, w.h - 22},
         [this, wx, ww](float x, float) {
             chopsNow(chopS_, chopE_); chopHold_ = 0; chopIdx_ = -1; chopMoved_ = false; chopNew_ = false; chopEndH_ = false;
-            const int n = (int)chopS_.size(), sel = std::min(chopSel_, n - 1); float bd = 14.f;
+            const int n = (int)chopS_.size(), sel = std::min(app_.chopSel(), n - 1); float bd = 14.f;
             for (int k = 0; k < n; k++) {   // the selected chop first, so when handles sit on top of each other it wins
                 const int i = k == 0 ? sel : (k - 1 < sel ? k - 1 : k);
                 for (int h = 0; h < 2; h++) { const float d = std::fabs(wx + (h ? chopE_[(size_t)i] : chopS_[(size_t)i]) * ww - x); if (d < bd) { bd = d; chopIdx_ = i; chopEndH_ = h == 1; } }
@@ -708,9 +709,9 @@ void SamplerUI::chopFullScreen() {
         for (int i = 0; i < n; i++) {   // down plays the chop, up lets it go: what KEY: HOLD / WHOLE CHOP means
             const Rect c{m + i * (pw + gap), H_ - m - padH, pw, padH};
             const bool lit = (padMask_ >> i) & 1;
-            rrect(c, R_CONTROL, lit ? ACCENT : SURFACE); stroke(c, R_CONTROL, i == chopSel_ ? ACCENT : OUTLINE, i == chopSel_ ? 2 : 1);
+            rrect(c, R_CONTROL, lit ? ACCENT : SURFACE); stroke(c, R_CONTROL, i == app_.chopSel() ? ACCENT : OUTLINE, i == app_.chopSel() ? 2 : 1);
             text(c.x + c.w / 2, c.y + c.h / 2, 12, lit ? ON_ACCENT : TEXT, std::to_string(i + 1), 1, true);
-            hit(c, [this, i](float, float) { chopSel_ = i; padMask_ |= 1u << i; app_.padHit(i, 100, true); }, [](float, float) {}, [this, i]() { padMask_ &= ~(1u << i); app_.padHit(i, 0, false); });
+            hit(c, [this, i](float, float) { app_.setChopSel(i); padMask_ |= 1u << i; app_.padHit(i, 100, true); }, [](float, float) {}, [this, i]() { padMask_ &= ~(1u << i); app_.padHit(i, 0, false); });
         }
     }
 }
@@ -852,7 +853,9 @@ void SamplerUI::pagePanel(Rect r) {
     }
     const float rows = pn > 8 ? 3.f : pn > 4 ? 2.f : 1.f, hy = r.y + 36 + rows * 30 + 2;
     { const std::string h = SamplerApp::pageHelp(app_.page()); const bool fxMode = mode == 1 || mode == 3; if (fxMode) button({r.x + r.w - 82, hy, 82, 24}, "BROWSE FX", false, [this] { fxOpen_ = true; fxTrack_ = app_.modeOf(app_.page()) == 3; }, 9.f);
-      const size_t per = (size_t)std::max(12.f, (r.w - (fxMode ? 90.f : 0.f)) / (8.f * textScale_ * 0.6f)); size_t a = 0; int ln = 0;   // wrapped at spaces, three lines at most
+      const bool fmHint = SamplerApp::fmHint(app_.page())[0] != 0;   // this page has gestures on the FM-1: a chip says so, a tap lists them
+      if (fmHint) button({r.x + r.w - (fxMode ? 82.f + 48.f : 44.f), hy, 44, 24}, "FM-1", fmOpen_, [this] { fmOpen_ = true; }, 9.f, true);
+      const size_t per = (size_t)std::max(12.f, (r.w - (fxMode ? 90.f : 0.f) - (SamplerApp::fmHint(app_.page())[0] ? 50.f : 0.f)) / (8.f * textScale_ * 0.6f)); size_t a = 0; int ln = 0;   // wrapped at spaces, three lines at most
       while (a < h.size() && ln < 3) { size_t b = std::min(h.size(), a + per); if (b < h.size()) { const size_t sp = h.rfind(' ', b); if (sp != std::string::npos && sp > a) b = sp; } text(r.x, hy + 6 + ln * 11 * textScale_, 8.f, DIM, h.substr(a, b - a), 0, false); a = b + (b < h.size() && h[b] == ' ' ? 1 : 0); ln++; } }
     auto k = app_.knobs();
     const float top = hy + 38, rh = (r.y + r.h - top) / 4;
@@ -860,7 +863,7 @@ void SamplerUI::pagePanel(Rect r) {
         const auto& p = k[(size_t)i];
         const float y = top + i * rh;
         if (!p.valid) continue;
-        const bool lit = fxFocusPage_ == (int)app_.page() && fxFocusKnob_ == i;   // the effect picked in the FX browser
+        const bool lit = app_.fxFocusKnob(app_.page()) == i;   // the effect picked in the FX browser
         if (lit) { const Rect row{r.x - 4, y - 2, r.w + 8, rh - 2}; rrect(row, R_CONTROL, theme::withAlpha(ACCENT, 40)); stroke(row, R_CONTROL, ACCENT, 2); }
         text(r.x, y + 8, T_CAPTION, lit ? ACCENT : DIM, p.name, 0, true);
         text(r.x + r.w, y + 10, T_VALUE, p.isChoice ? ACCENT : TEXT, p.value, 2, true);
@@ -993,6 +996,7 @@ void SamplerUI::fxSheet() {
     button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { fxOpen_ = false; }, 10);
     button({box.x + box.w - 250, box.y + 6, 80, 28}, "MASTER", !fxTrack_, [this] { fxTrack_ = false; }, 10);
     button({box.x + box.w - 166, box.y + 6, 92, 28}, "TRACK " + std::to_string(app_.track() + 1), fxTrack_, [this] { fxTrack_ = true; }, 10);
+    text(box.x + 14, box.y + box.h - 10, T_CAPTION, DIM, "ON THE FM-1: HOLD FX AND TURN PRESETS, LET GO TO OPEN. FX + ALGORITHM: MIX / TRACK", 0, false);
     const FxParams fp = fxTrack_ ? app_.trackParams(app_.track()) : app_.masterParams();
     const auto& cat = SamplerApp::fxCatalog();
     const float colW = (box.w - 16 - 16) / 3, rh = 28; float colY[3] = {box.y + 46, box.y + 46, box.y + 46};
@@ -1010,12 +1014,7 @@ void SamplerUI::fxSheet() {
             rrect(c, R_CONTROL, has ? SURFACE : BG); stroke(c, R_CONTROL, on ? ACCENT : OUTLINE, on ? 2 : 1);
             text(c.x + 24, c.y + c.h / 2, T_BODY - 1, has ? TEXT : DIM, fit(f.name, colW - 30, T_BODY - 1), 0, on);
             if (on) circle(c.x + 12, c.y + c.h / 2, 4.f, ACCENT); else if (has) circle(c.x + 12, c.y + c.h / 2, 3.f, OUTLINE);
-            if (has) tap(c, [this, pg, nm = std::string(f.name)] {
-                app_.gotoPage(pg);   // the browser stays open
-                fxFocusPage_ = (int)pg; fxFocusKnob_ = -1;   // light the knob of this effect (EQ -> EQ LOW)
-                const auto kk = app_.knobs(pg);
-                for (int i = 0; i < 4; i++) if (kk[(size_t)i].valid && std::string(kk[(size_t)i].name).rfind(nm, 0) == 0) { fxFocusKnob_ = i; break; }
-            });
+            if (has) tap(c, [this, pg, nm = std::string(f.name)] { fxOpen_ = false; app_.focusFx(nm, pg); });
             y += rh;
         }
         y += 8;

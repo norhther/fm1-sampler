@@ -1065,6 +1065,7 @@ int main() {
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SHAPE, "HOME x5: shape (macros, root key, slices)");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_SMPED, "HOME x6: sample edit");
         btn(SamplerApp::HOME); btn(SamplerApp::HOME);
+        btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_CHOP, "HOME again: the chops");
         btn(SamplerApp::HOME); CHECK(app.page() == SamplerApp::P_HOME, "HOME again: back to the sample");
         btn(SamplerApp::ENV); CHECK(app.page() == SamplerApp::P_ENV, "ENV: shortcut to the envelope");
         btn(SamplerApp::LFO); CHECK(app.page() == SamplerApp::P_LFO, "LFO: shortcut");
@@ -1523,6 +1524,83 @@ int main() {
         for (int i = 0; i < 9; i++) if (a6.takeBars() != 1) a6.cycleTakeBars();
         a6.setKeyTrigger(0, false); run6(0.2); a6.seqBounce(); run6(8.0);
         CHECK(a6.loopExists() && a6.status().bounceDone > 0, "TO TAPE puts one pass of the pattern on the tape (bounce done %d)", a6.status().bounceDone);
+    }
+    // ---- FM-1 hardware gestures: modifiers, analog knob, FX browse, chop page, key LEDs ----
+    {
+        Session s7(sr); s7.setDataDir("/tmp/fm1sampler_t7"); s7.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+        uint64_t led = 0; std::string lastToast;
+        auto grab = [&](const uint8_t* m, size_t n) {   // the last LED frame, alone or inside a batch
+            if (n < 8 || m[6] == 2) return;
+            auto one = [&](const uint8_t* c, size_t len) { if (c[0] == 1 && len >= 7) { uint64_t v = 0; for (int i = 0; i < 6; i++) v |= (uint64_t)(c[1 + i] & 127) << (7 * i); led = v; } };
+            if (m[6] == 1) one(m + 6, n - 7);
+            else if (m[6] == 10) { size_t i = 7; while (i + 2 < n - 1) { const size_t len = (size_t)(m[i] << 7 | m[i + 1]); if (i + 2 + len > n - 1) break; one(m + i + 2, len); i += 2 + len; } }
+        };
+        SamplerApp a7(s7, grab); a7.setTourDone(true); demoSounds(a7);
+        std::vector<float> ob(512), ib(512, 0.f); uint32_t tn = 0;
+        auto run7 = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(ob.begin(), ob.end(), 0.f); s7.process(ob.data(), ib.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(300)); tn += 6; a7.tick(tn); } };
+        auto hold = [&](int b, bool d) { uint8_t m[3] = {(uint8_t)(d ? 0x91 : 0x81), (uint8_t)b, 100}; a7.onMidi(m, 3); };
+        auto tap = [&](int b) { hold(b, true); hold(b, false); };
+        auto key = [&](int k, bool d) { uint8_t m[3] = {(uint8_t)(d ? 0x90 : 0x80), (uint8_t)(53 + k), 100}; a7.onMidi(m, 3); };
+        auto enc7 = [&](int i, int d) { uint8_t m[3] = {0xb0, (uint8_t)(16 + i), (uint8_t)(64 + d)}; a7.onMidi(m, 3); };
+        auto cc = [&](int c, int v) { uint8_t m[3] = {0xb0, (uint8_t)c, (uint8_t)v}; a7.onMidi(m, 3); };
+        auto knobAt = [&](float v) { const int raw = (int)std::lround(v * 1023); cc(7, raw >> 3); cc(39, (raw & 7) << 4); };
+        auto lit = [&](int k) { return (led >> (14 + k) & 1) != 0; };
+        run7(1.5);
+        // a tap on EDIT still opens the MIX tab; it acts when the button is let go
+        tap(SamplerApp::EDIT); CHECK(SamplerApp::modeOf(a7.page()) == 3, "EDIT tapped: the MIX tab");
+        tap(SamplerApp::HOME); CHECK(SamplerApp::modeOf(a7.page()) == 0, "HOME tapped: the SOUND tab");
+        { const SamplerApp::Page pg0 = a7.page(); hold(SamplerApp::EDIT, false); hold(SamplerApp::GLO, false); hold(40, true); hold(40, false);
+          CHECK(a7.page() == pg0, "a release without a press, and a stray button number, change nothing"); }
+        // hold EDIT + key: mute, with SEL: solo; the page does not change
+        const SamplerApp::Page before = a7.page();
+        hold(SamplerApp::EDIT, true); key(1, true); key(1, false); hold(SamplerApp::EDIT, false);
+        CHECK(a7.state(1).mute && a7.page() == before, "EDIT + key 2 mutes track 2 and stays on the page");
+        hold(SamplerApp::EDIT, true); run7(0.2); led = 0; run7(0.3);
+        CHECK(!lit(1) && lit(2) && !lit(5), "EDIT held: the keys show the tracks (muted dark, track 3 lit, empty track 6 dark)");
+        key(1, true); key(1, false); hold(SamplerApp::EDIT, false);
+        CHECK(!a7.state(1).mute, "EDIT + key 2 again unmutes it");
+        hold(SamplerApp::EDIT, true); hold(SamplerApp::SEL, true); key(2, true); key(2, false); hold(SamplerApp::SEL, false); hold(SamplerApp::EDIT, false);
+        CHECK(a7.state(2).solo && a7.page() == before, "EDIT + SEL + key 3 solos track 3");
+        a7.toggleSolo(2);
+        // HOME + key picks the track
+        hold(SamplerApp::HOME, true); key(3, true); key(3, false); hold(SamplerApp::HOME, false);
+        CHECK(a7.track() == 3 && a7.page() == before, "HOME + key 4 goes to track 4");
+        // the analog knob: master volume at once, the others wait until the knob is where the value is
+        CHECK(a7.knobTarget() == SamplerApp::KT_MASTER, "the knob moves the master volume at first");
+        hold(SamplerApp::GLO, true); enc7(6, 1); enc7(6, 1); hold(SamplerApp::GLO, false);
+        CHECK(a7.knobTarget() == SamplerApp::KT_DJ && a7.page() == before, "GLO + PRESETS picks the knob target (%s)", SamplerApp::knobTargetName(a7.knobTarget()));
+        const float dj0 = a7.knobs(SamplerApp::P_LIVE)[0].norm;
+        knobAt(0.f); CHECK(std::fabs(a7.knobs(SamplerApp::P_LIVE)[0].norm - dj0) < 0.001f && a7.knobWaiting(), "far from the value the knob does nothing (no jump)");
+        knobAt(dj0); knobAt(0.9f); CHECK(std::fabs(a7.knobs(SamplerApp::P_LIVE)[0].norm - 0.9f) < 0.03f, "once it reached the value it moves the DJ filter (%.2f)", a7.knobs(SamplerApp::P_LIVE)[0].norm);
+        a7.knobs(SamplerApp::P_LIVE)[0].set(0.5f); a7.setKnobTarget(SamplerApp::KT_MASTER);
+        cc(24, 127); CHECK(a7.fmBattery() == 100, "the battery reading of the FM-1 is kept (%d)", a7.fmBattery());
+        // FX + PRESETS browses the effects, letting go of FX opens the page and lights the knob
+        a7.gotoPage(SamplerApp::P_HOME);
+        hold(SamplerApp::FX, true); enc7(6, 1); CHECK(a7.toast().find("DJ FILTER") != std::string::npos, "FX + PRESETS shows the effect on the FM-1 screen (%s)", a7.toast().c_str());
+        enc7(6, 1); enc7(6, 1); hold(SamplerApp::FX, false);   // DJ FILTER, EQ, AUTO WAH
+        CHECK(a7.page() == SamplerApp::P_MOD && a7.fxFocusKnob(SamplerApp::P_MOD) == 1, "letting go opens AUTO WAH's page and lights its knob (page %d, knob %d)", (int)a7.page(), a7.fxFocusKnob(a7.page()));
+        a7.gotoPage(SamplerApp::P_HOME);
+        hold(SamplerApp::FX, true); enc7(1, 1); enc7(6, 1); hold(SamplerApp::FX, false);
+        CHECK(a7.fxScopeTrack() && SamplerApp::modeOf(a7.page()) == 3, "FX + ALGORITHM flips to the track's effects (page %d)", (int)a7.page());
+        // the CHOP page edits the chops of a KIT sample with the knobs
+        a7.selectTrack(3); a7.gotoPage(SamplerApp::P_CHOP); run7(0.5);
+        CHECK(a7.chopsAvailable() && a7.knobs()[0].valid && a7.knobs()[3].valid, "CHOP page: four knobs for a KIT sample");
+        const auto c0 = s7.slicesOf(3), e0 = s7.sliceEndsOf(3);
+        enc7(2, 1); run7(0.2); CHECK(a7.chopSel() == 1, "K1 picks chop 2");
+        enc7(4, 2); enc7(3, 3); run7(0.4);   // the end first, so the chop has room
+        const auto c1 = s7.slicesOf(3), e1 = s7.sliceEndsOf(3);
+        CHECK(c1.size() == c0.size() && std::fabs((c1[1] - c0[1]) - 3 * 0.005f) < 0.0015f && std::fabs((e1[1] - e0[1]) - 2 * 0.005f) < 0.0015f && std::fabs(c1[2] - c0[2]) < 1e-4f, "K2 moves the start (+%.3f), K3 the end (%.3f), the rest stays", c1[1] - c0[1], e1[1] - e0[1]);
+        { a7.setChopSel(1); const float s1 = s7.slicesOf(3)[1]; const float s2 = s7.slicesOf(3)[2]; a7.chopSetPos(true, s2 + 0.05f); a7.chopSetPos(false, s2 + 0.001f); run7(0.4);   // past the next chop: the order changes, the selection follows its chop
+          const auto cs = s7.slicesOf(3); CHECK(std::is_sorted(cs.begin(), cs.end()) && a7.chopSel() == 2 && std::fabs(cs[2] - (s2 + 0.001f)) < 1e-4f, "a chop moved past its neighbour keeps the selection (sel %d)", a7.chopSel());
+          a7.chopSetPos(false, s1); run7(0.4); a7.setChopSel(1); }
+        tap(SamplerApp::REC); run7(0.4); CHECK(s7.slicesOf(3).size() == c0.size() + 1, "REC splits the chop (%zu chops)", s7.slicesOf(3).size());
+        tap(SamplerApp::GLO); run7(0.4); CHECK(s7.slicesOf(3).size() == c0.size() && a7.page() == SamplerApp::P_CHOP, "GLO deletes it and stays on the page (%zu chops)", s7.slicesOf(3).size());
+        { const int n = (int)s7.slicesOf(3).size(); a7.gotoPage(SamplerApp::P_HOME); run7(0.8); int on = 0; for (int k = 0; k < 27; k++) on += lit(k) ? 1 : 0;
+          CHECK(on == n && (n >= 27 || !lit(n)), "KIT keys: one lit key per chop (%d lit, %d chops)", on, n); }
+        // the pattern page: keys light the steps that have a note
+        a7.selectTrack(0); a7.gotoPage(SamplerApp::P_SQ); a7.seqClear(); a7.seqSetBarCount(1); a7.seqToggleAt(0, 60, 96); a7.seqToggleAt(4 * 48, 62, 96); run7(0.4); led = 0; run7(0.6);
+        CHECK(lit(4) && !lit(2) && !lit(6), "pattern page: step 5 has a note (steps 3 and 7 dark)");
+        CHECK(std::string(SamplerApp::fmHint(SamplerApp::P_CHOP)).size() > 10 && SamplerApp::fmGesture(0) && !SamplerApp::fmGesture(9), "the phone has hints for the gestures");
     }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;

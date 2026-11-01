@@ -103,9 +103,37 @@ void SamplerUI::menuSheet() {
     row("SCREEN", {{app_.fullscreen() ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", app_.fullscreen()}, {app_.leftHanded() ? "LEFT-HANDED: ON" : "LEFT-HANDED: OFF", app_.leftHanded()},
                    {app_.access() ? "BIG TEXT, HIGH CONTRAST: ON" : "BIG TEXT, HIGH CONTRAST: OFF", app_.access()}},
         [this](int i) { if (i == 0) app_.setFullscreen(!app_.fullscreen()); else if (i == 1) app_.setLeftHanded(!app_.leftHanded()); else { const bool on = !app_.access(); app_.setAccess(on); app_.setTheme(on ? 4 : 0); } });
-    row("HELP", {{"SHOW THE TOUR AGAIN", false}}, [this](int) { app_.setTourDone(false); openTour(); });
+    row("HELP", {{"SHOW THE TOUR AGAIN", false}, {"FM-1 HINTS", false}}, [this](int i) { if (i == 0) { app_.setTourDone(false); openTour(); } else { menuOpen_ = false; fmOpen_ = true; } });
     const std::string t = app_.toast();
     if (!t.empty()) text(box.x + 14, box.y + box.h - 12, 11, ACCENT, fit(t, box.w - 28, 11), 0, true);
+}
+
+
+// ---- the FM-1 gestures: the hint of this page, the analog knob, the whole cheat sheet ----
+void SamplerUI::fmSheet() {
+    rrect({0, 0, W_, H_}, 0, withAlpha(BG, 215));
+    tap({0, 0, W_, H_}, [this] { fmOpen_ = false; });
+    const Rect box{W_ * 0.12f, 12, W_ * 0.76f, H_ - 24};
+    rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 1);
+    tap(box, [] {});
+    text(box.x + 14, box.y + 20, T_TITLE, TEXT, "FM-1 HINTS", 0, true);
+    const int bat = app_.fmBattery();
+    text(box.x + 130, box.y + 21, T_CAPTION, DIM, linkMidi_ ? (bat >= 0 ? "FM-1 CONNECTED   BATTERY " + std::to_string(bat) + "%" : std::string("FM-1 CONNECTED")) : "NO FM-1", 0, false);
+    button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { fmOpen_ = false; }, 10);
+    float y = box.y + 44; const float x = box.x + 14, w = box.w - 28;
+    auto wrapped = [&](const std::string& s, float size, uint32_t col) {   // wrapped at spaces to the width of the sheet
+        const size_t per = (size_t)std::max(12.f, w / (size * textScale_ * 0.6f)); size_t a = 0;
+        while (a < s.size()) { size_t b = std::min(s.size(), a + per); if (b < s.size()) { const size_t sp = s.rfind(' ', b); if (sp != std::string::npos && sp > a) b = sp; } text(x, y + 6, size, col, s.substr(a, b - a), 0, false); y += size * textScale_ + 4; a = b; while (a < s.size() && s[a] == ' ') a++; }
+    };
+    const std::string h = SamplerApp::fmHint(app_.page());
+    text(x, y + 6, T_CAPTION, ACCENT, std::string("THIS PAGE: ") + SamplerApp::pageName(app_.page()), 0, true); y += 18;
+    if (h.empty()) wrapped("Nothing special on this page. The keys, the encoders and K1-K4 work as always.", 10.f, DIM); else wrapped(h, 10.f, TEXT);
+    y += 8;
+    text(x, y + 6, T_CAPTION, ACCENT, "ANALOG KNOB MOVES", 0, true);
+    button({x + 150, y - 4, w - 150, 26}, std::string(SamplerApp::knobTargetName(app_.knobTarget())) + (app_.knobWaiting() ? "   (MOVE THE KNOB TO THE VALUE)" : ""), true, [this] { app_.setKnobTarget(app_.knobTarget() + 1); }, 10.f);
+    y += 32;
+    text(x, y + 6, T_CAPTION, ACCENT, "ALL GESTURES", 0, true); y += 18;
+    for (int i = 0; SamplerApp::fmGesture(i); i++) wrapped(SamplerApp::fmGesture(i), 9.5f, TEXT);
 }
 
 // ---- long-press on a track: what you can do with it ----

@@ -14,7 +14,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5", "CHOP"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM", "NEAPM", "NEAPJ", "PERSN", "HUNGJ", "LYDDM", "ALTRD", "LYDAG", "DOR#4", "SPAN8", "INSEN", "IWATO", "YO", "EGYPT", "MAJBL", "PROMT", "ENIGM", "OCTWH", "LOCR2", "MAJ6P", "MIN6P"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -106,6 +106,7 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "PATTERN on/off. KEYS: a key starts it, other keys transpose. LAUNCH: beat or bar.",   // TRIG
     "Wave fold, auto pan, vinyl crackle and a vowel filter on the whole mix.",                 // FX4
     "Track effects, part 5: wave fold, auto pan, vinyl, vowel. Only this track.",              // TFX5
+    "Edit the chops of a KIT sample: pick a chop, move its start and end. Set the algorithm to KIT/SLICE first.",   // CHOP
 };
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }
@@ -113,10 +114,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX", "TAPE"}; return n[m % kModes]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][9] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
+    static const Page p[kModes][9] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2, P_CHOP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
     return p[m % kModes];
 }
-int SamplerApp::modePageCount(int m) { static const int n[kModes] = {8, 9, 6, 9, 4}; return n[m % kModes]; }
+int SamplerApp::modePageCount(int m) { static const int n[kModes] = {9, 9, 6, 9, 4}; return n[m % kModes]; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -172,6 +173,7 @@ void SamplerApp::browse(int d) {
     auditionAt_ = nowMs_ + 250;
 }
 void SamplerApp::loadEntry(int i, bool preview) {
+    chTrack_ = -1;
     if (i < 0 || i >= (int)lib_.size()) return;
     libCursor_ = i; auditionAt_ = 0;
     const Entry& e = lib_[(size_t)i];
@@ -283,8 +285,8 @@ void SamplerApp::resampleNow() {
 }
 void SamplerApp::applyAlgo(int t) { s_.setMode(t, ts_[t].algo); s_.setChopFull(t, ts_[t].chopFull != 0); }
 int SamplerApp::chopCount(int idx) { static const int c[6] = {4, 8, 12, 16, 24, 32}; return c[std::min(5, std::max(0, idx))]; }
-void SamplerApp::autoChop() { TrackState& x = ts_[track_]; if (x.algo != 3) { x.algo = 3; applyAlgo(track_); } applyShape(track_, true); say("AUTO CHOP: THE HITS OF THE SOUND, UP TO " + std::to_string(chopCount(x.sliceCount))); }
-void SamplerApp::evenChop() { TrackState& x = ts_[track_]; if (x.algo != 3) { x.algo = 3; applyAlgo(track_); } const int n = chopCount(x.sliceCount); std::vector<float> p; for (int i = 0; i < n; i++) p.push_back(i / (float)n); s_.setSliceStarts(track_, p); say(std::to_string(n) + " EVEN CHOPS"); }
+void SamplerApp::autoChop() { chTrack_ = -1; TrackState& x = ts_[track_]; if (x.algo != 3) { x.algo = 3; applyAlgo(track_); } applyShape(track_, true); say("AUTO CHOP: THE HITS OF THE SOUND, UP TO " + std::to_string(chopCount(x.sliceCount))); }
+void SamplerApp::evenChop() { chTrack_ = -1; TrackState& x = ts_[track_]; if (x.algo != 3) { x.algo = 3; applyAlgo(track_); } const int n = chopCount(x.sliceCount); std::vector<float> p; for (int i = 0; i < n; i++) p.push_back(i / (float)n); s_.setSliceStarts(track_, p); say(std::to_string(n) + " EVEN CHOPS"); }
 void SamplerApp::setChopFull(bool full) { ts_[track_].chopFull = full; applyAlgo(track_); say(full ? "A KEY PLAYS THE WHOLE CHOP" : "THE CHOP SOUNDS WHILE THE KEY IS HELD"); }
 void SamplerApp::applyEnv(int t) {
     const TrackState& x = ts_[t];
@@ -345,7 +347,7 @@ FxParams SamplerApp::trackParams(int t) const {
 void SamplerApp::applyTrackFx(int t) { s_.setTrackFx(t, trackParams(t)); }
 void SamplerApp::applyPattern(int t) { s_.seqSetBars(t, ts_[t].seqBars + 1); s_.seqSetState(t, ts_[t].seqState); }
 void SamplerApp::queueCommit(int t) { commitAt_ = nowMs_ + 350; commitTrack_ = t; }   // the offline stretch / pitch runs once the knob rests
-void SamplerApp::setAlgo(int a) { ts_[track_].algo = ((a % 6) + 6) % 6; applyAlgo(track_); }
+void SamplerApp::setAlgo(int a) { chTrack_ = -1; ts_[track_].algo = ((a % 6) + 6) % 6; applyAlgo(track_); }
 void SamplerApp::setVolume(int t, float v) { ts_[t].vol = cl(v); applyMix(t); }
 void SamplerApp::setPan01(int t, float v) { ts_[t].pan = cl(v); applyMix(t); }
 void SamplerApp::setSend(int t, int w, float v) { (w ? ts_[t].sendD : ts_[t].sendR) = cl(v); applyMix(t); }
@@ -357,7 +359,7 @@ void SamplerApp::selectTrack(int t) {
     t = std::min(trackCount_ - 1, std::max(0, t));
     if (t == track_) return;
     if (st_.track_clip_rec[track_]) s_.clipRecord(track_, false);   // an overdub belongs to the track it was started on
-    track_ = t;
+    track_ = t; if (knobTarget_ != KT_MASTER) knobPicked_ = false;   // the knob's value is not this track's value
     if (ts_[t].entry >= 0) libCursor_ = ts_[t].entry;   // PRESETS starts from the sample this track plays
 }
 void SamplerApp::gotoPage(Page p) { page_ = p; lastPage_[modeOf(p)] = p; }
@@ -615,6 +617,23 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[3] = cont("SWING", &swing_, [](float v) { return v < 0.02f ? std::string("OFF") : fmt("%.0f PCT", 50.f + 25.f * v); }, [=] { applyTempo(); }, 0.02f);
         break;
     }
+    case P_CHOP: {   // the chops of a KIT sample: pick one, move its start and its end (what the phone's chop editor does with the finger)
+        std::vector<float> cs, ce;
+        if (!chopsRead(cs, ce)) break;
+        const int n = (int)cs.size(), sel = std::min(std::max(0, chopSel_), n - 1); chopSel_ = sel;
+        auto mk = [](const char* name, float norm, const std::string& val, bool choice, std::function<void(int)> step, std::function<void(float)> set) {
+            Knob q; q.name = name; q.valid = true; q.isChoice = choice; q.norm = norm; q.value = val; q.step = std::move(step); q.set = std::move(set); return q; };
+        static const char* stepName[3] = {"FINE", "NORMAL", "COARSE"};
+        k[0] = mk("CHOP", n > 1 ? sel / (float)(n - 1) : 0.f, std::to_string(sel + 1) + " OF " + std::to_string(n), true,
+                  [this, n](int d) { chopSel_ = std::min(n - 1, std::max(0, chopSel_ + (d > 0 ? 1 : -1))); },
+                  [this, n](float v) { chopSel_ = (int)std::lround(cl(v) * (n - 1)); });
+        k[1] = mk("START", cs[(size_t)sel], fmt("%.1f%%", cs[(size_t)sel] * 100), false, [this](int d) { chopNudge(false, d); }, [this](float v) { chopSetPos(false, v); });
+        k[2] = mk("END", ce[(size_t)sel], fmt("%.1f%%", ce[(size_t)sel] * 100), false, [this](int d) { chopNudge(true, d); }, [this](float v) { chopSetPos(true, v); });
+        k[3] = mk("NUDGE STEP", chopStep_ / 2.f, stepName[std::min(2, std::max(0, chopStep_))], true,
+                  [this](int d) { chopStep_ = std::min(2, std::max(0, chopStep_ + (d > 0 ? 1 : -1))); },
+                  [this](float v) { chopStep_ = (int)std::lround(cl(v) * 2); });
+        break;
+    }
     case P_SHAPE:
         if (isSynth(t)) {   // the four macros of a built-in synth
             k[0] = cont("TONE", &x.synTone, [](float v) { return fmt("%+.0f", (v - 0.5f) * 200.f); }, [=] { applyShape(t); }, 0.02f);
@@ -833,6 +852,7 @@ std::string SamplerApp::loopText() const {
 }
 void SamplerApp::keyEvent(int raw, bool down) {   // a key of the FM-1 (chromatic note 53+key): octave shift, chords in CHORD mode
     if (raw < 0 || raw > 127) return;
+    if (down && keyGesture(raw)) return;
     if (down) {
         if (keyCount_[raw]) keyEvent(raw, false);
         const bool kit = ts_[track_].algo == 3;   // KIT: every key is a pad (note 60 + key), whatever the tonality or octave
@@ -872,12 +892,14 @@ void SamplerApp::onMidi(const uint8_t* m, size_t n) {
     else if (ch == 0 && type == 0xb0) {
         if (a >= 16 && a < 23) encoder(a - 16, b - 64);
         else if (a == 7) knobMsb_ = b;
-        else if (a == 39) s_.setMasterVolume(((knobMsb_ << 3) | (b >> 4)) / 1023.f * 1.2f);
+        else if (a == 39) knobMove(((knobMsb_ << 3) | (b >> 4)) / 1023.f);
+        else if (a == 24) battery_ = b;
     }
 }
 void SamplerApp::onSysex(const uint8_t* m, size_t n) {
     if (n < 9 || m[1] != 0x7d || m[2] != 'D' || m[3] != 'A' || m[4] != 'W') return;
     linkSeen_ = true;
+    if (m[6] == 0x40) lastPongAt_ = nowMs_ ? nowMs_ : 1;
     if (m[6] == 0x41 && n >= 12) {   // the firmware's own SEL screen / OCT buttons: its scale index is the tonality unless it is the OFF we keep it on
         if ((m[7] & 7) != 7) { scale_.scale = m[7] & 7; fwDirty_ = true; }
         scale_.root = m[8] % 12; scale_.octave = (int)m[9] - 3; if ((m[10] & 1) != (scale_.mode == 1)) scale_.mode = m[10] & 1;   // (SNAP is app only: the firmware sees it as KEY)
@@ -892,7 +914,11 @@ void SamplerApp::onSysex(const uint8_t* m, size_t n) {
     else if (m[6] == 0x42) needClear_ = true;     // the firmware had its own screen up: repaint everything
 }
 void SamplerApp::button(int b, bool down) {
-    if (down) held_ |= 1u << b; else held_ &= ~(1u << b);
+    if (b < 0 || b > REC) return;   // a stray note number must not reach the bit masks
+    const uint32_t bit = 1u << b;
+    const bool wasHeld = (held_ & bit) != 0;
+    if (down) held_ |= bit; else held_ &= ~bit;
+    if (page_ == P_CHOP && down && b == REC && chopsAvailable()) { chopSplit(); return; }   // the CHOP page: REC cuts the chop in two (GLO deletes it, on release)
     if (b == SAVE) {   // tap = save the loop, hold = clear it
         if (down) { saveDownAt_ = nowMs_ ? nowMs_ : 1; saveHeld_ = true; saveHoldDone_ = false; gotoPage(P_SAVE); }
         else { saveHeld_ = false; if (!saveHoldDone_) loopSave(); }
@@ -908,16 +934,26 @@ void SamplerApp::button(int b, bool down) {
         }
         return;
     }
+    if (b == HOME || b == FX || b == EDIT || b == GLO || b == SEL) {   // these also work as modifiers (hold one, play a key or turn an encoder): the tap acts on release unless it was used
+        if (down) { modUsed_ &= ~bit; return; }
+        if (!wasHeld) return;   // a release whose press never came (a lost message): nothing to do
+        const bool used = (modUsed_ & bit) != 0; modUsed_ &= ~bit;
+        if (b == FX && (fxBrowsed_ || used)) {   // FX + PRESETS browsed the effects: let go and the page of the one shown opens
+            const auto& cat = fxCatalog();
+            if (fxBrowsed_ && fxCur_ >= 0 && fxCur_ < (int)cat.size()) { const Page pg = fxScopeTrack_ ? cat[(size_t)fxCur_].track : cat[(size_t)fxCur_].master; if (pg != kPages) focusFx(cat[(size_t)fxCur_].name, pg); }
+            fxBrowsed_ = false; fxCur_ = -1; fxScopeAuto_ = true;   // the next browse starts fresh
+            return;
+        }
+        if (used) return;
+        if (b == GLO && page_ == P_CHOP && chopsAvailable()) { chopRemove(); return; }   // the CHOP page: a tap on GLO deletes the chop, holding it for a gesture does not
+        switch (b) { case HOME: modeButton(0); break; case FX: modeButton(1); break; case EDIT: modeButton(3); break; case GLO: gotoPage(P_KEY); break; default: gotoPage(P_LEN); break; }
+        return;
+    }
     if (!down) return;
     switch (b) {
-    case HOME: modeButton(0); break;
-    case FX: modeButton(1); break;
-    case EDIT: modeButton(3); break;
     case ENV: gotoPage(P_ENV); break;      // shortcuts to a page of a mode
     case LFO: gotoPage(P_LFO); break;
     case ARP: gotoPage(P_ARP); break;
-    case GLO: gotoPage(P_KEY); break;
-    case SEL: gotoPage(P_LEN); break;
     case PLAY: transportPlay(); break;
     case REC: loopRecord(); break;
     default: break;
@@ -925,13 +961,148 @@ void SamplerApp::button(int b, bool down) {
 }
 void SamplerApp::encoder(int i, int delta) {
     if (!delta) return;
+    const uint32_t fxBit = 1u << FX, gloBit = 1u << GLO;
+    if (i == 6 && (held_ & fxBit)) { modUsed_ |= fxBit; fxCursorStep(delta); return; }          // FX + PRESETS: browse the effects on the FM-1 screen
+    if (i == 1 && (held_ & fxBit)) { modUsed_ |= fxBit; fxScopeTrack_ = !fxScopeTrack_; fxScopeAuto_ = false; fxCur_ = -1; say(fxScopeTrack_ ? "FX BROWSER: THIS TRACK" : "FX BROWSER: WHOLE MIX"); return; }   // FX + ALGORITHM: whole mix / this track
+    if (i == 6 && (held_ & gloBit)) { modUsed_ |= gloBit; setKnobTarget(knobTarget_ + (delta > 0 ? 1 : kKnobTargets - 1)); return; }   // GLO + PRESETS: what the analog knob moves
     if (i == 0) { selectTrack(track_ + (delta > 0 ? 1 : -1)); return; }
     if (i == 6) { browse(delta); return; }
     if (i == 1) { setAlgo(ts_[track_].algo + (delta > 0 ? 1 : -1)); return; }
     if (i == 2 && mic_ == 1 && page_ != P_SAVE) { setMicThreshold01(micThr_ + (delta > 0 ? 0.03f : -0.03f)); touchedKnob_ = 0; touchedAt_ = nowMs_; return; }   // K1 = trigger level while the microphone listens
     Knobs k = knobs();
     const int idx = i - 2;
-    if (idx < 4 && k[(size_t)idx].valid && k[(size_t)idx].step) { k[(size_t)idx].step(delta); touchedKnob_ = idx; touchedAt_ = nowMs_; }
+    if (idx < 4 && k[(size_t)idx].valid && k[(size_t)idx].step) { k[(size_t)idx].step(delta); touchedKnob_ = idx; touchedAt_ = nowMs_; if (lastTouchPage_ != (int)page_ || lastTouchKnob_ != idx) { lastTouchPage_ = (int)page_; lastTouchKnob_ = idx; if (knobTarget_ == KT_LAST) knobPicked_ = false; } }
+}
+
+// ---- FM-1 gestures: hold a button, then play a key, turn an encoder or move the analog knob ----
+const char* SamplerApp::knobTargetName(int t) {
+    static const char* n[kKnobTargets] = {"MASTER VOLUME", "TRACK VOLUME", "DJ FILTER", "LAST TURNED KNOB"};
+    return n[((t % kKnobTargets) + kKnobTargets) % kKnobTargets];
+}
+void SamplerApp::setKnobTarget(int t) {
+    knobTarget_ = ((t % kKnobTargets) + kKnobTargets) % kKnobTargets;
+    knobPicked_ = knobTarget_ == KT_MASTER;   // the others wait until the knob is where the value is
+    say(std::string("KNOB: ") + knobTargetName(knobTarget_));
+}
+void SamplerApp::knobMove(float v) {
+    v = cl(v);
+    if (knobTarget_ == KT_MASTER) { s_.setMasterVolume(v * 1.2f); return; }
+    Knob kn;
+    if (knobTarget_ == KT_TRACK) kn = knobs(P_MIX)[0];
+    else if (knobTarget_ == KT_DJ) kn = knobs(P_LIVE)[0];
+    else if (lastTouchKnob_ >= 0) kn = knobs((Page)lastTouchPage_)[(size_t)lastTouchKnob_];
+    if (!kn.valid || !kn.set) return;
+    if (!knobPicked_) {
+        if (std::fabs(v - kn.norm) > 0.05f) return;   // not there yet: the value stays where it is
+        knobPicked_ = true;
+    }
+    kn.set(v);
+}
+bool SamplerApp::keyGesture(int raw) {   // EDIT + key n = mute track n (+ SEL: solo it), HOME + key n = go to track n
+    const int k = raw - 53;
+    const uint32_t editBit = 1u << EDIT, selBit = 1u << SEL, homeBit = 1u << HOME;
+    if (k < 0 || k >= trackCount_ || k >= kFmTracks) return false;
+    const std::string n = std::to_string(k + 1);
+    if (held_ & editBit) {
+        modUsed_ |= editBit | selBit;
+        if (held_ & selBit) { toggleSolo(k); say("TRACK " + n + (ts_[k].solo ? " SOLO" : " SOLO OFF")); }
+        else { toggleMute(k); say("TRACK " + n + (ts_[k].mute ? " MUTED" : " UNMUTED")); }
+        return true;
+    }
+    if (held_ & homeBit) { modUsed_ |= homeBit; selectTrack(k); return true; }
+    return false;
+}
+void SamplerApp::focusFx(const std::string& name, Page p) {
+    gotoPage(p); fxFocusPage_ = (int)p; fxFocusKnob_ = -1;
+    const Knobs kk = knobs(p);
+    for (int i = 0; i < 4; i++) if (kk[(size_t)i].valid && kk[(size_t)i].name.rfind(name, 0) == 0) { fxFocusKnob_ = i; break; }   // EQ -> EQ LOW
+}
+void SamplerApp::fxCursorStep(int d) {   // FX + PRESETS: the catalog of the phone's FX browser on the FM-1 screen
+    if (fxCur_ < 0 && fxScopeAuto_) fxScopeTrack_ = modeOf(page_) == 3;   // a browse starts on the side of the tab you are in, unless ALGORITHM chose
+    const auto& cat = fxCatalog();
+    const int n = (int)cat.size(); int i = fxCur_ < 0 ? (d > 0 ? -1 : 0) : fxCur_;
+    for (int tries = 0; tries < n; tries++) {
+        i = ((i + (d > 0 ? 1 : -1)) % n + n) % n;
+        if ((fxScopeTrack_ ? cat[(size_t)i].track : cat[(size_t)i].master) != kPages) break;
+    }
+    fxCur_ = i; fxBrowsed_ = true;
+    say(std::string(cat[(size_t)i].name) + (fxScopeTrack_ ? "  (TRACK)" : "  (MIX)"));
+}
+const char* SamplerApp::fmHint(Page p) {
+    switch (p) {
+    case P_CHOP: return "K1 chop  K2 start  K3 end  K4 step.  REC splits the chop, GLO deletes it, the keys play the pads.";
+    case P_SQ: return "Keys 1-16 light the steps of the bar that plays; the step under the playhead flips.";
+    case P_MIX: case P_TEQ: case P_DUCK: case P_TFX: case P_TFX2: case P_TFX3: case P_TFX4: case P_TFX5:
+        return "Hold EDIT + key 1-8: mute that track (add SEL: solo it).  Hold HOME + key: go to that track.  Hold FX + PRESETS: browse effects.";
+    case P_FX: case P_FX2: case P_FX3: case P_FX4: case P_TONE: case P_MOD: case P_LIVE: case P_LIVE2: case P_TSTOP:
+        return "Hold FX + turn PRESETS to browse the effects, let go of FX to open one.  Hold FX + turn ALGORITHM: whole mix / this track.";
+    case P_KEY: return "Hold GLO + turn PRESETS: what the analog knob moves (master volume, track volume, DJ filter, last turned knob).";
+    case P_HOME: case P_SHAPE: case P_PADS: return "Hold HOME + key 1-8: go to that track.  The CHOP page (press HOME again) edits chops with K1-K4.";
+    default: return "";
+    }
+}
+const char* SamplerApp::fmGesture(int i) {
+    static const char* g[] = {
+        "HOLD EDIT + KEY 1-8: MUTE THAT TRACK",
+        "HOLD EDIT + SEL + KEY 1-8: SOLO THAT TRACK",
+        "HOLD HOME + KEY 1-8: GO TO THAT TRACK",
+        "HOLD FX + TURN PRESETS: BROWSE EFFECTS, LET GO TO OPEN",
+        "HOLD FX + TURN ALGORITHM: WHOLE MIX / THIS TRACK",
+        "HOLD GLO + TURN PRESETS: WHAT THE ANALOG KNOB MOVES",
+        "CHOP PAGE (SOUND MODE): K1 CHOP, K2 START, K3 END, K4 STEP",
+        "CHOP PAGE: REC SPLITS THE CHOP, GLO DELETES IT",
+        "KEY LEDS: PAD KEYS LIGHT FOR EACH CHOP, STEP KEYS ON THE PATTERN PAGE",
+        nullptr};
+    return g[i];
+}
+// ---- chops (KIT sample): the same list the phone's editor draws; every change goes back to the sampler at once ----
+bool SamplerApp::chopsAvailable() const { return ts_[track_].algo == 3 && !isSynth(track_) && hasSample(track_); }
+bool SamplerApp::chopsRead(std::vector<float>& s, std::vector<float>& e) {
+    if (!chopsAvailable()) return false;
+    if (chTrack_ != track_ || chS_.empty() || nowMs_ - chAt_ > 250) {
+        chS_ = s_.slicesOf(track_); chE_ = s_.sliceEndsOf(track_); chTrack_ = track_; chAt_ = nowMs_;
+        if (chE_.size() != chS_.size()) { chE_.assign(chS_.size(), 1.f); for (size_t i = 0; i + 1 < chS_.size(); i++) chE_[i] = chS_[i + 1]; }   // a chop with no end stops where the next one starts
+    }
+    s = chS_; e = chE_;
+    return !s.empty();
+}
+void SamplerApp::chopsWrite(const std::vector<float>& s0, const std::vector<float>& e0) {
+    std::vector<size_t> order(s0.size()); for (size_t i = 0; i < order.size(); i++) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return s0[a] < s0[b]; });   // the sampler keeps the chops in order of their start: so do we, and the selection follows its chop
+    std::vector<float> s, e; for (size_t i = 0; i < order.size(); i++) { s.push_back(s0[order[i]]); e.push_back(e0[order[i]]); if ((int)order[i] == chopSel_) chopSel_ = (int)i; }
+    s_.setSliceStarts(track_, s, e);
+    chS_ = s; chE_ = e; chTrack_ = track_; chAt_ = nowMs_;   // what the sampler will say in a moment
+}
+void SamplerApp::chopNudge(bool end, int steps) {
+    static const float size[3] = {0.001f, 0.005f, 0.02f};   // of the sample length: fine, normal, coarse
+    std::vector<float> s, e; if (!chopsRead(s, e)) return;
+    const size_t i = (size_t)std::min((int)s.size() - 1, std::max(0, chopSel_));
+    const float d = (float)std::min(8, std::max(-8, steps)) * size[std::min(2, std::max(0, chopStep_))];
+    if (end) e[i] = cl(e[i] + d, s[i] + 0.002f, 1.f); else s[i] = cl(s[i] + d, 0.f, e[i] - 0.002f);
+    chopsWrite(s, e);
+}
+void SamplerApp::chopSetPos(bool end, float v) {
+    std::vector<float> s, e; if (!chopsRead(s, e)) return;
+    const size_t i = (size_t)std::min((int)s.size() - 1, std::max(0, chopSel_));
+    if (end) e[i] = cl(v, s[i] + 0.002f, 1.f); else s[i] = cl(v, 0.f, e[i] - 0.002f);
+    chopsWrite(s, e);
+}
+void SamplerApp::chopSplit() {   // the selected chop becomes two halves
+    std::vector<float> s, e; if (!chopsRead(s, e)) return;
+    if (s.size() >= 32) { say("32 CHOPS IS THE MOST"); return; }
+    const size_t i = (size_t)std::min((int)s.size() - 1, std::max(0, chopSel_));
+    if (e[i] - s[i] < 0.006f) { say("THAT CHOP IS TOO SHORT"); return; }
+    const float m = 0.5f * (s[i] + e[i]);
+    s.insert(s.begin() + (long)i + 1, m); e.insert(e.begin() + (long)i + 1, e[i]); e[i] = m;
+    chopsWrite(s, e); say("CHOP " + std::to_string(i + 1) + " SPLIT");
+}
+void SamplerApp::chopRemove() {
+    std::vector<float> s, e; if (!chopsRead(s, e)) return;
+    if (s.size() <= 2) { say("A KIT KEEPS TWO CHOPS"); return; }
+    const size_t i = (size_t)std::min((int)s.size() - 1, std::max(0, chopSel_));
+    s.erase(s.begin() + (long)i); e.erase(e.begin() + (long)i);
+    chopSel_ = std::min((int)s.size() - 1, (int)i);
+    chopsWrite(s, e); say("CHOP " + std::to_string(i + 1) + " DELETED");
 }
 
 // ---- tick ----
@@ -940,6 +1111,7 @@ void SamplerApp::tick(uint32_t now) {
     if (fwDirty_) { fwDirty_ = false; sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true); }
     if (repaintAt_ && now >= repaintAt_) { repaintAt_ = repaintAt_ + 2500 < now + 2500 && repaintCount_++ < 1 ? now + 2500 : 0; needClear_ = true; }
     st_ = s_.status();
+    if (held_ && lastPongAt_ && nowMs_ - lastPongAt_ > 2500) { held_ = 0; modUsed_ = 0; fxBrowsed_ = false; }   // the FM-1 went quiet (cable out): a button that never came up must not stay held
     for (int t = 0; t < kTracks; t++) if (st_.seqBars[t] > 0 && nowMs_ - barsLocalAt_[t] > 250) ts_[t].seqBars = std::min(15, st_.seqBars[t] - 1);   // the engine is the truth for the length (a bank can have another one)
     projectTick();
     loopAny_ = false;
@@ -1053,10 +1225,35 @@ void SamplerApp::leds() {
     else if (loopAny_) m |= 1ull << REC;
     // keys follow the tonality: the keyboard stays chromatic, only the keys that belong to the scale light, the root of each octave blinks slowly;
     // with the scale OFF only the root keys light. A sounding key goes dark.
+    const bool trackKeys = (held_ & ((1u << EDIT) | (1u << HOME))) != 0;   // EDIT / HOME held: the keys 1-8 are the tracks
+    const bool kitKeys = ts_[track_].algo == 3;
+    std::vector<float> cs, ce; const bool haveChops = chopsRead(cs, ce);
+    const int pads = kitKeys && !isSynth(track_) && haveChops ? (int)cs.size() : 16;   // KIT sample: a key per chop
+    bool stepOn[16] = {}; int stepHead = -1;
+    if (page_ == P_SQ) {   // the pattern page: keys 1-16 are the steps of the bar that plays (the step under the playhead flips)
+        Session::SeqView v[kSeqMax]; const int cnt = s_.seqNotes(track_, v, kSeqMax);
+        const int pt = patternTicks(seqBarsOf(track_)), barTicks = kPpq * 4, st = kPpq / 4;
+        const double ph = std::fmod(st_.beatPos * kPpq, (double)pt);
+        const int bar = st_.seqState[track_] == 3 ? st_.seqCursor[track_] / barTicks : (int)(ph / barTicks);
+        for (int j = 0; j < cnt; j++) { const int rel = v[j].tick - bar * barTicks; if (rel >= 0 && rel < barTicks) stepOn[std::min(15, rel / st)] = true; }
+        if (st_.playing || st_.seqState[track_]) { const int rel = (int)ph - bar * barTicks; if (rel >= 0 && rel < barTicks) stepHead = std::min(15, rel / st); }
+    }
     for (int k = 0; k < 27; k++) {
         const int raw = 53 + k, note = raw + 12 * scale_.octave, pc = ((note - scale_.root) % 12 + 12) % 12;
-        bool on = ts_[track_].algo == 3 ? true : hasScale(scale_.scale) ? scaleIndex(pc, scale_.scale) >= 0 : pc == 0;   // KIT: every key is a pad
-        if (on && pc == 0 && hasScale(scale_.scale) && ts_[track_].algo != 3) on = blinkSlow;
+        bool on;
+        if (trackKeys) {   // lit = a sound, dark = empty or muted, slow blink = the selected track, fast blink = solo
+            if (k >= trackCount_ || k >= kFmTracks) on = false;
+            else if (ts_[k].solo) on = blinkFast;
+            else if (ts_[k].mute) on = false;
+            else if (k == track_) on = blinkSlow;
+            else on = hasSample(k);
+            if (on) m |= 1ull << (14 + k);
+            continue;
+        }
+        if (page_ == P_SQ && k < 16) { on = stepOn[k] != (k == stepHead); if (on) m |= 1ull << (14 + k); continue; }
+        on = kitKeys ? k < pads : hasScale(scale_.scale) ? scaleIndex(pc, scale_.scale) >= 0 : pc == 0;   // KIT: a key per pad
+        if (kitKeys && page_ == P_CHOP && on && k == chopSel_) on = blinkFast;   // the chop that K2 / K3 move
+        else if (on && pc == 0 && hasScale(scale_.scale) && !kitKeys) on = blinkSlow;
         if (keyCount_[raw]) on = false;
         if (note < 0 || note > 127) on = false;
         if (on) m |= 1ull << (14 + k);
@@ -1072,7 +1269,7 @@ void SamplerApp::leds() {
 // Layout (240x240): track tags, page and state, sample name, a 60 px picture that depends on the page, the loop strip, four knobs, a hint.
 void SamplerApp::draw(uint32_t now) {
     static int lastHero = -1;
-    const int heroKind = mic_ == 1 || mic_ == 2 ? 6 : page_ == P_ENV ? 1 : page_ == P_LFO ? 2 : page_ == P_MIX ? 3 : page_ == P_KEY ? 4 : page_ == P_LEN ? 5 : page_ == P_SQ ? 7 : page_ == P_TEMPO ? 8 : 0;
+    const int heroKind = mic_ == 1 || mic_ == 2 ? 6 : page_ == P_ENV ? 1 : page_ == P_LFO ? 2 : page_ == P_MIX ? 3 : page_ == P_KEY ? 4 : page_ == P_LEN ? 5 : page_ == P_SQ ? 7 : page_ == P_TEMPO ? 8 : page_ == P_CHOP && chopsAvailable() ? 9 : 0;
     if (heroKind != lastHero) { lastHero = heroKind; needClear_ = true; }
     if (needClear_) { fwDirty_ = true; clear(BLACK); std::fill(cells_.begin(), cells_.end(), SurfaceCell()); std::fill(rects_.begin(), rects_.end(), ~0ull); needResend_ = false; }
     else if (needResend_) { needResend_ = false; std::fill(cells_.begin(), cells_.end(), SurfaceCell()); std::fill(rects_.begin(), rects_.end(), ~0ull); }
@@ -1086,7 +1283,7 @@ void SamplerApp::draw(uint32_t now) {
         rect(8 + i, i * 30 + 9, 20, 12, 2, st_.track_clip_rec[i] ? ACCENT : st_.track_has_clip[i] ? PAPER : BLACK);
     }
     drawText(20, 6, 26, 2, ACCENT, BLACK, kPage[page_], 9);
-    for (int i = 0; i < 7; i++) rect(270 + i, 122 + i * 7, 30, 5, 5, i >= modePageCount(modeOf(page_)) ? BLACK : i == pageSlot(page_) ? ACCENT : BAR);   // where you are inside the mode (press its button again for the next page)
+    for (int i = 0; i < 9; i++) rect(270 + i, 122 + i * 6, 30, 4, 5, i >= modePageCount(modeOf(page_)) ? BLACK : i == pageSlot(page_) ? ACCENT : BAR);   // where you are inside the mode (press its button again for the next page)
     const char* state = st_.freeRecording || st_.track_clip_rec[track_] ? "REC" : st_.playing ? "PLAY" : "STOP";
     drawText(21, 176, 26, 2, st_.freeRecording || st_.track_clip_rec[track_] ? ACCENT : PAPER, BLACK, state, 5);
     // sample line: name and algorithm (or the toast / microphone state)
@@ -1122,7 +1319,7 @@ void SamplerApp::draw(uint32_t now) {
         if (rect(60 + i, cx, cy + 29, 110, 4, BAR)) rects_[70 + i] = ~0ull;   // the fill goes on top of every repaint of the track
         rect(70 + i, cx, cy + 29, bw, 4, p.isChoice ? ACCENT : PAPER);
     }
-    const char* hint = mic_ == 1 ? (page_ == P_SAVE ? "K4 = TRIGGER LEVEL  LINE = THRESHOLD" : "K1 = TRIGGER LEVEL  LINE = THRESHOLD") : mic_ == 2 ? "RECORDING  K1 ON LOOP PAGE STOPS"  : page_ == P_LEN ? "TURN K1: X2 OR /2  THE LOOP REPEATS" : page_ == P_SAVE ? "TAP SAVE = SAVE LOOP  HOLD = CLEAR ALL" : page_ == P_SQ ? "HOLD SEQ AND PLAY KEYS TO RECORD" : page_ == P_KEY ? "KEYS FOLLOW THE KEY  CHANGE ANY TIME"
+    const char* hint = mic_ == 1 ? (page_ == P_SAVE ? "K4 = TRIGGER LEVEL  LINE = THRESHOLD" : "K1 = TRIGGER LEVEL  LINE = THRESHOLD") : mic_ == 2 ? "RECORDING  K1 ON LOOP PAGE STOPS"  : page_ == P_CHOP ? (chopsAvailable() ? "REC SPLIT  GLO DELETE  KEYS PLAY PADS" : "SET ALGORITHM TO KIT/SLICE") : page_ == P_LEN ? "TURN K1: X2 OR /2  THE LOOP REPEATS" : page_ == P_SAVE ? "TAP SAVE = SAVE LOOP  HOLD = CLEAR ALL" : page_ == P_SQ ? "HOLD SEQ AND PLAY KEYS TO RECORD" : page_ == P_KEY ? "KEYS FOLLOW THE KEY  CHANGE ANY TIME"
                      : "SEL TRACK  PRE BROWSE  ALG ALGORITHM";
     drawText(90, 6, 230, 1, DIM, BLACK, hint, 38);
     needClear_ = false;
@@ -1188,6 +1385,15 @@ void SamplerApp::hero(uint32_t now, const Knobs& k) {
             for (int j = 0; j < cnt; j++) { const int c = v[j].tick * cols / pt; if (c == i) top = std::max(top, 12 + (v[j].note % 36) * (H - 12) / 36); }
             const int cc = (int)((double)st_.seqCursor[track_] / pt * cols), cursor = x.seqState == 3 && i == cc;
             column(i, x0 + i * 4, 3, cursor ? std::max(8, top) : std::max(2, top), cursor || i == pc ? ACCENT : top ? PAPER : BAR, true);
+        }
+    } else if (page_ == P_CHOP && chopsAvailable()) {   // the sample with its chops: the selected one amber, the others white, the gaps dark
+        std::vector<float> cs, ce; chopsRead(cs, ce);
+        const auto pk = peaks(track_, 57); const int sel = std::min(std::max(0, chopSel_), (int)cs.size() - 1);
+        for (int i = 0; i < 57; i++) {
+            const float pos = (i + 0.5f) / 57.f; bool any = false, in = false;
+            for (size_t j = 0; j < cs.size(); j++) if (pos >= cs[j] && pos <= ce[j]) { any = true; if ((int)j == sel) in = true; }
+            const float v = i < (int)pk.size() ? pk[(size_t)i] : 0.f;
+            column(i, x0 + i * 4, 3, (int)(std::min(1.f, v * 1.1f) * H) + 1, in ? ACCENT : any ? PAPER : BAR, false);
         }
     } else if (page_ == P_TEMPO) {   // the tempo in big letters and four beat lamps
         char b[32]; snprintf(b, sizeof b, st_.loopSamples > 0 ? "%.0f LOCK" : "%.0f BPM", st_.loopSamples > 0 ? st_.bpm : tempo_);

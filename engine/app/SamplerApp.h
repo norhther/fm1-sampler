@@ -24,7 +24,7 @@ public:
     static constexpr int kTracks = 16;   // the most; a session starts with 8 and ADD TRACK opens the next ones
     static constexpr int kFmTracks = 8;  // the FM-1 screen and keys only show the first eight
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, P_FX4, P_TFX5, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, P_FX4, P_TFX5, P_CHOP, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -61,6 +61,26 @@ public:
     static int modeOf(Page p);
     static int pageSlot(Page p);                  // index of a page inside its mode
     int track() const { return track_; }
+    // ---- FM-1 hardware gestures: hold a button, then use a key, an encoder or the analog knob (the phone shows them as hints: fmHint) ----
+    enum KnobTarget { KT_MASTER, KT_TRACK, KT_DJ, KT_LAST, kKnobTargets };   // what the analog knob moves
+    static const char* knobTargetName(int t);
+    int knobTarget() const { return knobTarget_; }
+    void setKnobTarget(int t);
+    void knobMove(float v01);                     // the analog knob of the FM-1; every target but the master volume waits until the knob reaches the value (no jump)
+    bool knobWaiting() const { return !knobPicked_; }
+    static const char* fmHint(Page p);            // the hardware gestures that work on a page, one plain line ("" = none)
+    static const char* fmGesture(int i);          // the cheat sheet, one gesture per line, nullptr at the end
+    int fmBattery() const { return battery_ < 0 ? -1 : battery_ * 100 / 127; }   // the battery reading of the FM-1 in percent of its range, -1 = never seen
+    // CHOP page (a KIT sample): K1 picks the chop, K2 / K3 move its start / end, K4 sets the step. The phone's chop editor shares the selection
+    bool chopsAvailable() const;
+    int chopSel() const { return chopSel_; }
+    void setChopSel(int i) { chopSel_ = std::max(0, i); }
+    void chopSplit(); void chopRemove(); void chopNudge(bool end, int steps); void chopSetPos(bool end, float v);
+    int chopStepIdx() const { return chopStep_; }
+    // the FX browser (phone and FM-1: hold FX, turn PRESETS): go to the page of an effect and light its knob there
+    void focusFx(const std::string& name, Page p);
+    int fxFocusKnob(Page p) const { return (int)p == fxFocusPage_ ? fxFocusKnob_ : -1; }
+    bool fxScopeTrack() const { return fxScopeTrack_; }
     void selectTrack(int t);
     Knobs knobs();
     Knobs knobs(Page p);
@@ -137,7 +157,7 @@ public:
     void selectPad(int pad) { ts_[track_].selPad = std::min(15, std::max(0, pad)); }
     void resampleNow();                                   // the sound you hear (bars of the loop or of the pattern) becomes a sample on this track
     void applyEdit(int t);
-    void setSliceStarts(const std::vector<float>& pts, const std::vector<float>& ends = {}) { s_.setSliceStarts(track_, pts, ends); }
+    void setSliceStarts(const std::vector<float>& pts, const std::vector<float>& ends = {}) { chTrack_ = -1; s_.setSliceStarts(track_, pts, ends); }
     // pattern banks A..H and the song (a chain of banks played one after the other on every track)
     int patternSlot(int t) const { return st_.seqSlot[t]; }
     void selectPattern(int slot) { s_.seqSelectPattern(track_, slot, false); }
@@ -361,6 +381,15 @@ private:
     int keyNotes_[128][3] = {}; int keyCount_[128] = {};
     bool fwDirty_ = true; uint32_t lenAt_ = 0;
     uint32_t held_ = 0;
+    // FM-1 gestures
+    uint32_t modUsed_ = 0;                       // held buttons that were used as a modifier: their tap action is skipped on release
+    int knobTarget_ = KT_MASTER; bool knobPicked_ = true; int battery_ = -1, lastTouchPage_ = -1, lastTouchKnob_ = -1;
+    uint32_t lastPongAt_ = 0; int chopSel_ = 0, chopStep_ = 1, chTrack_ = -1; std::vector<float> chS_, chE_; uint32_t chAt_ = 0;
+    bool chopsRead(std::vector<float>& s, std::vector<float>& e);
+    void chopsWrite(const std::vector<float>& s, const std::vector<float>& e);
+    int fxFocusPage_ = -1, fxFocusKnob_ = -1, fxCur_ = -1; bool fxScopeTrack_ = false, fxBrowsed_ = false, fxScopeAuto_ = true;
+    void fxCursorStep(int d);
+    bool keyGesture(int raw);                    // a key played while a button is held: mute, solo, pick a track
     ScaleState scale_;
     uint32_t touchedAt_ = 0; int touchedKnob_ = -1;
     std::vector<SurfaceCell> cells_;

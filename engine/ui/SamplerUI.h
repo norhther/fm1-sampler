@@ -23,8 +23,8 @@ public:
     std::string takeAnnounce() { std::string s; s.swap(announce_); return s; }                    // a message for the screen reader (TalkBack)
     void openMenu() { menuOpen_ = true; }
     void openLibraryBrowser() { openLibrary(); }
-    int fxFocusPage_ = -1, fxFocusKnob_ = -1;   // the knob the FX browser sent you to, lit on its page
     void openFxBrowser(bool track) { fxOpen_ = true; fxTrack_ = track; }
+    void openFmHints() { fmOpen_ = true; }
     bool menuOpen() const { return menuOpen_; }
     bool tourOpen() const { return tourOpen_; }
     void openTour() { tourOpen_ = true; tourStep_ = 0; menuOpen_ = false; }
@@ -64,7 +64,7 @@ private:
     void trackList(Rect r);
     void sampleArea(Rect r);
     void pagePanel(Rect r);
-    void librarySheet(); void openLibrary(); void fxSheet();
+    void librarySheet(); void openLibrary(); void fxSheet(); void fmSheet(); bool fmOpen_ = false;
     void projectSheet();
     void songSheet();
     void sequencerView(Rect r);
@@ -108,7 +108,7 @@ private:
     bool songOpen_ = false, copyArm_ = false; bool projOpen_ = false; int projSel_ = -1; float projScroll_ = 0, projLastY_ = 0, projMoved_ = 0; uint32_t projDelAt_ = 0; std::vector<std::string> projList_; Rect projListRect_{0, 0, 0, 0};
     // SELECT mode of the roll: notes picked by tap or by a box, edited together
     int drumView_ = 0;   // the roll as a drum grid: 0 off, 1 pads 1-8, 2 pads 9-16 (one row per pad)
-    int chopIdx_ = -1, chopSel_ = 0, chopHold_ = 0; bool chopMoved_ = false, chopNew_ = false, chopEndH_ = false;   // KIT: the chop handle under the finger, the selected chop
+    int chopIdx_ = -1, chopHold_ = 0; bool chopMoved_ = false, chopNew_ = false, chopEndH_ = false;   // KIT: the chop handle under the finger, the selected chop
     std::vector<float> chopS_, chopE_;                                    // the chops while a finger moves a handle (and a few frames after, until the session has them)
     void chopsNow(std::vector<float>& s, std::vector<float>& e) const;    // starts and ends of the chops, 0..1
     void chopDelete();

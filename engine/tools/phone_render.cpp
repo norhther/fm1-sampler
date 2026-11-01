@@ -89,6 +89,12 @@ int main(int argc, char** argv) {
     app.selectTrack(0); app.gotoPage(SamplerApp::P_TRIG); ui.frame(now); dump("trigger");
     app.gotoPage(SamplerApp::P_SQ); app.setKeyTrigger(0, true); ui.frame(now); { float nx = 0, ny = 0; for (auto& o : ui.ops()) if (o.type == UiOp::TEXT && o.text == "FULL SCREEN") { nx = o.f[0]; ny = o.f[1] - 4; } tapAt(nx, ny); } ui.frame(now); dump("seqfull");
     app.selectTrack(0); app.gotoPage(SamplerApp::P_HOME); app.setAlgo(3); ui.frame(now); dump("kit_sample"); ui.openChopEditor(); ui.frame(now); dump("chop");
+    // the FM-1 hints: the chop page with its chip, the hints sheet, the FX browser with its footer
+    tapAt(60, 20); ui.frame(now);   // EXIT of the chop editor
+    app.gotoPage(SamplerApp::P_CHOP); app.setChopSel(2); ui.frame(now); dump("chop_page");
+    app.gotoPage(SamplerApp::P_MIX); ui.frame(now); dump("mix_chip");
+    ui.openFmHints(); ui.frame(now); dump("fm_hints"); ui.touch(0, 790, 22, now); ui.touch(2, 790, 22, now); ui.frame(now);
+    app.gotoPage(SamplerApp::P_FX); ui.openFxBrowser(false); ui.frame(now); dump("fxbrowser2");
     fprintf(f, "]}\n"); fclose(f);
     return 0;
 }
