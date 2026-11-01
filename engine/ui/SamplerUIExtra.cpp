@@ -79,22 +79,27 @@ void SamplerUI::menuSheet() {
     rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 1);
     tap(box, [] {});
     text(box.x + 14, box.y + 20, T_TITLE, TEXT, "MENU", 0, true);
-    text(box.x + 80, box.y + 21, T_CAPTION, DIM, std::string(linkMidi_ ? "FM-1 CONNECTED" : "NO FM-1") + "   CPU " + std::to_string((int)(st_.cpu_permille / 10)) + "%", 0, false);
+    text(box.x + 80, box.y + 21, T_CAPTION, DIM, std::string(linkMidi_ ? "FM-1 CONNECTED" : "NO FM-1") + "   CPU " + std::to_string((int)(st_.cpu_permille / 10)) + "% PEAK " + std::to_string((int)(st_.cpu_peak_permille / 10)) + "%" + (xruns_ >= 0 ? "   XRUNS " + std::to_string(xruns_) : std::string()), 0, false);
     button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { menuOpen_ = false; }, 10);
-    const float lab = 92, bx = box.x + lab + 10, bw = box.w - lab - 22, bh = 32; float y = box.y + 46;
+    const float lab = 92, bx = box.x + lab + 10, bw = box.w - lab - 22, bh = 27; float y = box.y + 44;
     auto row = [&](const char* name, std::vector<std::pair<std::string, bool>> items, std::function<void(int)> f, bool danger = false) {
         text(box.x + 12, y + bh / 2, T_CAPTION, DIM, name, 0, true);
         const float w = (bw - 4 * (items.size() - 1)) / items.size();
         for (size_t i = 0; i < items.size(); i++) { const Rect c{bx + i * (w + 4), y, w, bh}; if (danger) dangerButton(c, items[i].first, [f, i] { f((int)i); }, 10); else button(c, items[i].first, items[i].second, [f, i] { f((int)i); }, 10); }
-        y += bh + 8;
+        y += bh + 5;
     };
     row("SOUND GOES TO", {{"THE FM-1", !app_.phoneOut()}, {"PHONE SPEAKER", app_.phoneOut()}}, [this](int i) { app_.setPhoneOut(i == 1); });
     row("SOUNDS", {{app_.audition() ? "AUDITION: ON" : "AUDITION: OFF", app_.audition()}, {"SAVE LOOP TO LIBRARY", false}, {"PROJECTS", false}, {"NEW PROJECT", false}},
         [this](int i) { if (i == 0) app_.setAudition(!app_.audition()); else if (i == 1) { app_.loopSave(); } else if (i == 3) { if (app_.newProject()) menuOpen_ = false; } else { menuOpen_ = false; projOpen_ = true; projSel_ = -1; projScroll_ = 0; } });
+    row("BROWSE", {{"INSTRUMENTS", false}, {"EFFECTS", false}}, [this](int i) { menuOpen_ = false; if (i == 0) openLibrary(); else { fxOpen_ = true; fxTrack_ = false; } });
     row("TIMING", {{"TAP TEMPO", false}, {"TAKE: " + (app_.takeBars() ? std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("FREE")), app_.takeBars() > 0}, {"QUANTIZE: " + app_.quantText(), app_.quantDiv() > 0}},
         [this](int i) { if (i == 0) app_.tapTempo(); else if (i == 1) app_.cycleTakeBars(); else app_.cycleQuant(); });
     row("OTHER GEAR", {{"MIDI SYNC: OFF", app_.midiSync() == 0}, {"FOLLOW CLOCK IN", app_.midiSync() == 1}, {"SEND CLOCK OUT", app_.midiSync() == 2}}, [this](int i) { app_.setMidiSync(i); });
-    { std::vector<std::pair<std::string, bool>> th; for (int i = 0; i < theme::kThemes; i++) th.push_back({theme::name(i), app_.themeId() == i}); row("LOOK", th, [this](int i) { app_.setTheme(i); }); }
+    for (int r0 = 0; r0 < theme::kThemes; r0 += 5) {   // the looks, five to a row
+        std::vector<std::pair<std::string, bool>> th; const int e = std::min(theme::kThemes, r0 + 5);
+        for (int i = r0; i < e; i++) th.push_back({theme::name(i), app_.themeId() == i});
+        row(r0 == 0 ? "LOOK" : "", th, [this, r0](int i) { app_.setTheme(r0 + i); });
+    }
     row("SCREEN", {{app_.fullscreen() ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", app_.fullscreen()}, {app_.leftHanded() ? "LEFT-HANDED: ON" : "LEFT-HANDED: OFF", app_.leftHanded()},
                    {app_.access() ? "BIG TEXT, HIGH CONTRAST: ON" : "BIG TEXT, HIGH CONTRAST: OFF", app_.access()}},
         [this](int i) { if (i == 0) app_.setFullscreen(!app_.fullscreen()); else if (i == 1) app_.setLeftHanded(!app_.leftHanded()); else { const bool on = !app_.access(); app_.setAccess(on); app_.setTheme(on ? 4 : 0); } });

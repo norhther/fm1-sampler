@@ -120,7 +120,7 @@ struct Session::Impl {
     std::atomic<double> a_pos{0};
     std::atomic<bool> a_playing{false}, a_free{false}, a_freeArmed{false}, a_pending{false};
     std::atomic<float> a_master{0.f}, a_freeSec{0.f}, a_sampleSec{0.f}, a_inPeak{0.f}, a_bpm{120.f};
-    std::atomic<uint32_t> a_cpu{0}, a_clip_mask{0}, a_cliprec_mask{0};
+    std::atomic<uint32_t> a_cpu{0}, a_cpuPeak{0}, a_clip_mask{0}, a_cliprec_mask{0};
     std::atomic<int> a_bars{4}, a_sampleState{0}, a_sampleTrack{0}, a_sampleVersion{0}, a_sampleFails{0};
     std::atomic<int32_t> a_loop{0};
     std::atomic<float> a_clipPos{0.f}, a_lfo[kTracks];
@@ -943,7 +943,9 @@ void Session::process(float* out, const float* in, int frames) {
     for (int i = 0; i < kTracks; i++) { cm |= (uint32_t)d->tracks[(size_t)i]->clipHas << i; rm |= (uint32_t)d->tracks[(size_t)i]->clipRec << i; }
     d->a_clip_mask = cm; d->a_cliprec_mask = rm;
     const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count(), budget = frames * 1e6 / d->sr;
-    d->a_cpu = (d->a_cpu.load() * 7 + (uint32_t)(1000.0 * us / budget)) / 8;
+    const uint32_t cur = (uint32_t)(1000.0 * us / budget);
+    d->a_cpu = (d->a_cpu.load() * 7 + cur) / 8;
+    d->a_cpuPeak = std::max(cur, d->a_cpuPeak.load() * 998 / 1000);
 }
 
 // ---- transport and notes ----
@@ -1453,7 +1455,7 @@ Session::Status Session::status() const {
     s.playing = d->a_playing; s.pos = d->a_pos; s.loopSamples = d->a_loop;
     s.clip = d->a_clip.load() > 0; s.songOn = d->a_songOn.load() != 0; s.songPos = d->a_songPos.load(); s.songLen = d->a_songLen.load();
     for (int i = 0; i < kTracks; i++) { s.seqSlot[i] = d->a_slot[i].load(); s.seqSlotPending[i] = d->a_slotPending[i].load(); }
-    s.bpm = d->a_bpm; s.loopBars = d->a_bars; s.master_peak = d->a_master; s.cpu_permille = d->a_cpu;
+    s.bpm = d->a_bpm; s.loopBars = d->a_bars; s.master_peak = d->a_master; s.cpu_permille = d->a_cpu; s.cpu_peak_permille = d->a_cpuPeak;
     const uint32_t cm = d->a_clip_mask, rm = d->a_cliprec_mask;
     for (int i = 0; i < kTracks; i++) {
         s.track_peak[i] = d->tracks[(size_t)i]->peak;

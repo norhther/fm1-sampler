@@ -5,6 +5,7 @@
 #include <Stretch.h>
 #include <Slicer.h>
 #include <Reverb.h>
+#include <MasterFx.h>
 #include <cmath>
 #include <thread>
 #include <chrono>
@@ -121,6 +122,17 @@ int main() {
         app.removeTrack(0); CHECK(app.trackCount() == n - 1, "track 1 is emptied, not closed");
         while (app.trackCount() > SamplerApp::kFmTracks) app.removeTrack(app.trackCount() - 1);
         app.removeTrack(app.trackCount() - 1); CHECK(app.trackCount() == SamplerApp::kFmTracks, "never fewer than %d tracks", SamplerApp::kFmTracks);
+    }
+    {   // the FX 4 effects: silent at rest, each one changes a tone and stays finite and bounded
+        struct E { const char* name; float FxParams::* f; };
+        for (E e : {E{"fold", &FxParams::fold}, E{"autopan", &FxParams::autopan}, E{"vinyl", &FxParams::vinyl}, E{"vowel", &FxParams::vowel}}) {
+            MasterFx fx(44100); FxParams p; CHECK(!fx.active(), "%s: bypassed at rest", e.name);
+            p.*e.f = 0.8f; fx.set(p); CHECK(fx.active(), "%s: active when turned up", e.name);
+            std::vector<float> a(4096 * 2), b; for (int i = 0; i < 4096; i++) a[2 * i] = a[2 * i + 1] = 0.5f * std::sin(2 * kPi * 220.f * i / 44100.f);
+            b = a; fx.process(b.data(), 4096, 0.0, 2.0 / 44100);
+            double diff = 0, pk = 0; bool fin = true; for (size_t i = 0; i < a.size(); i++) { diff += std::fabs(a[i] - b[i]); pk = std::max(pk, (double)std::fabs(b[i])); fin = fin && std::isfinite(b[i]); }
+            CHECK(fin && diff / a.size() > 0.005 && pk < 3.0, "%s changes the sound (mean diff %.3f, peak %.2f)", e.name, diff / a.size(), pk);
+        }
     }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;

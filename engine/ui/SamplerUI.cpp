@@ -9,7 +9,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD"};   // by Page
 static_assert(sizeof(kPageTab) / sizeof(*kPageTab) == SamplerApp::kPages, "one tab label for every page");
 }  // namespace
 
@@ -119,6 +119,7 @@ void SamplerUI::frame(uint32_t now) {
     trackList(rTracks_); sampleArea(rArea_); pagePanel(rPanel_);
     }
     if (sheetOpen_) librarySheet();
+    if (fxOpen_) fxSheet();
     if (projOpen_) projectSheet();
     if (songOpen_) songSheet();
     if (menuOpen_) menuSheet();
@@ -376,7 +377,7 @@ void SamplerUI::sampleArea(Rect r) {
         text(nm.x + 10, nm.y + nm.h / 2 + 9, 9, DIM, lib[(size_t)cur].group + "  " + std::to_string(cur + 1) + "/" + std::to_string(lib.size()), 0, false);
     }
     text(nm.x + nm.w - 10, nm.y + nm.h / 2, 9.5f, ACCENT, "LIBRARY", 2, true);
-    tap(nm, [this] { sheetOpen_ = true; sheetScroll_ = std::max(0.f, (float)app_.libraryCursor() * 34.f - 100.f); app_.refreshLibrary(); });
+    tap(nm, [this] { openLibrary(); });
     // microphone and disk
     Rect br{r.x, lr.y + lr.h + 8, r.w, 38};
     const int ms = app_.micState();
@@ -849,8 +850,9 @@ void SamplerUI::pagePanel(Rect r) {
         Rect c{r.x + (i % 4) * (pw + 4), r.y + 36 + (i / 4) * 30, (float)pw, 26};
         button(c, kPageTab[pg], app_.page() == pg, [this, pg] { app_.gotoPage(pg); }, 9.5f);
     }
-    const float rows = pn > 4 ? 2.f : 1.f, hy = r.y + 36 + rows * 30 + 2;
-    { const std::string h = SamplerApp::pageHelp(app_.page()); const size_t per = (size_t)std::max(12.f, r.w / (8.f * textScale_ * 0.6f)); size_t a = 0; int ln = 0;   // wrapped at spaces, three lines at most
+    const float rows = pn > 8 ? 3.f : pn > 4 ? 2.f : 1.f, hy = r.y + 36 + rows * 30 + 2;
+    { const std::string h = SamplerApp::pageHelp(app_.page()); const bool fxMode = mode == 1 || mode == 3; if (fxMode) button({r.x + r.w - 82, hy, 82, 24}, "BROWSE FX", false, [this] { fxOpen_ = true; fxTrack_ = app_.modeOf(app_.page()) == 3; }, 9.f);
+      const size_t per = (size_t)std::max(12.f, (r.w - (fxMode ? 90.f : 0.f)) / (8.f * textScale_ * 0.6f)); size_t a = 0; int ln = 0;   // wrapped at spaces, three lines at most
       while (a < h.size() && ln < 3) { size_t b = std::min(h.size(), a + per); if (b < h.size()) { const size_t sp = h.rfind(' ', b); if (sp != std::string::npos && sp > a) b = sp; } text(r.x, hy + 6 + ln * 11 * textScale_, 8.f, DIM, h.substr(a, b - a), 0, false); a = b + (b < h.size() && h[b] == ' ' ? 1 : 0); ln++; } }
     auto k = app_.knobs();
     const float top = hy + 38, rh = (r.y + r.h - top) / 4;
@@ -927,39 +929,88 @@ void SamplerUI::projectSheet() {
     if (!t.empty()) text(box.x + 14, box.y + box.h - 16, 11, ACCENT, t, 0, true);
 }
 
+void SamplerUI::openLibrary() {
+    app_.refreshLibrary(); sheetOpen_ = true; sheetScroll_ = 0;
+    const auto& lib = app_.library(); const int cur = app_.libraryCursor();
+    libGroup_ = cur >= 0 && cur < (int)lib.size() ? lib[(size_t)cur].group : (lib.empty() ? std::string() : lib[0].group);   // opens on the group of the sound that is loaded
+}
+// the instrument browser: a chip per group on top, then the sounds of that group as a grid of cards (tap = load it, the sheet stays open to browse and hear)
 void SamplerUI::librarySheet() {
     rrect({0, 0, W_, H_}, 0, theme::withAlpha(BG, 200));
     tap({0, 0, W_, H_}, [this] { sheetOpen_ = false; });
-    const Rect box{W_ * 0.22f, 24, W_ * 0.56f, H_ - 48};
+    const Rect box{W_ * 0.14f, 14, W_ * 0.72f, H_ - 28};
     rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 1);
     tap(box, [] {});
-    text(box.x + 14, box.y + 20, T_TITLE, TEXT, "SAMPLE LIBRARY", 0, true);
+    text(box.x + 14, box.y + 20, T_TITLE, TEXT, "INSTRUMENTS", 0, true);
+    text(box.x + 150, box.y + 21, T_CAPTION, DIM, "LOADS ON TRACK " + std::to_string(app_.track() + 1), 0, false);
     button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { sheetOpen_ = false; }, 10);
     button({box.x + box.w - 190, box.y + 6, 112, 28}, app_.audition() ? "AUDITION: ON" : "AUDITION: OFF", app_.audition(), [this] { app_.setAudition(!app_.audition()); }, 10);
-    sheetList_ = {box.x + 6, box.y + 44, box.w - 12, box.h - 52};
     const auto& lib = app_.library();
-    // rows: a header per group, then its entries
-    struct Row { bool head; std::string text; int entry; };
-    std::vector<Row> rows;
-    std::string g;
-    for (int i = 0; i < (int)lib.size(); i++) { if (lib[(size_t)i].group != g) { g = lib[(size_t)i].group; rows.push_back({true, g, -1}); } rows.push_back({false, lib[(size_t)i].label, i}); }
-    const float rh = 34;
-    sheetScroll_ = std::min(std::max(0.f, sheetScroll_), std::max(0.f, rows.size() * rh - sheetList_.h));
+    std::vector<std::string> groups; for (const auto& e : lib) if (std::find(groups.begin(), groups.end(), e.group) == groups.end()) groups.push_back(e.group);
+    if (std::find(groups.begin(), groups.end(), libGroup_) == groups.end() && !groups.empty()) libGroup_ = groups[0];
+    float cx = box.x + 8; const float cy = box.y + 44, ch = 28;   // the chips: they wrap to a second line when there are many groups
+    float cyy = cy;
+    for (const auto& g : groups) {
+        const float cw = std::max(54.f, 12.f + g.size() * 7.5f);
+        if (cx + cw > box.x + box.w - 8) { cx = box.x + 8; cyy += ch + 4; }
+        int n = 0; for (const auto& e : lib) if (e.group == g) n++;
+        button({cx, cyy, cw, ch}, g, g == libGroup_, [this, g] { libGroup_ = g; sheetScroll_ = 0; }, 9.5f);
+        cx += cw + 4;
+    }
+    sheetList_ = {box.x + 8, cyy + ch + 8, box.w - 16, box.y + box.h - (cyy + ch + 8) - 8};
+    std::vector<int> items; for (int i = 0; i < (int)lib.size(); i++) if (lib[(size_t)i].group == libGroup_) items.push_back(i);
+    const int cols = box.w > 520 ? 3 : 2; const float gap = 6, cw = (sheetList_.w - gap * (cols - 1)) / cols, rh = 44;
+    const int nrows = ((int)items.size() + cols - 1) / cols;
+    sheetScroll_ = std::min(std::max(0.f, sheetScroll_), std::max(0.f, nrows * (rh + gap) - sheetList_.h));
     clip(sheetList_);
-    for (size_t i = 0; i < rows.size(); i++) {
-        const float y = sheetList_.y + i * rh - sheetScroll_;
-        if (y + rh < sheetList_.y || y > sheetList_.y + sheetList_.h) continue;
-        if (rows[i].head) { text(sheetList_.x + 8, y + rh / 2, T_CAPTION, DIM, rows[i].text, 0, true); line(sheetList_.x, y + rh - 3, sheetList_.x + sheetList_.w, y + rh - 3, OUTLINE, 1); continue; }
-        const bool cur = rows[i].entry == app_.libraryCursor();
-        if (cur) { rrect({sheetList_.x, y + 1, sheetList_.w, rh - 2}, R_CONTROL, RAISED); stroke({sheetList_.x, y + 1, sheetList_.w, rh - 2}, R_CONTROL, ACCENT, 1); }
-        text(sheetList_.x + 14, y + rh / 2, T_BODY + 1, cur ? ACCENT : TEXT, fit(rows[i].text, sheetList_.w - 30, T_BODY + 1), 0, cur);
+    for (int k = 0; k < (int)items.size(); k++) {
+        const Rect c{sheetList_.x + (k % cols) * (cw + gap), sheetList_.y + (k / cols) * (rh + gap) - sheetScroll_, cw, rh};
+        if (c.y + c.h < sheetList_.y || c.y > sheetList_.y + sheetList_.h) continue;
+        const int e = items[(size_t)k]; const bool cur = e == app_.libraryCursor();
+        rrect(c, R_CARD, cur ? RAISED : BG); stroke(c, R_CARD, cur ? ACCENT : OUTLINE, cur ? 2 : 1);
+        text(c.x + 10, c.y + rh / 2 - 6, T_BODY + 1, cur ? ACCENT : TEXT, fit(lib[(size_t)e].label, cw - 20, T_BODY + 1), 0, true);
+        text(c.x + 10, c.y + rh / 2 + 11, 8.5f, DIM, lib[(size_t)e].kit ? "DRUM KIT" : (lib[(size_t)e].path.rfind("synth:", 0) == 0 || lib[(size_t)e].path.rfind("patch:", 0) == 0) ? "SYNTH" : "SAMPLE", 0, false);
     }
     endClip();
-    hit(sheetList_, [this](float, float y) { sheetLastY_ = y; sheetMoved_ = 0; },
+    hit(sheetList_, [this](float x, float y) { sheetLastY_ = y; sheetDownX_ = x; sheetDownY_ = y; sheetMoved_ = 0; },
         [this](float, float y) { sheetScroll_ -= y - sheetLastY_; sheetMoved_ += std::fabs(y - sheetLastY_); sheetLastY_ = y; },
-        [this, rows, rh]() {
+        [this, items, cols, cw, rh, gap]() {
             if (sheetMoved_ > 8) return;
-            const int idx = (int)((sheetLastY_ - sheetList_.y + sheetScroll_) / rh);
-            if (idx >= 0 && idx < (int)rows.size() && !rows[(size_t)idx].head) { app_.loadEntry(rows[(size_t)idx].entry, app_.audition()); }   // the sheet stays open: browse and hear
+            const int col = (int)((sheetDownX_ - sheetList_.x) / (cw + gap)), row = (int)((sheetDownY_ - sheetList_.y + sheetScroll_) / (rh + gap)), k = row * cols + col;
+            if (col >= 0 && col < cols && row >= 0 && k >= 0 && k < (int)items.size()) app_.loadEntry(items[(size_t)k], app_.audition());
         });
+}
+// the FX browser: every effect by kind; the dot says which are on; tap one to go to its knob (MASTER = the whole mix, TRACK = the selected track)
+void SamplerUI::fxSheet() {
+    rrect({0, 0, W_, H_}, 0, theme::withAlpha(BG, 200));
+    tap({0, 0, W_, H_}, [this] { fxOpen_ = false; });
+    const Rect box{W_ * 0.14f, 14, W_ * 0.72f, H_ - 28};
+    rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 1);
+    tap(box, [] {});
+    text(box.x + 14, box.y + 20, T_TITLE, TEXT, "EFFECTS", 0, true);
+    button({box.x + box.w - 70, box.y + 6, 60, 28}, "CLOSE", false, [this] { fxOpen_ = false; }, 10);
+    button({box.x + box.w - 250, box.y + 6, 80, 28}, "MASTER", !fxTrack_, [this] { fxTrack_ = false; }, 10);
+    button({box.x + box.w - 166, box.y + 6, 92, 28}, "TRACK " + std::to_string(app_.track() + 1), fxTrack_, [this] { fxTrack_ = true; }, 10);
+    const FxParams fp = fxTrack_ ? app_.trackParams(app_.track()) : app_.masterParams();
+    const auto& cat = SamplerApp::fxCatalog();
+    const float colW = (box.w - 16 - 16) / 3, rh = 28; float colY[3] = {box.y + 46, box.y + 46, box.y + 46};
+    // three columns of kinds, the biggest kind first, each into the shortest column; a kind is a caption and its effects
+    std::vector<std::string> kinds; for (const auto& f : cat) if (std::find(kinds.begin(), kinds.end(), f.cat) == kinds.end()) kinds.push_back(f.cat);
+    auto count = [&](const std::string& k) { int n = 0; for (const auto& f : cat) if (k == f.cat) n++; return n; };
+    std::stable_sort(kinds.begin(), kinds.end(), [&](const std::string& a, const std::string& b) { return count(a) > count(b); });
+    for (const auto& kd : kinds) {
+        const int col = (int)(std::min_element(colY, colY + 3) - colY); float& y = colY[col]; const float x = box.x + 8 + col * (colW + 8);
+        text(x + 2, y + 8, T_CAPTION, DIM, kd, 0, true); y += 18;
+        for (const auto& f : cat) {
+            if (kd != f.cat) continue;
+            const SamplerApp::Page pg = fxTrack_ ? f.track : f.master; const bool has = pg != SamplerApp::kPages, on = has && f.on && f.on(fp);
+            const Rect c{x, y, colW, rh - 3};
+            rrect(c, R_CONTROL, has ? SURFACE : BG); stroke(c, R_CONTROL, on ? ACCENT : OUTLINE, on ? 2 : 1);
+            text(c.x + 24, c.y + c.h / 2, T_BODY - 1, has ? TEXT : DIM, fit(f.name, colW - 30, T_BODY - 1), 0, on);
+            if (on) circle(c.x + 12, c.y + c.h / 2, 4.f, ACCENT); else if (has) circle(c.x + 12, c.y + c.h / 2, 3.f, OUTLINE);
+            if (has) tap(c, [this, pg] { fxOpen_ = false; app_.gotoPage(pg); });
+            y += rh;
+        }
+        y += 8;
+    }
 }

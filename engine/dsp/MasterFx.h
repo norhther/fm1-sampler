@@ -15,6 +15,7 @@ struct FxParams {
     float filter = 0.5f;                                                // DJ filter: below 0.5 low-pass sweeping down, above 0.5 high-pass sweeping up
     float crush = 0, tapeStop = 0, tsDown = 1.8f, tsUp = 1.8f;   // tape stop: depth, seconds to run down, seconds to spin up
     float spring = 0, springDamp = 0.5f, phone = 0, punch = 0;   // OP-1 style: spring reverb (mix, damping), phone (telephone band + grit), punch (transients + saturation)
+    float fold = 0, autopan = 0, vinyl = 0, vowel = 0;   // FX 4: wave folder, auto pan (one turn every two beats), vinyl (crackle, hiss, dull top), vowel (a formant filter that walks A E I O U)
     int repeat = 0;    // 0 off, 1..4: 1/4, 1/8, 1/16, 1/32 of a beat... (note values: 1/4 = one beat)
     int reverse = 0;   // the same slices, played backwards
     int gate = 0;      // 0 off, 1..3: 1/8, 1/16, 1/32
@@ -38,6 +39,7 @@ public:
         return p_.chorus > 0.004f || p_.flanger > 0.004f || p_.phaser > 0.004f || p_.comp >= 0.01f || std::fabs(p_.width - 0.5f) >= 0.01f
             || p_.drive > 0.004f || eqOn() || p_.tremolo > 0.004f || p_.wah > 0.004f || p_.ringmod > 0.004f
             || std::fabs(p_.filter - 0.5f) >= 0.02f || p_.crush >= 0.005f || p_.tapeStop > 0.02f || tsOn_ || p_.spring > 0.004f || p_.phone > 0.004f || p_.punch > 0.004f
+            || p_.fold > 0.004f || p_.autopan > 0.004f || p_.vinyl > 0.004f || p_.vowel > 0.004f
             || p_.repeat > 0 || p_.reverse > 0 || p_.gate > 0 || p_.freeze > 0;
     }
     void feedOnly(const float* x, int n) {
@@ -54,6 +56,7 @@ public:
     // x: interleaved stereo, in place. beat0: the beat position at the first sample, beatsPerSample: the tempo.
     void process(float* x, int n, double beat0, double beatsPerSample) {
         drive(x, n);
+        fold(x, n);
         punch(x, n);
         eq(x, n);
         chorus(x, n);
@@ -66,6 +69,9 @@ public:
         djFilter(x, n);
         crush(x, n);
         phone(x, n);
+        vowel(x, n);
+        vinyl(x, n);
+        autopan(x, n, beat0, beatsPerSample);
         gate(x, n, beat0, beatsPerSample);
         slicer(x, n, beatsPerSample > 0 ? 1.0 / beatsPerSample : sr_ * 0.5);
         spring(x, n);
@@ -79,6 +85,46 @@ private:
         if (p_.drive < 0.004f) return;
         const float g = 1.f + p_.drive * 14.f, makeup = 1.f / (1.f + (g - 1.f) * 0.22f), mix = std::min(1.f, p_.drive * 3.f);
         for (int i = 0; i < n * 2; i++) { const float d = x[i], w = std::tanh(d * g) * makeup * 1.6f; x[i] = d + (w - d) * mix; }
+    }
+    // ---- fold: a wave folder: the peaks that pass the ceiling turn back instead of clipping, so the sound gets new, bright overtones ----
+    void fold(float* x, int n) {
+        if (p_.fold < 0.004f) return;
+        const float g = 1.f + p_.fold * 6.f, mix = std::min(1.f, p_.fold * 4.f);
+        for (int i = 0; i < n * 2; i++) { const float d = x[i], w = std::sin(d * g * 1.2f) * 0.8f; x[i] = d + (w - d) * mix; }
+    }
+    // ---- vowel: three formant band-passes that walk A, E, I, O, U as the knob goes up (the first bit of the knob is only the mix) ----
+    void vowel(float* x, int n) {
+        if (p_.vowel < 0.004f) { if (vwOn_) { vwOn_ = false; for (auto& f : vw_) f.reset(); } return; }
+        static const float F[5][3] = {{800, 1150, 2900}, {400, 1600, 2700}, {350, 1700, 2700}, {450, 800, 2830}, {325, 700, 2530}};
+        vwOn_ = true;
+        const float pos = clampf(p_.vowel, 0.f, 1.f) * 3.999f, fr = pos - std::floor(pos); const int a = (int)pos;
+        for (int b = 0; b < 3; b++) { vw_[b].k = 0.22f; vw_[b].set(F[a][b] * std::pow(F[a + 1][b] / F[a][b], fr), (float)sr_); }
+        const float mix = std::min(1.f, p_.vowel * 5.f), wg[3] = {1.f, 0.7f, 0.4f};
+        for (int i = 0; i < n; i++) for (int c = 0; c < 2; c++) {
+            const float d = x[2 * i + c]; float w = 0.f;
+            for (int b = 0; b < 3; b++) { float lp, hp; vw_[b].run(c, d, lp, hp); w += (d - hp - lp) * wg[b]; }   // d - hp - lp: the band-pass, unity at its centre
+            x[2 * i + c] = d + (w * 1.1f - d) * mix;
+        }
+    }
+    // ---- vinyl: the top is dulled, a little hiss, and pops and crackle at random (more of them as the knob goes up) ----
+    void vinyl(float* x, int n) {
+        if (p_.vinyl < 0.004f) return;
+        const float a = 1.f - std::exp(-2.f * kPi * (14000.f - 9000.f * p_.vinyl) / sr_), dens = (3.f + 90.f * p_.vinyl) / sr_, hiss = 0.0025f * p_.vinyl;
+        for (int i = 0; i < n; i++) {
+            vyRng_ = vyRng_ * 1664525u + 1013904223u; const float r = (vyRng_ >> 8) / 16777216.f;
+            if (r < dens) { vyPop_ = ((vyRng_ & 1) ? 1.f : -1.f) * (0.05f + 0.25f * ((vyRng_ >> 4) & 255) / 255.f) * (0.5f + p_.vinyl); }
+            vyPop_ *= 0.55f;   // a pop dies in a few samples
+            const float nz = ((vyRng_ >> 12) / 524288.f - 1.f) * hiss;
+            for (int c = 0; c < 2; c++) { vyLp_[c] += a * (x[2 * i + c] - vyLp_[c]); x[2 * i + c] = vyLp_[c] + vyPop_ + nz; }
+        }
+    }
+    // ---- auto pan: the sound swings left and right, one turn every two beats ----
+    void autopan(float* x, int n, double beat0, double bps) {
+        if (p_.autopan < 0.004f) return;
+        for (int i = 0; i < n; i++) {
+            const float pan = 0.5f + 0.5f * p_.autopan * std::sin(2.f * kPi * (float)std::fmod((beat0 + i * bps) * 0.5, 1.0));
+            x[2 * i] *= std::cos(pan * kPi * 0.5f) * 1.4142f; x[2 * i + 1] *= std::sin(pan * kPi * 0.5f) * 1.4142f;
+        }
     }
     // ---- punch: the attack of every hit is pushed up (fast level against slow level), then a little saturation glues it ----
     void punch(float* x, int n) {
@@ -373,6 +419,7 @@ private:
     float cmpEnv_ = 0;
     float puF_ = 0, puS_ = 0;                                                   // punch: fast and slow level
     float phHp_[2] = {0, 0}, phHp2_[2] = {0, 0}, phLp1_[2] = {0, 0}, phLp2_[2] = {0, 0}, phHold_[2] = {0, 0}; int phCnt_ = 0; uint32_t phRng_ = 5;   // phone
+    Svf vw_[3]; bool vwOn_ = false; float vyLp_[2] = {0, 0}, vyPop_ = 0; uint32_t vyRng_ = 11;   // vowel, vinyl
     static constexpr int kSpAp = 20; static constexpr size_t kSpD = 4096;       // spring: allpass stages, loop delay
     std::vector<float> spD_ = std::vector<float>(kSpD, 0.f); float spZ_[kSpAp] = {}; size_t spW_ = 0; float spLp_ = 0; bool spOn_ = false;
 };

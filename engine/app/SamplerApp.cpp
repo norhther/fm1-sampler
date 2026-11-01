@@ -14,7 +14,7 @@ namespace {
 constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)); }
 // The palette of the FM-1 screens (and of the phone): ink, paper, one amber accent.
 constexpr uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38);
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM", "NEAPM", "NEAPJ", "PERSN", "HUNGJ", "LYDDM", "ALTRD", "LYDAG", "DOR#4", "SPAN8", "INSEN", "IWATO", "YO", "EGYPT", "MAJBL", "PROMT", "ENIGM", "OCTWH", "LOCR2", "MAJ6P", "MIN6P"};
 const char* kModeName[] = {"KEY", "CHORD", "SNAP"};
@@ -104,6 +104,8 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "Track effects, part 4: spring reverb, phone, punch, beat repeat. Only this track.",         // TFX4
     "TAPE STOP of the top bar: run-down time, spin-up time, depth, HOLD or LATCH.",   // TSTOP
     "PATTERN on/off. KEYS: a key starts it, other keys transpose. LAUNCH: beat or bar.",   // TRIG
+    "Wave fold, auto pan, vinyl crackle and a vowel filter on the whole mix.",                 // FX4
+    "Track effects, part 5: wave fold, auto pan, vinyl, vowel. Only this track.",              // TFX5
 };
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }
@@ -111,10 +113,10 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX", "TAPE"}; return n[m % kModes]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][8] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
+    static const Page p[kModes][9] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN}};
     return p[m % kModes];
 }
-int SamplerApp::modePageCount(int m) { static const int n[kModes] = {8, 8, 6, 8, 4}; return n[m % kModes]; }
+int SamplerApp::modePageCount(int m) { static const int n[kModes] = {8, 9, 6, 9, 4}; return n[m % kModes]; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -317,11 +319,12 @@ void SamplerApp::applyFx() {
     s_.setRetLevel(0, reverbDw_);
     s_.setDelay(0.05f + delayTime_ * 1.45f, delayFb_ * 0.95f);
 }
-void SamplerApp::applyMasterFx() {
+FxParams SamplerApp::masterParams() const {
     FxParams p; p.chorus = chorus_; p.flanger = flanger_; p.phaser = phaser_; p.comp = comp_; p.width = width_; p.filter = djFilter_; p.crush = crush_; p.repeat = repeat_; p.gate = gate_;
-    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStopHeld_ ? tsDepth_ : tapeStop_; p.tsDown = 0.3f * std::pow(20.f, tsDown_); p.tsUp = tsUp_ < 0.02f ? 0.f : 0.1f * std::pow(40.f, tsUp_); p.spring = spring_; p.springDamp = springDamp_; p.phone = phone_; p.punch = punch_; p.reverse = reverse_; p.freeze = freeze_;
-    s_.setMasterFx(p);
+    p.drive = drive_; p.eqLow = eqLow_; p.eqMid = eqMid_; p.eqHigh = eqHigh_; p.tremolo = tremolo_; p.wah = wah_; p.ringmod = ringmod_; p.tapeStop = tapeStopHeld_ ? tsDepth_ : tapeStop_; p.tsDown = 0.3f * std::pow(20.f, tsDown_); p.tsUp = tsUp_ < 0.02f ? 0.f : 0.1f * std::pow(40.f, tsUp_); p.spring = spring_; p.springDamp = springDamp_; p.phone = phone_; p.punch = punch_; p.fold = fold_; p.autopan = autopan_; p.vinyl = vinyl_; p.vowel = vowel_; p.reverse = reverse_; p.freeze = freeze_;
+    return p;
 }
+void SamplerApp::applyMasterFx() { s_.setMasterFx(masterParams()); }
 void SamplerApp::applyTempo() {
     s_.setMetronome(metro_ != 0, metroVol_);
     s_.setTakeQuant(takeQuant_);
@@ -332,13 +335,14 @@ void SamplerApp::applyTempo() {
     s_.setSwing(0.5f + 0.25f * swing_);
 }
 void SamplerApp::applyTomb() { s_.tombolaSet((tSpin_ - 0.5f) * 14.f, tGrav_, tMass_, tShape_); }
-void SamplerApp::applyTrackFx(int t) {
+FxParams SamplerApp::trackParams(int t) const {
     const TrackState& x = ts_[t];
     FxParams p; p.filter = x.tfDj; p.chorus = x.tfChorus; p.crush = x.tfCrush; p.gate = x.tfGate; p.eqLow = x.tfEqLow; p.eqMid = x.tfEqMid; p.eqHigh = x.tfEqHigh; p.comp = x.tfComp;
     p.drive = x.tfDrive; p.flanger = x.tfFlanger; p.phaser = x.tfPhaser; p.tremolo = x.tfTremolo; p.wah = x.tfWah; p.ringmod = x.tfRing; p.width = x.tfWidth;
-    p.spring = x.tfSpring; p.phone = x.tfPhone; p.punch = x.tfPunch; p.repeat = x.tfRepeat; p.freeze = x.tfFreeze;
-    s_.setTrackFx(t, p);
+    p.spring = x.tfSpring; p.phone = x.tfPhone; p.punch = x.tfPunch; p.fold = x.tfFold; p.autopan = x.tfAutopan; p.vinyl = x.tfVinyl; p.vowel = x.tfVowel; p.repeat = x.tfRepeat; p.freeze = x.tfFreeze;
+    return p;
 }
+void SamplerApp::applyTrackFx(int t) { s_.setTrackFx(t, trackParams(t)); }
 void SamplerApp::applyPattern(int t) { s_.seqSetBars(t, ts_[t].seqBars + 1); s_.seqSetState(t, ts_[t].seqState); }
 void SamplerApp::queueCommit(int t) { commitAt_ = nowMs_ + 350; commitTrack_ = t; }   // the offline stretch / pitch runs once the knob rests
 void SamplerApp::setAlgo(int a) { ts_[track_].algo = ((a % 6) + 6) % 6; applyAlgo(track_); }
@@ -588,6 +592,12 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[2] = cont("PUNCH", &x.tfPunch, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
         k[3] = choice("BEAT REPEAT", &x.tfRepeat, {kRepeat[0], kRepeat[1], kRepeat[2], kRepeat[3], kRepeat[4]}, [=] { applyTrackFx(t); });
         break;
+    case P_TFX5:
+        k[0] = cont("WAVE FOLD", &x.tfFold, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
+        k[1] = cont("AUTO PAN", &x.tfAutopan, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
+        k[2] = cont("VINYL", &x.tfVinyl, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
+        k[3] = cont("VOWEL", &x.tfVowel, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
+        break;
     case P_TRIG: {
         k[0] = patternTransport(t);
         k[1] = choice("KEYS", &x.keyTrig, {"PLAY SOUND", "PLAY PATTERN"}, [=] { setKeyTrigger(t, ts_[t].keyTrig != 0); }, true);
@@ -674,6 +684,12 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[1] = cont("SPRING DAMP", &springDamp_, [](float v) { return pct(v); }, [=] { applyMasterFx(); });
         k[2] = cont("PHONE", &phone_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
         k[3] = cont("PUNCH", &punch_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
+        break;
+    case P_FX4:
+        k[0] = cont("WAVE FOLD", &fold_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
+        k[1] = cont("AUTO PAN", &autopan_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
+        k[2] = cont("VINYL", &vinyl_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
+        k[3] = cont("VOWEL", &vowel_, [](float v) { return v < 0.02f ? std::string("OFF") : pct(v); }, [=] { applyMasterFx(); });
         break;
     case P_TOMB: {   // balls bounce in a turning drum and play their notes when they hit the wall: play keys to drop balls
         k[0] = cont("SPIN", &tSpin_, [](float v) { return fmt("%+.1f", (v - 0.5f) * 14.f); }, [=] { applyTomb(); }, 0.01f);
@@ -1188,4 +1204,38 @@ void SamplerApp::hero(uint32_t now, const Knobs& k) {
         }
     }
     (void)k; (void)now;
+}
+
+// ---- the FX browser: every effect, by kind, with the page of its knob (master or track) and whether it is on ----
+const std::vector<SamplerApp::FxItem>& SamplerApp::fxCatalog() {
+    constexpr Page N = kPages;   // no page: the effect does not exist on that side
+    auto d = [](float v, float rest) { return std::fabs(v - rest) >= 0.02f; };
+    static const std::vector<FxItem> c = {
+        {"DJ FILTER", "FILTER", P_LIVE, P_TFX, [d](const FxParams& p) { return d(p.filter, 0.5f); }},
+        {"EQ", "FILTER", P_TONE, P_TEQ, [d](const FxParams& p) { return d(p.eqLow, 0.5f) || d(p.eqMid, 0.5f) || d(p.eqHigh, 0.5f); }},
+        {"AUTO WAH", "FILTER", P_MOD, P_TFX3, [](const FxParams& p) { return p.wah > 0.01f; }},
+        {"VOWEL", "FILTER", P_FX4, P_TFX5, [](const FxParams& p) { return p.vowel > 0.01f; }},
+        {"DRIVE", "DRIVE", P_TONE, P_TFX2, [](const FxParams& p) { return p.drive > 0.01f; }},
+        {"WAVE FOLD", "DRIVE", P_FX4, P_TFX5, [](const FxParams& p) { return p.fold > 0.01f; }},
+        {"CRUSH", "DRIVE", P_LIVE, P_TFX, [](const FxParams& p) { return p.crush > 0.01f; }},
+        {"PUNCH", "DRIVE", P_FX3, P_TFX4, [](const FxParams& p) { return p.punch > 0.01f; }},
+        {"PHONE", "DRIVE", P_FX3, P_TFX4, [](const FxParams& p) { return p.phone > 0.01f; }},
+        {"COMPRESSOR", "DRIVE", P_FX2, P_TEQ, [](const FxParams& p) { return p.comp > 0.01f; }},
+        {"CHORUS", "MOTION", P_FX2, P_TFX, [](const FxParams& p) { return p.chorus > 0.01f; }},
+        {"FLANGER", "MOTION", P_FX2, P_TFX2, [](const FxParams& p) { return p.flanger > 0.01f; }},
+        {"PHASER", "MOTION", P_FX2, P_TFX2, [](const FxParams& p) { return p.phaser > 0.01f; }},
+        {"TREMOLO", "MOTION", P_MOD, P_TFX2, [](const FxParams& p) { return p.tremolo > 0.01f; }},
+        {"RING MOD", "MOTION", P_MOD, P_TFX3, [](const FxParams& p) { return p.ringmod > 0.01f; }},
+        {"AUTO PAN", "MOTION", P_FX4, P_TFX5, [](const FxParams& p) { return p.autopan > 0.01f; }},
+        {"WIDTH", "MOTION", P_MOD, P_TFX3, [d](const FxParams& p) { return d(p.width, 0.5f); }},
+        {"REVERB / DELAY", "SPACE", P_FX, P_MIX, nullptr},
+        {"SPRING", "SPACE", P_FX3, P_TFX4, [](const FxParams& p) { return p.spring > 0.01f; }},
+        {"VINYL", "SPACE", P_FX4, P_TFX5, [](const FxParams& p) { return p.vinyl > 0.01f; }},
+        {"BEAT REPEAT", "LIVE", P_LIVE, P_TFX4, [](const FxParams& p) { return p.repeat > 0; }},
+        {"TRANCE GATE", "LIVE", P_LIVE, P_TFX, [](const FxParams& p) { return p.gate > 0; }},
+        {"REVERSE", "LIVE", P_LIVE2, N, [](const FxParams& p) { return p.reverse > 0; }},
+        {"FREEZE", "LIVE", P_LIVE2, P_TFX3, [](const FxParams& p) { return p.freeze > 0; }},
+        {"TAPE STOP", "LIVE", P_TSTOP, N, nullptr},
+    };
+    return c;
 }

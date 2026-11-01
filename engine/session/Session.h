@@ -30,6 +30,7 @@ public:
         float track_peak[kTracks];
         bool track_has_clip[kTracks], track_clip_rec[kTracks];
         uint32_t cpu_permille;   // audio block time / block duration, smoothed
+        uint32_t cpu_peak_permille;   // the slowest call lately (falls off over a few seconds): a spike is what you hear as a crackle
         bool freeRecording; float freeSeconds;
         bool freeArmed;          // free take armed: waiting for the first sound
         int sampleState;         // 0 idle, 1 recording, 2 working, 3 waiting for sound

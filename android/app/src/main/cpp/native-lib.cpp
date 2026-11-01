@@ -177,6 +177,7 @@ FN(void, uiLink)(JNIEnv*, jclass, jlong h, jboolean midi, jboolean usb) { auto& 
 FN(jobjectArray, uiFrame)(JNIEnv* env, jclass, jlong h, jfloat w, jfloat hh, jfloat top, jfloat bottom, jlong now) {
     auto& e = *E(h);
     std::lock_guard<std::mutex> l(e.surfaceMtx);
+    e.ui->setXruns(e.stream ? e.stream->getXRunCount().value() : -1);
     e.ui->setSize(w, hh, top, bottom);
     e.ui->frame((uint32_t)now);
     const auto& ops = e.ui->ops();

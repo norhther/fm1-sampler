@@ -13,6 +13,7 @@ public:
     explicit SamplerUI(SamplerApp& app);
     void setSize(float w, float h, float topInset, float bottomInset) { W_ = w; H_ = h; top_ = topInset; bottom_ = bottomInset; }
     void setLink(bool midi, bool usbAudio) { linkMidi_ = midi; linkAudio_ = usbAudio; }
+    void setXruns(int n) { xruns_ = n; }   // the audio stream's underruns so far (-1: unknown)
     void frame(uint32_t nowMs);
     const std::vector<UiOp>& ops() const { return ops_; }
     void touch(int action /*0 down 1 move 2 up*/, float x, float y, uint32_t nowMs) { touchP(0, action, x, y, nowMs); }
@@ -21,6 +22,8 @@ public:
     bool takeHaptic() { const bool h = haptic_; haptic_ = false; return h; }                     // a touch landed on a control: the phone should tick
     std::string takeAnnounce() { std::string s; s.swap(announce_); return s; }                    // a message for the screen reader (TalkBack)
     void openMenu() { menuOpen_ = true; }
+    void openLibraryBrowser() { openLibrary(); }
+    void openFxBrowser(bool track) { fxOpen_ = true; fxTrack_ = track; }
     bool menuOpen() const { return menuOpen_; }
     bool tourOpen() const { return tourOpen_; }
     void openTour() { tourOpen_ = true; tourStep_ = 0; menuOpen_ = false; }
@@ -60,7 +63,7 @@ private:
     void trackList(Rect r);
     void sampleArea(Rect r);
     void pagePanel(Rect r);
-    void librarySheet();
+    void librarySheet(); void openLibrary(); void fxSheet();
     void projectSheet();
     void songSheet();
     void sequencerView(Rect r);
@@ -77,8 +80,8 @@ private:
     uint16_t padMask_ = 0;   // the pads that are down
     uint32_t now_ = 0;
     Session::Status st_{};
-    bool linkMidi_ = false, linkAudio_ = false, sheetOpen_ = false;
-    float sheetScroll_ = 0, sheetLastY_ = 0, sheetMoved_ = 0;
+    bool linkMidi_ = false, linkAudio_ = false, sheetOpen_ = false, fxOpen_ = false, fxTrack_ = false;
+    float sheetScroll_ = 0, sheetLastY_ = 0, sheetMoved_ = 0, sheetDownX_ = 0, sheetDownY_ = 0; std::string libGroup_;
     Rect sheetList_{0, 0, 0, 0};
     float rollBase_ = 54, rollScroll_ = 0, rollDownX_ = 0, rollDownY_ = 0, rollStartBase_ = 54, rollStartScroll_ = 0; bool rollMoved_ = false;   // piano roll: lowest note shown, first tick shown, touch state
     float rollZoom_ = 1.f, rollRowsF_ = 12.f;   // (12 rows: big enough to hit with a finger)
@@ -97,7 +100,7 @@ private:
     void askTapeClear(int track);   // -1: the whole tape
     void confirmSheet(); void menuSheet(); void tourSheet(); void trackMenuSheet(); void mixerView(Rect r); void flowStrip(Rect r); void undoToast();
     void showUndo(const std::string& msg) { undoMsg_ = msg; undoMsgAt_ = now_ ? now_ : 1; }
-    bool menuOpen_ = false, tourOpen_ = false, tourSeen_ = false, haptic_ = false; int tourStep_ = 0, trackMenu_ = -1, tapeTop_ = 0, tapeSeen_ = -1;   // tapeTop_: the first lane the tape page shows (8 at most at once)
+    bool menuOpen_ = false, tourOpen_ = false, tourSeen_ = false, haptic_ = false; int xruns_ = -1, tourStep_ = 0, trackMenu_ = -1, tapeTop_ = 0, tapeSeen_ = -1;   // tapeTop_: the first lane the tape page shows (8 at most at once)
     float textScale_ = 1.f; uint32_t undoMsgAt_ = 0;
     std::string announce_, lastToast_, undoMsg_;
     Rect rTracks_{0, 0, 0, 0}, rPanel_{0, 0, 0, 0}, rArea_{0, 0, 0, 0}, rRec_{0, 0, 0, 0}, rUndo_{0, 0, 0, 0}, rTempo_{0, 0, 0, 0};   // where things are, for the tour
