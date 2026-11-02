@@ -564,13 +564,16 @@ struct Session::Impl {
         if (t.arpOn) { if (vel) t.arp.noteOn(note); else t.arp.noteOff(note); }
         else t.pending.push_back({note, vel});
     }
-    void startCount(int kind) {
-        counting = true; countKind = kind; countLeft = countIn * 4.0 * samplesPerBeat(); freeBeat = 0; playing = false; clickEnv = 0;
+    int countTrack = -1;   // kind 3 (record over the tape from a bar): the track that records when the clicks end
+    void clipRecOn(int t) { auto& tr = *tracks[(size_t)t]; if (!tr.clipRec) { tapeCheckpoint(t); tr.recWrote = false; } tr.clipRec = true; }
+    void startCount(int kind, int bars = -1) {
+        counting = true; countKind = kind; countLeft = (bars < 0 ? countIn : bars) * 4.0 * samplesPerBeat(); freeBeat = 0; playing = false; clickEnv = 0;
     }
     void endCount() {
         counting = false;
         if (countKind == 1 && freeArmed) { freeArmed = false; a_freeArmed = false; freeRec = true; playing = true; pos = 0; clickEnv = 0; }
         else if (countKind == 2) { playing = true; if (loopSamples == 0) pos = 0; }
+        else if (countKind == 3) { playing = true; if (countTrack >= 0) clipRecOn(countTrack); countTrack = -1; }
         countKind = 0;
     }
 
@@ -1002,10 +1005,29 @@ void Session::process(float* out, const float* in, int frames) {
 // ---- transport and notes ----
 void Session::play(bool on) {
     d->post([this, on] {
-        if (!on) { d->counting = false; d->countKind = 0; d->bounceCancel(); }
+        if (!on) { d->counting = false; d->countKind = 0; d->countTrack = -1; d->bounceCancel(); }
         if (!on && (d->freeRec || d->freeArmed)) d->freeStop();
         d->playing = on;
         if (!on) for (auto& t : d->tracks) d->releaseAll(*t);
+    });
+}
+void Session::seek(int bar) {   // the tape head goes to the start of a bar (0 = the start); tapes of every speed follow
+    d->post([this, bar] {
+        if (d->loopSamples <= 0) return;
+        const int bars = std::max(1, d->loopBars);
+        const double p = (double)d->loopSamples * std::min(std::max(bar, 0), bars - 1) / bars;
+        d->pos = p; d->tapePos = p;
+    });
+}
+void Session::recordFrom(int track, int bar, int countBars) {   // record over the tape from a bar, after countBars bars of clicks (0 = at once)
+    if (track < 0 || track >= kTracks) return;
+    seek(bar);
+    d->post([this, track, countBars] {
+        if (d->loopSamples <= 0) return;
+        for (auto& t : d->tracks) d->releaseAll(*t);
+        d->countTrack = track;
+        if (countBars > 0) d->startCount(3, std::min(countBars, 8));
+        else { d->playing = true; d->clipRecOn(track); d->countTrack = -1; }
     });
 }
 void Session::silence() {

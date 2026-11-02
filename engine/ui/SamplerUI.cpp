@@ -143,7 +143,9 @@ void SamplerUI::topBar(Rect r) {
     if (st_.playing) { rrect({pl.x + 15, cy - 8, 5, 16}, 0, ACCENT); rrect({pl.x + 24, cy - 8, 5, 16}, 0, ACCENT); }
     else tri(pl.x + 16, cy - 9, pl.x + 16, cy + 9, pl.x + 30, cy, TEXT);
     tap(pl, [this] { app_.transportPlay(); });
-    x += 52;
+    x += 48;
+    { Rect sp{x, 6, 34, bh}; rrect(sp, R_CONTROL, RAISED); rrect({sp.x + 11, cy - 6, 12, 12}, 1, TEXT); tap(sp, [this] { app_.transportStop(); }); }   // STOP: back to the start of the tape
+    x += 42;
     // REC: arms the first take on a clean looper, overdub afterwards
     Rect rc{x, 6, 74, bh};
     const bool recOn = st_.freeRecording || st_.track_clip_rec[app_.track()], armed = st_.freeArmed;
@@ -190,8 +192,8 @@ void SamplerUI::topBar(Rect r) {
           button({mx, 6, 78, bh}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
           mx += 86;
       }
-      text(mx, cy - 6, 11, st_.freeRecording || recOn || armed ? ACCENT : TEXT, fit(app_.loopText(), right - mx, 11), 0, true);
-      text(mx, cy + 11, 9, DIM, fit(std::string("LOOP SOURCE: ") + (app_.knobs(SamplerApp::P_SAVE)[1].value), right - mx, 9), 0, false);
+      text(mx, cy - 6, 11, st_.freeRecording || recOn || armed ? ACCENT : TEXT, fit(app_.loopExists() ? std::to_string(std::max(1, st_.loopBars)) + (st_.loopBars == 1 ? " BAR" : " BARS") : app_.loopText(), right - mx, 11), 0, true);
+      text(mx, cy + 11, 9, DIM, fit(std::string("SRC: ") + (app_.knobs(SamplerApp::P_SAVE)[1].value), right - mx, 9), 0, false);
       tap({mx - 4, 0, std::max(60.f, right - mx), r.h}, [this] { auto k = app_.knobs(SamplerApp::P_SAVE); k[1].step(k[1].norm > 0.5f ? -1 : 1); }); }
 }
 
@@ -422,8 +424,16 @@ void SamplerUI::tapeView(Rect r) {   // like the OP-1 tape: two reels and the he
           if (has) button({bx, r.y + 2, 70, 26}, "UNDO TAKE", st_.globalUndoN > 0, [this] { app_.globalUndo(); }, 9.f);
           else if (!rec && !st_.freeArmed) button({bx, r.y + 2, 70, 26}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.f); } }
     const int nT = app_.trackCount(), vis = std::min(nT, 8);
-    const float labW = 34, ruler = 12, top = r.y + 48 + ruler, xW = 38, sbW = nT > vis ? 14.f : 0.f, laneH = (r.y + r.h - top) / vis, wx = r.x + labW + 4, ww = r.w - labW - 4 - xW - sbW;   // xW: a gutter on the right for each lane's X, so it never covers the waveform
+    const float labW = 34, ruler = 16, top = r.y + 48 + ruler, xW = 38, sbW = nT > vis ? 14.f : 0.f, laneH = (r.y + r.h - top) / vis, wx = r.x + labW + 4, ww = r.w - labW - 4 - xW - sbW;   // xW: a gutter on the right for each lane's X, so it never covers the waveform
     if (has) for (int b = 0; b < bars; b += std::max(1, bars / 16)) text(wx + ww * b / bars + 3, top - ruler / 2 - 1, 8, DIM, std::to_string(b + 1), 0, false);   // the ruler: where each bar starts
+    if (has) {   // tap or drag the ruler: the head goes to that bar; RECORD FROM starts there
+        const Rect rr{wx, top - ruler, ww, ruler};
+        auto go = [this, rr, bars](float px, float) { app_.seekBar((int)std::floor((px - rr.x) / rr.w * bars)); };
+        hit(rr, go, go);
+        const float mx = wx + ww * app_.seekBarNow() / bars; line(mx, top - ruler, mx, top + 4, ACCENT, 2);
+        button({r.x + r.w - 76 - 4 - 92, r.y + 30, 92, 16}, st_.track_clip_rec[app_.track()] || st_.countBeats > 0 ? "STOP RECORDING" : "REC FROM BAR " + std::to_string(app_.seekBarNow() + 1), st_.track_clip_rec[app_.track()] || st_.countBeats > 0, [this] { app_.recordOver(); }, 8.5f);
+        button({r.x + r.w - 76, r.y + 30, 76, 16}, app_.punchCount() ? "COUNT " + std::to_string(app_.punchCount()) + (app_.punchCount() == 1 ? " BAR" : " BARS") : std::string("COUNT OFF"), false, [this] { app_.cyclePunchCount(); }, 8.5f);
+    }
     if (tapeSeen_ != app_.track()) { tapeSeen_ = app_.track(); tapeTop_ = std::min(tapeTop_, app_.track()); tapeTop_ = std::max(tapeTop_, app_.track() - vis + 1); }   // a track picked elsewhere scrolls into view
     tapeTop_ = std::max(0, std::min(tapeTop_, nT - vis));
     if (sbW > 0) {   // a scroll bar: drag it (or tap it) to move through the tracks

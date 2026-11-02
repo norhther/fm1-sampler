@@ -69,6 +69,8 @@ public:
     // ---- transport and notes ----
     void play(bool on);
     void setTrackSpace(int track, bool own, float size /*0..1*/, float sec, float fb);   // OWN SPACE: this track gets its own reverb and delay
+    void seek(int bar);                   // tape head to the start of a bar (0 = the start of the tape)
+    void recordFrom(int track, int bar, int countBars);   // record over the tape from a bar, after countBars bars of metronome (0 = at once)
     void silence();                       // STOP ALL: transport off, every voice and held note released, reverb and delay tails cleared
     void noteOn(int track, int note, int vel);
     void noteOff(int track, int note);

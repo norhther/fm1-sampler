@@ -137,6 +137,14 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.52
+
+- **STOP button** in the top bar (next to play/pause): stops the tape and goes back to the start. It also ends a record-over.
+- **Go to a bar**: tap or drag the bar numbers above the lanes in the TAPE view, the head jumps there (an orange marker shows it), stopped or playing.
+- **Record over from a bar**: REC FROM BAR n goes to that bar, plays COUNT-IN bars of metronome (COUNT button: off, 1 to 4 bars; the tape is silent during the count), then records over the selected track. Press it again (STOP RECORDING) to stop and rewind.
+- **Readable text**: the top bar showed `LOOP 134...` and `LOOP SOURC...`; it now shows the bars and `SRC: ...`. The tape caption is no longer covered by the new buttons.
+- Host-tested (test_app, test_features green, 6 new checks for stop, seek and record-from-bar). Phone screens checked in the host render; not run on a phone or an FM-1. The FM-1 screen has no stop or record-from-bar control yet.
+
 ## v0.51
 
 - **Effects follow the instrument**: each instrument keeps the track effects and the reverb/delay sends you set on it, and gets them back when you load it again. An instrument you have not touched starts clean. The memory is saved with the project (`ifx.N` lines). Before, the effects belonged to the track and stayed the same whatever you loaded.

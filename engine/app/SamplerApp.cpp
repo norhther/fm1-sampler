@@ -836,6 +836,17 @@ void SamplerApp::setTempo(float bpm) {
 
 // ---- looper, recorder ----
 void SamplerApp::transportPlay() { s_.play(!st_.playing); }
+void SamplerApp::transportStop() {
+    if (st_.track_clip_rec[track_]) s_.clipRecord(track_, false);
+    s_.play(false); s_.seek(0); seekBar_ = 0;
+}
+void SamplerApp::seekBar(int bar) { seekBar_ = std::max(0, std::min(bar, std::max(1, st_.loopBars) - 1)); s_.seek(seekBar_); }
+void SamplerApp::recordOver() {
+    if (st_.track_clip_rec[track_] || st_.countBeats > 0) { transportStop(); say("RECORD OVER OFF"); return; }
+    if (!loopAny_) { say("RECORD A FIRST TAKE"); return; }
+    s_.recordFrom(track_, seekBar_, punchCount_);
+    say(punchCount_ ? "COUNT-IN, THEN RECORDING" : "RECORDING OVER THE TAPE");
+}
 void SamplerApp::loopRecord() {
     if (st_.freeArmed || st_.freeRecording) { s_.freeRecord(track_, false); say("LOOP SET"); return; }
     if (st_.bounce) { say("RECORDING THE PATTERN"); return; }

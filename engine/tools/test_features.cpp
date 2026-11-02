@@ -1056,6 +1056,27 @@ static void testLock() {
     app.seqClear(); run(0.2);
 }
 
+// STOP goes back to the start; RECORD FROM a bar: clicks first, then the overdub starts at that bar
+static void testTapeSeek() {
+    const int sr = SAMPLERATE; system("rm -rf /tmp/fm1sampler_tl; mkdir -p /tmp/fm1sampler_tl");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tl"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    std::vector<float> buf(512), loud(512, 0.5f); uint32_t k = 0;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), loud.data(), 256); if (++k % 8 == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1)); } };
+    s.setTempo(120.f); s.setTakeBars(2); s.setLoopSource(0); s.freeRecord(0, true); run(6.0);
+    auto st = s.status(); CHECK(st.loopSamples > 0 && st.loopBars == 2, "a 2 bar tape exists (%d bars)", st.loopBars);
+    s.play(true); run(0.7);
+    s.play(false); s.seek(0); run(0.1); st = s.status();
+    CHECK(!st.playing && st.pos == 0, "STOP rewinds to the start (pos %.0f)", st.pos);
+    s.seek(1); run(0.1); st = s.status();
+    CHECK(std::fabs(st.pos - st.loopSamples / 2.0) < 1.0, "seek to bar 2 puts the head half way (%.0f of %.0f)", st.pos, st.loopSamples);
+    s.recordFrom(0, 1, 1); run(0.5); st = s.status();
+    CHECK(st.countBeats > 0 && !st.playing && !st.track_clip_rec[0], "1 bar of clicks first: not playing, not recording (%d beats left)", st.countBeats);
+    run(2.0); st = s.status();
+    CHECK(st.playing && st.track_clip_rec[0] && st.pos > st.loopSamples / 2.0 - 1, "after the clicks it records from bar 2 (pos %.0f)", st.pos);
+    s.play(false); run(0.1); s.recordFrom(0, 0, 0); run(0.1); st = s.status();
+    CHECK(st.playing && st.track_clip_rec[0], "count-in 0 records at once");
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -1167,6 +1188,7 @@ int main() {
     testTombola();
     testSwing();
     testRollZoom();
+    testTapeSeek();
     testLibrary();
     testPaul();
     testGrid();
