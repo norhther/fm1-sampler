@@ -69,6 +69,7 @@ public:
     // ---- transport and notes ----
     void play(bool on);
     void setTrackSpace(int track, bool own, float size /*0..1*/, float sec, float fb);   // OWN SPACE: this track gets its own reverb and delay
+    void newTape(int bars);                // an empty tape of that many bars at the current tempo (no sound on it yet); only when there is no tape
     void seekPos(double samples);          // tape head to an exact place (samples from the start of the tape; 0 = the start)
     void moveTo(double samples, bool listen);   // the head goes there like a tape (fast, heard when `listen`, backwards too); while the transport plays it jumps
     void setPunchLen(double bars);         // a record or overdub that ends by itself: 0 = when told to, n = after n bars, -1 = at the end of the tape
@@ -102,6 +103,7 @@ public:
     void setStretch(int track, float speed, float semitones, bool commit);     // commit: the knob rested, (re)build the stretched copy offline
     void setLfo(int track, const Lfo& l);
     void setArp(int track, bool on, int rate /*0..11*/, int pattern /*0..4*/, int octaves /*1..4*/, float gate /*0.05..0.95*/);
+    void setTapeOnly(int track, bool on);   // TAPE ONLY: the cassette and the track effects treat the tape of the track only, the live sound stays dry
     void setPrintFx(int track, bool on, bool bake = true);   // the tape of the track holds the sound after its cassette and effects (see Session.cpp)
     void setTape(int track, float sat, float tone, float wobble, float hiss, float mix, float bits);
 

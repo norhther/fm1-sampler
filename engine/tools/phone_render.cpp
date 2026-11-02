@@ -77,6 +77,7 @@ int main(int argc, char** argv) {
     app.gotoPage(SamplerApp::P_TAPEV); ui.frame(now); dump("tape_view");
     app.gotoPage(SamplerApp::P_HEAD); ui.frame(now); dump("head");
     app.gotoPage(SamplerApp::P_TAPEV); ui.openTapeFull(); ui.frame(now); dump("tape_full"); ui.openTapeFull(false);
+    app.gotoPage(SamplerApp::P_HOME); ui.openTrackMenu(0); ui.frame(now); dump("track_menu"); ui.openTrackMenu(-1);
     app.gotoPage(SamplerApp::P_TFX2); ui.frame(now); dump("trackfx2");
     app.gotoPage(SamplerApp::P_PADS); ui.frame(now); dump("pads");
     app.gotoPage(SamplerApp::P_TAPEV);

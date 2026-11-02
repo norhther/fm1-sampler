@@ -137,6 +137,14 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.54
+
+- **Empty tape**: NEW LOOP has a third choice, EMPTY TAPE: a silent tape of 1 to 64 bars at the current tempo, with nothing recorded. Move the head and use REC FROM x.y (with COUNT-IN bars of metronome) to record anywhere on it. OVERDUB works on it too.
+- **Reset sound to defaults**: tap a track, RESET SOUND TO DEFAULTS. The instrument comes back as it was loaded: envelope, LFO, arp, play window, speed, pitch, tuning, synth macros and edits, chops and pad settings. The effects, mix, sends, pattern and tape of the track stay.
+- **Tape only effects** (TAPE tab, PRINT page, K3 FX ON): TAPE ONLY makes the cassette and the effects of the track treat its tape and nothing else. The live sound goes past them, dry, so you can play live effects on the tape while the instrument stays clean. Saved with the project. It is ignored while PRINT FX is on.
+- **Each instrument keeps its own key mode**: scale, root, octave and note / chord mode (KEY page) belong to the track and go with the instrument, like its effects. Changing it on one track does not touch the others; a project keeps one per track (an older project gives every track the one it had). An instrument you have not touched starts with the default (note mode).
+- Host-tested (test_app, test_features green, new checks for the empty tape, the reset, tape only and the key mode per track). Phone screens checked in the host render; not run on a phone or an FM-1. The FM-1 has no reset button and no EMPTY TAPE choice yet; TAPE ONLY is on its PRINT page (K3).
+
 ## v0.53
 
 - **Move the tape like a tape**: drag the bar numbers above the lanes and the head follows your finger (up to 6x speed, backwards too) and you hear the tape go by. A tap puts the head there at once. New page **HEAD** in the TAPE tab: K1 moves the head (knob or encoder), K2 ALIGN (FREE, or snapped to whole bars), K3 LISTEN (hear the tape while it moves, on or off), K4 STOP AFTER.

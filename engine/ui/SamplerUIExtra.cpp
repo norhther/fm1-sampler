@@ -42,11 +42,12 @@ void SamplerUI::newLoopSheet() {
     rrect(box, R_CARD, SURFACE); stroke(box, R_CARD, ACCENT, 2);
     tap(box, [] {});
     text(box.x + 14, box.y + 22, T_TITLE, TEXT, "NEW LOOP ON TRACK " + std::to_string(app_.track() + 1), 0, true);
-    const float cw = (box.w - 36) / 2; float y = box.y + 44;
-    button({box.x + 12, y, cw, 40}, "TAPE (OP-1 STYLE)", !nlSeq_, [this] { nlSeq_ = false; }, 11);
-    button({box.x + 24 + cw, y, cw, 40}, "SEQUENCER", nlSeq_, [this] { nlSeq_ = true; }, 11);
+    const float cw = (box.w - 36) / 2, c3 = (box.w - 32) / 3; float y = box.y + 44;
+    button({box.x + 12, y, c3, 40}, "TAPE (TAKE)", !nlSeq_ && !nlEmpty_, [this] { nlSeq_ = false; nlEmpty_ = false; }, 10.5f);
+    button({box.x + 16 + c3, y, c3, 40}, "EMPTY TAPE", !nlSeq_ && nlEmpty_, [this] { nlSeq_ = false; nlEmpty_ = true; }, 10.5f);
+    button({box.x + 20 + 2 * c3, y, c3, 40}, "SEQUENCER", nlSeq_, [this] { nlSeq_ = true; }, 10.5f);
     y += 48;
-    text(box.x + 14, y + 8, T_CAPTION, DIM, fit(nlSeq_ ? "A PATTERN THAT RECORDS THE KEYS YOU PLAY AND LOOPS. EDIT IT ON THE SEQ PAGE." : "THE FIRST TAKE ON THE TAPE: PLAY, AND IT ENDS BY ITSELF. THEN OVERDUB WITH REC.", box.w - 28, T_CAPTION), 0, false);
+    text(box.x + 14, y + 8, T_CAPTION, DIM, fit(nlSeq_ ? "A PATTERN THAT RECORDS THE KEYS YOU PLAY AND LOOPS. EDIT IT ON THE SEQ PAGE." : nlEmpty_ ? "A SILENT TAPE OF THE LENGTH YOU PICK. MOVE THE HEAD, THEN REC FROM." : "THE FIRST TAKE ON THE TAPE: PLAY, AND IT ENDS BY ITSELF. THEN OVERDUB WITH REC.", box.w - 28, T_CAPTION), 0, false);
     y += 28;
     static const int bars[7] = {1, 2, 4, 8, 16, 32, 64};
     const float bw = (box.w - 24 - 6 * 4) / 7;
@@ -55,10 +56,10 @@ void SamplerUI::newLoopSheet() {
         button({box.x + 12 + i * (bw + 4), y, bw, 40}, std::to_string(bars[i]) + (i == 0 ? " BAR" : ""), nlBars_ == i && !off, [this, i, off] { if (!off) nlBars_ = i; }, 10.5f);
     }
     y += 48;
-    text(box.x + 14, y + 8, T_CAPTION, DIM, fit(nlSeq_ ? "UP TO 16 BARS. IT STARTS RECORDING AT ONCE." : app_.loopExists() ? "THE TAPE ALREADY HAS A LOOP: CLEAR IT FIRST." : "UP TO 64 BARS, AT THE CURRENT TEMPO. REC STARTS IT.", box.w - 28, T_CAPTION), 0, false);
+    text(box.x + 14, y + 8, T_CAPTION, DIM, fit(nlSeq_ ? "UP TO 16 BARS. IT STARTS RECORDING AT ONCE." : nlEmpty_ && !app_.loopExists() ? "UP TO 64 BARS, AT THE CURRENT TEMPO. NOTHING RECORDS YET." : app_.loopExists() ? "THE TAPE ALREADY HAS A LOOP: CLEAR IT FIRST." : "UP TO 64 BARS, AT THE CURRENT TEMPO. REC STARTS IT.", box.w - 28, T_CAPTION), 0, false);
     const float by = box.y + box.h - 58;
     button({box.x + 12, by, cw, 46}, "CANCEL", false, [this] { newLoopOpen_ = false; }, 12);
-    button({box.x + 24 + cw, by, cw, 46}, "START", false, [this] { newLoopOpen_ = false; app_.newLoop(std::min(nlSeq_ ? 16 : 64, bars[nlBars_]), nlSeq_); }, 12, true);
+    button({box.x + 24 + cw, by, cw, 46}, "START", false, [this] { newLoopOpen_ = false; app_.newLoop(std::min(nlSeq_ ? 16 : 64, bars[nlBars_]), nlSeq_, nlEmpty_ && !nlSeq_); }, 12, true);
 }
 
 // ---- a few seconds of UNDO after something that can be undone ----
@@ -147,11 +148,12 @@ void SamplerUI::trackMenuSheet() {
     const std::string lab = app_.sampleLabel(t);
     text(box.x + 14, box.y + 20, T_TITLE, TEXT, "TRACK " + std::to_string(t + 1), 0, true);
     text(box.x + 14, box.y + 40, T_CAPTION, DIM, fit(lab.empty() ? "EMPTY" : lab, box.w - 28, T_CAPTION), 0, false);
-    float y = box.y + 54; const float bw = box.w - 24, bh = 36;
+    float y = box.y + 54; const float bw = box.w - 24, bh = 32;
     auto b = [&](const std::string& s, bool on, std::function<void()> f) { button({box.x + 12, y, bw, bh}, s, on, std::move(f), 10.5f); y += bh + 6; };
     b("OPEN ITS SOUND", false, [this] { trackMenu_ = -1; app_.gotoMode(0); });
     b(app_.state(t).mute ? "UNMUTE" : "MUTE", app_.state(t).mute, [this, t] { app_.toggleMute(t); });
     b("SOLO", app_.state(t).solo, [this, t] { app_.toggleSolo(t); });
+    b("RESET SOUND TO DEFAULTS", false, [this, t] { app_.resetSound(t); trackMenu_ = -1; });
     b("CLEAR ITS PATTERN", false, [this, t] { app_.seqClear(); showUndo("PATTERN OF TRACK " + std::to_string(t + 1) + " CLEARED"); trackMenu_ = -1; });
     if (st_.track_has_clip[t]) { dangerButton({box.x + 12, y, bw, bh}, "ERASE ITS TAPE", [this, t] { trackMenu_ = -1; askTapeClear(t); }, 10.5f); y += bh + 6; }
     { const bool last = t == app_.trackCount() - 1 && app_.trackCount() > SamplerApp::kFmTracks;

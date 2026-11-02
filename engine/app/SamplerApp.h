@@ -236,6 +236,8 @@ public:
         float tfEqLow = 0.5f, tfEqMid = 0.5f, tfEqHigh = 0.5f, tfComp = 0.f, duckAmt = 0.f;   // MIX mode: track EQ and compressor, how far the sidechain pushes this track down
         float padVol[16], padPitch[16], padDecay[16]; int padGroup[16] = {}; int selPad = 0;   // per pad of a kit (PADS page)
         TrackState() { for (int i = 0; i < 16; i++) { padVol[i] = 2.f / 3.f; padPitch[i] = 0.5f; padDecay[i] = 0.5f; } }
+        ScaleState scale;  // the key mode of this instrument: scale, root, octave, and note / chord mode (each track has its own)
+        int tapeOnly = 0;  // TAPE ONLY: the cassette and the effects of this track treat its tape, not the live sound
         int printFx = 0;   // PRINT FX: this track's tape holds the sound after its cassette and effects
         int keyTrig = 0, trigQ = 1, seqOne = 0, chopFull = 0;      // the keys start the pattern (OP-1 style), and when: at once, on the beat, on the bar
         int seqState = 0, seqBars = 3;   // sequencer: OFF / PLAY / REC, pattern length - 1 (1..16 bars)
@@ -294,7 +296,7 @@ public:
     std::vector<std::string> projectList() const;      // newest first
     // NEW LOOP, OP-1 style: the first take of the tape ends by itself after that many bars (`sequencer` false), or a pattern of that many bars (at most 16) starts to record
     // the keys you play and loops, to be edited on the SEQ page (REC on the tape then puts a pass of it on the tape)
-    void newLoop(int bars, bool sequencer);
+    void newLoop(int bars, bool sequencer, bool empty = false);   // empty: a tape of that length with nothing on it, ready for REC FROM
     bool newProject();                                 // keeps the current work (saved), then starts from the app's own defaults
     std::string newProjectName() const;                // "Project 1", "Project 2" ...
     bool saveProject(const std::string& name);         // the tape audio is written in the background
@@ -326,6 +328,9 @@ private:
     void encoder(int i, int delta);
     // ---- parameters ----
     void applyAll(int t);
+public:
+    void resetSound(int t);   // the sound of the track's instrument back to its defaults: envelope, LFO, arp, play window, speed, pitch, tuning, synth macros and edits, chops. Effects, mix and tape stay
+private:
     Knob quantKnob(); Knob tripletKnob();
     void applyShape(int t, bool reslice = false); void applySynthEdit(int t); void applyPad(int t, int pad); void applyPads(int t); void autoTune(); void applyAlgo(int t); void applyEnv(int t); void applyLfo(int t); void applyHome(int t, bool commit = false); void applyArp(int t); void applySeq(int t); void applyMix(int t);
     void applyFx(); void applyTrackSpace(int t);
@@ -423,7 +428,9 @@ private:
     int fxFocusPage_ = -1, fxFocusKnob_ = -1, fxCur_ = -1; bool fxScopeTrack_ = false, fxBrowsed_ = false, fxScopeAuto_ = true;
     void fxCursorStep(int d);
     bool keyGesture(int raw);                    // a key played while a button is held: mute, solo, pick a track
-    ScaleState scale_;
+    ScaleState scale_;   // the key mode of the selected track (a copy of ts_[track_].scale)
+    void scaleOut() { ts_[track_].scale = scale_; }   // the selected track keeps what it has
+    void scaleIn();                                   // ... and the selected track's own comes back
     uint32_t touchedAt_ = 0; int touchedKnob_ = -1;
     std::vector<SurfaceCell> cells_;
     std::vector<uint64_t> rects_;

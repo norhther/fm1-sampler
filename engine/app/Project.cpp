@@ -63,6 +63,7 @@ std::string SamplerApp::stateText() {
     io.i("format", fmtv, 0, 99); io.i("rate", sr, 8000, 192000);
     float tempo = st_.loopSamples > 0 ? st_.bpm : tempo_; int bars = st_.loopSamples > 0 ? st_.loopBars : 0, track = track_;
     io.f("tempo", tempo, 30, 300); io.i("loopBars", bars, 0, 64); io.i("track", track, 0, kTracks - 1); int tc = trackCount_; io.i("trackCount", tc, 8, kTracks);
+    scaleOut();   // the selected track's key mode into its state before it is written
     auto common = [&](Io& x) {
         x.f("reverbSize", reverbSize_); x.f("reverbDw", reverbDw_); x.f("delayTime", delayTime_); x.f("delayFb", delayFb_); x.i("loopSrc", loopSrc_, 0, 1);
         x.f("chorus", chorus_); x.f("phaser", phaser_); x.f("comp", comp_); x.f("width", width_); x.f("djFilter", djFilter_); x.f("crush", crush_);
@@ -88,7 +89,7 @@ std::string SamplerApp::stateText() {
         io.f(k + "tfEqLow", x.tfEqLow); io.f(k + "tfEqMid", x.tfEqMid); io.f(k + "tfEqHigh", x.tfEqHigh); io.f(k + "tfComp", x.tfComp); io.f(k + "duckAmt", x.duckAmt);
         io.i(k + "edW1", x.edW1, 0, 4); io.i(k + "edW2", x.edW2, 0, 4); io.i(k + "edType", x.edType, 0, 2); io.i(k + "edUni", x.edUni, 0, 3); io.i(k + "edVoice", x.edVoice, 0, 3); io.f(k + "edDet2", x.edDet2); io.f(k + "edCut", x.edCut); io.f(k + "edRes", x.edRes);
         io.i(k + "spaceOwn", x.spaceOwn, 0, 1); io.f(k + "spSize", x.spSize); io.f(k + "spTime", x.spTime); io.f(k + "spFb", x.spFb);
-        io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8); io.i(k + "printFx", x.printFx, 0, 1);
+        io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8); io.i(k + "printFx", x.printFx, 0, 1); io.i(k + "tapeOnly", x.tapeOnly, 0, 1); io.i(k + "scale", x.scale.scale, 0, kScaleCount - 1); io.i(k + "scaleRoot", x.scale.root, 0, 11); io.i(k + "scaleOct", x.scale.octave, -3, 3); io.i(k + "scaleMode", x.scale.mode, 0, 23);
         io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
         io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.f(k + "tfFold", x.tfFold); io.f(k + "tfAutopan", x.tfAutopan); io.f(k + "tfVinyl", x.tfVinyl); io.f(k + "tfVowel", x.tfVowel); io.f(k + "tfComb", x.tfComb); io.f(k + "tfCombTune", x.tfCombTune); io.f(k + "tfOctave", x.tfOctave); io.f(k + "tfFshift", x.tfFshift); io.f(k + "tfScratch", x.tfScratch); io.f(k + "tfScratchNoise", x.tfScratchNoise); io.i(k + "tfScratchRate", x.tfScratchRate, 0, 4); io.i(k + "tfScratchStyle", x.tfScratchStyle, 0, 3); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
         int sq = x.seqState == 0 ? 0 : 1, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15); io.i(k + "keyTrig", x.keyTrig, 0, 1); io.i(k + "trigQ", x.trigQ, 0, 2); io.i(k + "seqOne", x.seqOne, 0, 1); io.i(k + "chopFull", x.chopFull, 0, 1);
@@ -122,6 +123,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         x.i("scale", scale_.scale, 0, kScaleCount - 1); x.i("scaleRoot", scale_.root, 0, 11); x.i("scaleOct", scale_.octave, -3, 3); x.i("scaleMode", scale_.mode, 0, 23);
     };
     common(io);
+    for (auto& tr : ts_) tr.scale = scale_;   // an older project: one key mode for every track; a newer one says it per track below
     tempo_ = tempo;
     for (int t = 0; t < kTracks; t++) {
         TrackState& x = ts_[t]; const std::string k = "t" + std::to_string(t) + ".";
@@ -133,7 +135,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
         for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
         io.i(k + "spaceOwn", x.spaceOwn, 0, 1); io.f(k + "spSize", x.spSize); io.f(k + "spTime", x.spTime); io.f(k + "spFb", x.spFb);
-        io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8); io.i(k + "printFx", x.printFx, 0, 1);
+        io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8); io.i(k + "printFx", x.printFx, 0, 1); io.i(k + "tapeOnly", x.tapeOnly, 0, 1); io.i(k + "scale", x.scale.scale, 0, kScaleCount - 1); io.i(k + "scaleRoot", x.scale.root, 0, 11); io.i(k + "scaleOct", x.scale.octave, -3, 3); io.i(k + "scaleMode", x.scale.mode, 0, 23);
         io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
         io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.f(k + "tfFold", x.tfFold); io.f(k + "tfAutopan", x.tfAutopan); io.f(k + "tfVinyl", x.tfVinyl); io.f(k + "tfVowel", x.tfVowel); io.f(k + "tfComb", x.tfComb); io.f(k + "tfCombTune", x.tfCombTune); io.f(k + "tfOctave", x.tfOctave); io.f(k + "tfFshift", x.tfFshift); io.f(k + "tfScratch", x.tfScratch); io.f(k + "tfScratchNoise", x.tfScratchNoise); io.i(k + "tfScratchRate", x.tfScratchRate, 0, 4); io.i(k + "tfScratchStyle", x.tfScratchStyle, 0, 3); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
         int sq = 0, bars2 = x.seqBars; io.i(k + "seqState", sq, 0, 1); io.i(k + "seqBars", bars2, 0, 15); io.i(k + "keyTrig", x.keyTrig, 0, 1); io.i(k + "trigQ", x.trigQ, 0, 2); io.i(k + "seqOne", x.seqOne, 0, 1); io.i(k + "chopFull", x.chopFull, 0, 1);
@@ -184,8 +186,8 @@ void SamplerApp::applyStateText(const std::string& text) {
         instFxMem_[kvp.second.substr(0, bar)] = v;
     }
     applyFx(); applyMasterFx(); applySeq(0); applyTomb(); applyTempo(); applyMaster(); s_.setLoopSource(loopSrc_);
+    track_ = track; scale_ = ts_[track_].scale;
     setScale(scale_.scale, scale_.root, scale_.octave, scale_.mode);
-    track_ = track;
     (void)bars; (void)fmtv; (void)sr;
 }
 

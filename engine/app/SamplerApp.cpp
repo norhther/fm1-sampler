@@ -198,7 +198,7 @@ void SamplerApp::loadEntry(int i, bool preview) {
     libCursor_ = i; auditionAt_ = 0;
     const Entry& e = lib_[(size_t)i];
     TrackState& t = ts_[track_];
-    instFxSwap(track_, i);   // the effects of the instrument that leaves are kept, the new one gets its own (clean the first time)
+    scaleOut(); instFxSwap(track_, i); scaleIn();   // the effects of the instrument that leaves are kept, the new one gets its own (clean the first time)
     t.entry = i; t.start = 0.f; t.end = 1.f; t.rootN = 0.5f; t.sliceCount = 3; t.sliceSens = 0.5f; t.synTone = t.synBody = t.synMotion = t.synGrit = 0.5f; t.edW1 = t.edW2 = t.edType = t.edUni = t.edVoice = 0; t.edDet2 = t.edCut = 0.5f; t.edRes = 0.f;
     if (e.kit) t.algo = 3; else if (t.algo == 3) t.algo = 0;
     if (e.path.rfind("patch:", 0) == 0) {   // a saved patch: the synth, then every setting that was saved with it
@@ -228,6 +228,7 @@ void SamplerApp::instFx(TrackState& x, std::vector<float>& v, bool set) {
     one(x.tfSpring); one(x.tfPhone); one(x.tfPunch); one(x.tfFold); one(x.tfAutopan); one(x.tfVinyl); one(x.tfVowel); one(x.tfComb); one(x.tfCombTune); one(x.tfOctave); one(x.tfFshift);
     one(x.tfScratch); one(x.tfScratchNoise); one(x.tfScratchRate, 0, 4); one(x.tfScratchStyle, 0, 3); one(x.tfRepeat, 0, 8); one(x.tfFreeze, 0, 1); one(x.tfEqLow); one(x.tfEqMid); one(x.tfEqHigh); one(x.tfComp);
     one(x.sendR); one(x.sendD); one(x.spaceOwn, 0, 1); one(x.spSize); one(x.spTime); one(x.spFb);
+    one(x.scale.scale, 0, kScaleCount - 1); one(x.scale.root, 0, 11); one(x.scale.octave, -3, 3); one(x.scale.mode, 0, kModeCount - 1);   // the key mode belongs to the instrument too
 }
 void SamplerApp::instFxSwap(int t, int ne) {
     TrackState& x = ts_[t];
@@ -267,8 +268,21 @@ void SamplerApp::importFile(const std::string& wav) {
 }
 
 // ---- parameters ----
+void SamplerApp::resetSound(int t) {
+    if (t < 0 || t >= kTracks || ts_[t].entry < 0 || ts_[t].entry >= (int)lib_.size()) { say("NOTHING TO RESET: LOAD A SOUND"); return; }
+    TrackState& x = ts_[t]; const TrackState d;
+    x.a = d.a; x.d = d.d; x.s = d.s; x.r = d.r; x.lfoRate = d.lfoRate; x.lfoDepth = d.lfoDepth; x.lfoTarget = d.lfoTarget; x.lfoShape = d.lfoShape;
+    x.speed = d.speed; x.pitch = d.pitch; x.arpRate = d.arpRate; x.arpPatt = d.arpPatt; x.arpOct = d.arpOct; x.arpLen = d.arpLen;
+    x.fineN = d.fineN; x.levelN = d.levelN; x.editOp = d.editOp; x.chopFull = d.chopFull; x.selPad = d.selPad;
+    for (int i = 0; i < 16; i++) { x.padVol[i] = d.padVol[i]; x.padPitch[i] = d.padPitch[i]; x.padDecay[i] = d.padDecay[i]; x.padGroup[i] = d.padGroup[i]; }
+    x.algo = 0;   // loadEntry puts a kit back on KIT
+    const int keep = track_; track_ = t; loadEntry(x.entry, false); track_ = keep;   // the instrument again: its own envelope, window, macros and edits
+    applyAll(t);
+    say("SOUND RESET TO DEFAULTS");
+}
 void SamplerApp::applyAll(int t) {
     applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t); applyPads(t); applyEdit(t); applySynthEdit(t); applyTrackSpace(t);
+    s_.setTapeOnly(t, ts_[t].tapeOnly != 0);
     s_.setPrintFx(t, ts_[t].printFx != 0, false);   // the switch only: a saved tape is already printed (or not)
 }
 void SamplerApp::applyShape(int t, bool reslice) {
@@ -405,12 +419,17 @@ void SamplerApp::setSend(int t, int w, float v) { (w ? ts_[t].sendD : ts_[t].sen
 void SamplerApp::setScale(int scale, int root, int octave, int mode) {
     scale_ = {std::min(kScaleCount - 1, std::max(0, scale)), ((root % 12) + 12) % 12, std::min(3, std::max(-3, octave)), std::min(kModeCount - 1, std::max(0, mode))};
     sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true);
+    scaleOut();
+}
+void SamplerApp::scaleIn() {
+    if (scale_.scale == ts_[track_].scale.scale && scale_.root == ts_[track_].scale.root && scale_.octave == ts_[track_].scale.octave && scale_.mode == ts_[track_].scale.mode) return;
+    scale_ = ts_[track_].scale; sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true);
 }
 void SamplerApp::selectTrack(int t) {
     t = std::min(trackCount_ - 1, std::max(0, t));
     if (t == track_) return;
     if (st_.track_clip_rec[track_]) s_.clipRecord(track_, false);   // an overdub belongs to the track it was started on
-    track_ = t; if (knobTarget_ != KT_MASTER) knobPicked_ = false;   // the knob's value is not this track's value
+    scaleOut(); track_ = t; scaleIn(); if (knobTarget_ != KT_MASTER) knobPicked_ = false;   // the knob's value is not this track's value
     if (ts_[t].entry >= 0) libCursor_ = ts_[t].entry;   // PRESETS starts from the sample this track plays
 }
 void SamplerApp::gotoPage(Page p) { page_ = p; lastPage_[modeOf(p)] = p; }
@@ -722,6 +741,7 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         q.value = (printPendMask_ >> t & 1) ? "PRINTING..." : !tape ? (x.printFx ? "RECORDS WITH THE FX" : "NO TAPE YET") : x.printFx ? "HAS THE FX" : "DRY, FX AT PLAYBACK";
         q.step = [](int) {}; q.set = [](float) {};
         k[1] = q;
+        k[2] = choice("FX ON", &x.tapeOnly, {"LIVE + TAPE", "TAPE ONLY"}, [=] { s_.setTapeOnly(t, ts_[t].tapeOnly != 0); say(ts_[t].tapeOnly ? "EFFECTS TREAT THE TAPE ONLY" : "EFFECTS TREAT THE LIVE SOUND TOO"); }, true);
         break;
     }
     case P_SHAPE:
@@ -884,7 +904,7 @@ void SamplerApp::loopRecord() {
     s_.clipRecord(track_, !st_.track_clip_rec[track_]);
     say(st_.track_clip_rec[track_] ? "OVERDUB OFF" : "OVERDUB");
 }
-void SamplerApp::newLoop(int bars, bool sequencer) {
+void SamplerApp::newLoop(int bars, bool sequencer, bool empty) {
     if (sequencer) {
         const int b = std::min(16, std::max(1, bars));
         seqSetBarCount(b); s_.seqClear(track_);
@@ -895,6 +915,7 @@ void SamplerApp::newLoop(int bars, bool sequencer) {
         return;
     }
     if (loopAny_) { say("THE TAPE HAS A LOOP: CLEAR IT FIRST"); return; }
+    if (empty) { applyTempo(); s_.newTape(bars); gotoPage(P_TAPEV); say(std::to_string(bars) + (bars == 1 ? " BAR TAPE: REC FROM" : " BARS TAPE: REC FROM")); return; }
     for (int i = 0; i < kTakeBarsN; i++) { takeBars_ = i; if (takeBars() == bars) break; }
     applyTempo(); gotoPage(P_TAPEV); loopRecord();
 }
@@ -1198,7 +1219,7 @@ const char* SamplerApp::fmHint(Page p) {
     case P_FX: case P_FX2: case P_FX3: case P_FX4: case P_FX5: case P_FX6: case P_TONE: case P_MOD: case P_LIVE: case P_LIVE2: case P_TSTOP:
         return "Hold FX + turn PRESETS to browse the effects, let go of FX to open one.  Hold FX + turn ALGORITHM: whole mix / this track.";
     case P_HEAD: return "K1 turns the tape head (hear the tape go by when K3 is on), K2 snaps it to bars, K4 ends a record or overdub by itself.";
-    case P_PRINT: return "PRINT FX ON: the effects you play while you record or overdub this track go onto its tape (K1 turns it on).";
+    case P_PRINT: return "PRINT FX ON: the effects you play while you record or overdub this track go onto its tape (K1 turns it on). K3 TAPE ONLY: the effects treat the tape, not the live sound.";
     case P_KEY: return "Hold GLO + turn PRESETS: what the analog knob moves (master volume, track volume, DJ filter, last turned knob).";
     case P_HOME: case P_SHAPE: case P_PADS: return "Hold HOME + key 1-8: go to that track.  The CHOP page (press HOME again) edits chops with K1-K4.";
     default: return "";
@@ -1299,6 +1320,7 @@ void SamplerApp::tick(uint32_t now) {
     projectTick();
     loopAny_ = false;
     for (int t = 0; t < kTracks; t++) loopAny_ |= st_.track_has_clip[t];
+    loopAny_ |= st_.loopSamples > 0;   // an empty tape of a set length counts: OVERDUB and REC FROM work on it
     for (int t = 0; t < kTracks; t++) if (st_.seqState[t] != seqSeen_[t]) { seqSeen_[t] = st_.seqState[t]; ts_[t].seqState = st_.seqState[t]; }   // the engine changed it (a bounce mutes the pattern)
     for (int t = 0; t < kTracks; t++) {   // the engine is the truth for PRINT FX (an undo of a print, a loaded tape and a bake that was dropped all change it behind our back)
         const int eng = (int)(st_.printMask >> t & 1), pend = (int)(printPendMask_ >> t & 1);

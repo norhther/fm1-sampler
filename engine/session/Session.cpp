@@ -39,6 +39,7 @@ struct Session::Impl {
         Session::Lfo lfo; float lfoPhase = 0, lfoSH = 0, lfoVal = 0;
         TapeInsert tape; float tapeP[6] = {0.f, 1.f, 0.f, 0.f, 0.f, 1.f};   // the cassette's settings, as given (a bake runs its own cassette)
         uint32_t bakeTok = 0;   // a bake on its way carries the token it started with; switching print off (or starting another) changes it, and the bake is dropped
+        bool tapeOnly = false;   // the cassette and the effects of the track treat its tape only; the live sound goes past them, dry
         bool printFx = false;   // the tape of this track holds the instrument AFTER its cassette and effects: it records what they make of it and plays back past them
         float vol = 0.8f, pan = 0.f, send[2] = {0.f, 0.f};
         std::vector<Note> pending;   // notes of this block (without the arpeggiator)
@@ -142,11 +143,11 @@ struct Session::Impl {
     std::atomic<int> a_seqFlags[kTracks], a_seqTrans[kTracks], a_seqPos[kTracks];   // a_seqFlags: run | start pending << 1 | key trigger << 2; a_seqPos: tick inside the pattern that is playing, -1 when it is not
     std::atomic<int> a_voiceN[kTracks]; std::atomic<float> a_voicePos[kTracks][kVoiceMax];
 
-    std::vector<float> bus, tmp, sendBus[2], tsend[2], wet; bool spaceBuilt[kTracks] = {};   // spaceBuilt: only the caller's thread touches it
+    std::vector<float> bus, tbus, tmp, sendBus[2], tsend[2], wet; bool spaceBuilt[kTracks] = {};   // spaceBuilt: only the caller's thread touches it
 
     explicit Impl(int rate) : sr(rate), reverb(rate), delay(rate), mfx(rate) {
         for (int i = 0; i < kTracks; i++) tracks.emplace_back(new Track(rate, i));
-        bus.resize(kBlock * 2); tmp.resize(kBlock * 2); wet.resize(kBlock * 2); sendBus[0].resize(kBlock * 2); sendBus[1].resize(kBlock * 2); tsend[0].resize(kBlock * 2); tsend[1].resize(kBlock * 2);
+        bus.resize(kBlock * 2); tbus.resize(kBlock * 2); tmp.resize(kBlock * 2); wet.resize(kBlock * 2); sendBus[0].resize(kBlock * 2); sendBus[1].resize(kBlock * 2); tsend[0].resize(kBlock * 2); tsend[1].resize(kBlock * 2);
         for (auto& a : a_lpk) a = 0.f;
         for (auto& r : a_tpk) for (auto& a : r) a = 0.f;
         for (auto& a : a_lfo) a = 0.f;
@@ -857,7 +858,7 @@ struct Session::Impl {
             // the tape of this track: one pass over the block that adds the clip to the bus and records into it. A normal track runs it here (the
             // instrument dry; the cassette and the effects come after and treat the tape too). A PRINTED track runs it after its effects instead:
             // what they make of the instrument lands on the tape, and the tape plays back past them (nothing is treated twice)
-            auto tapePass = [&] {
+            auto tapePass = [&](float* dst) {
             if (tl) {
                 for (int i = 0; i < n; i++) {
                     const int32_t k0 = (p0 + i) % loopSamples;
@@ -866,10 +867,10 @@ struct Session::Impl {
                     const int32_t k = (int32_t)cp % loopSamples;
                     if (t.clipHas) {
                         auto& c = t.clip;
-                        if (locked) { bus[2 * i] += c[(size_t)2 * k]; bus[2 * i + 1] += c[(size_t)2 * k + 1]; }
+                        if (locked) { dst[2 * i] += c[(size_t)2 * k]; dst[2 * i + 1] += c[(size_t)2 * k + 1]; }
                         else {   // tape speed: its own read pointer, linear interpolation
                             const int32_t k1 = (k + 1) % loopSamples; const float fr = (float)(cp - std::floor(cp));
-                            bus[2 * i] += c[(size_t)2 * k] + (c[(size_t)2 * k1] - c[(size_t)2 * k]) * fr; bus[2 * i + 1] += c[(size_t)2 * k + 1] + (c[(size_t)2 * k1 + 1] - c[(size_t)2 * k + 1]) * fr;
+                            dst[2 * i] += c[(size_t)2 * k] + (c[(size_t)2 * k1] - c[(size_t)2 * k]) * fr; dst[2 * i + 1] += c[(size_t)2 * k + 1] + (c[(size_t)2 * k1 + 1] - c[(size_t)2 * k + 1]) * fr;
                         }
                     }
                     if (t.clipRec && !(ti == punchTrack && punchLeft >= 0 && i >= punchLeft)) {   // the punch-out: nothing is written past it
@@ -904,16 +905,24 @@ struct Session::Impl {
                 for (int i = 0; i < n; i++) {
                     const double cp = std::min((double)loopSamples - 1.001, std::max(0.0, glideStart + i * glideStep));
                     const size_t k = (size_t)cp, k1 = k + 1; const float fr = (float)(cp - (double)k); auto& c = t.clip;
-                    bus[2 * i] += c[2 * k] + (c[2 * k1] - c[2 * k]) * fr; bus[2 * i + 1] += c[2 * k + 1] + (c[2 * k1 + 1] - c[2 * k + 1]) * fr;
+                    dst[2 * i] += c[2 * k] + (c[2 * k1] - c[2 * k]) * fr; dst[2 * i + 1] += c[2 * k + 1] + (c[2 * k1 + 1] - c[2 * k + 1]) * fr;
                 }
             }
             };
-            if (!t.printFx) tapePass();
+            if (t.tapeOnly && !t.printFx) {   // TAPE ONLY: the tape alone goes through the cassette and the effects, the live sound is added dry
+                std::fill(tbus.begin(), tbus.begin() + n * 2, 0.f);
+                tapePass(tbus.data());
+                t.tape.process(tbus.data(), n);
+                if (t.fx->active()) t.fx->process(tbus.data(), n, beat0, 1.0 / spb); else t.fx->feedOnly(tbus.data(), n);
+                for (int i = 0; i < n * 2; i++) bus[(size_t)i] += tbus[(size_t)i];
+            } else {
+            if (!t.printFx) tapePass(bus.data());
             t.tape.process(bus.data(), n);
             if (t.fx->active()) t.fx->process(bus.data(), n, beat0, 1.0 / spb); else t.fx->feedOnly(bus.data(), n);
             if (t.printFx) {
                 if (freeRec && loopSrc == 1 && ti == freeTrack) for (int i = 0; i < n * 2; i++) freeBuf[freeBase + (size_t)i] += bus[(size_t)i];   // the first take, printed
-                tapePass();
+                tapePass(bus.data());
+            }
             }
             const float dkR = std::exp(-1.f / (std::max(0.02f, duckRel) * (float)sr)); float de = std::max(duckEnv0, duckTrig && ti != duckSrc ? 1.f : 0.f);
             const float da = ti == duckSrc ? 0.f : duckAmt[ti];
@@ -1032,6 +1041,16 @@ void Session::play(bool on) {
         if (!on) for (auto& t : d->tracks) d->releaseAll(*t);
     });
 }
+void Session::newTape(int bars) {
+    d->post([this, bars] {
+        if (d->loopSamples > 0 || d->freeArmed || d->freeRec) return;
+        const double spb = d->samplesPerBeat();
+        const int fit = std::max(1, (int)(180.0 * d->sr / (4 * spb)));   // the tape holds 3 minutes
+        d->loopBars = std::min(std::min(64, std::max(1, bars)), fit); d->a_bars = d->loopBars;
+        d->loopSamples = (int32_t)std::lround(d->loopBars * 4 * spb); d->a_loop = d->loopSamples;
+        d->pos = 0; d->tapePos = 0; d->playing = false; d->glide = false;
+    });
+}
 void Session::seekPos(double samples) {   // the tape head jumps to an exact place (samples from the start of the tape)
     d->post([this, samples] {
         if (d->loopSamples <= 0) return;
@@ -1108,6 +1127,7 @@ void Session::setArp(int t, bool on, int rate, int pattern, int octaves, float g
 void Session::setTape(int t, float sat, float tone, float wobble, float hiss, float mix, float bits) {
     if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; const float v[6] = {sat, tone, wobble, hiss, mix, bits}; std::copy(v, v + 6, tr.tapeP); tr.tape.setParams(sat, tone, wobble, hiss, mix, bits); });
 }
+void Session::setTapeOnly(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { d->tracks[(size_t)t]->tapeOnly = on; }); }
 // PRINT FX: the tape of the track holds the sound after its cassette and effects. Switching on with a tape already there runs that tape through them once (a bake,
 // one undo step) and flips the switch when it is done; switching off only flips it
 void Session::setPrintFx(int t, bool on, bool bake) {

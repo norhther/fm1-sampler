@@ -1095,6 +1095,81 @@ static void testTapeSeek() {
     }
 }
 
+// an empty tape of 2 bars, then REC FROM bar 2 works on it
+static void testEmptyTape() {
+    const int sr = SAMPLERATE; system("rm -rf /tmp/fm1sampler_tm; mkdir -p /tmp/fm1sampler_tm");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tm"); std::vector<float> buf(512), loud(512, 0.5f);
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), loud.data(), 256); } };
+    s.setTempo(120.f); s.setLoopSource(0); s.newTape(2); run(0.1); auto st = s.status();
+    CHECK(st.loopBars == 2 && std::abs(st.loopSamples - 4 * sr) <= 1 && !st.playing && !st.track_has_clip[0], "an empty 2 bar tape at 120 bpm (%d bars, %.0f samples)", st.loopBars, st.loopSamples);
+    s.seekPos(st.loopSamples / 2.0); s.recordFrom(0, 0); run(0.5); st = s.status();
+    CHECK(st.playing && st.track_clip_rec[0] && st.pos > st.loopSamples / 2.0, "REC FROM bar 2 on the empty tape records (pos %.0f)", st.pos);
+    s.clipRecord(0, false); run(0.1); st = s.status(); CHECK(st.track_has_clip[0] && st.loopSamples == 4 * sr, "the take stays on the 2 bar tape");
+}
+
+static void testResetSound() {
+    const int sr = SAMPLERATE; system("rm -rf /tmp/fm1sampler_tn; mkdir -p /tmp/fm1sampler_tn");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_tn"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 0;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } std::this_thread::sleep_for(std::chrono::microseconds(1500)); } };
+    run(2.5); app.selectTrack(3);
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) { app.loadEntry(i); break; }
+    run(1.5); const auto before = app.state(3);
+    app.gotoPage(SamplerApp::P_ENV); { auto k = app.knobs(); k[0].set(0.9f); k[3].set(0.9f); }
+    app.gotoPage(SamplerApp::P_LFO); { auto k = app.knobs(); k[1].set(0.8f); }
+    app.setSend(3, 0, 0.6f); run(0.3);
+    const auto edited = app.state(3);
+    CHECK(std::fabs(edited.a - before.a) > 0.1f && edited.lfoDepth > 0.5f, "the sound was edited (attack %.2f -> %.2f, lfo depth %.2f)", before.a, edited.a, edited.lfoDepth);
+    app.resetSound(3); run(1.5); const auto after = app.state(3);
+    CHECK(std::fabs(after.a - before.a) < 0.01f && std::fabs(after.r - before.r) < 0.01f && after.lfoDepth == 0.f, "RESET SOUND: envelope back to the patch (attack %.2f, release %.2f) and no LFO", after.a, after.r);
+    CHECK(std::fabs(after.sendR - 0.6f) < 0.01f && after.entry == edited.entry, "...the sends and the instrument stay (send %.2f)", after.sendR);
+}
+
+// TAPE ONLY: a track effect treats the tape, the live sound stays dry
+static void testTapeOnly() {
+    const int sr = SAMPLERATE; system("rm -rf /tmp/fm1sampler_to; mkdir -p /tmp/fm1sampler_to");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_to"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 0; std::vector<float> all;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); all.insert(all.end(), buf.begin(), buf.end()); if (i % 5 == 0) { now += 33; app.tick(now); } std::this_thread::sleep_for(std::chrono::microseconds(1500)); } };
+    run(2.5); app.selectTrack(3);
+    for (int i = 0; i < (int)app.library().size(); i++) if (app.library()[(size_t)i].label == "Saw Bass" && app.library()[(size_t)i].path.rfind("synth:", 0) == 0) { app.loadEntry(i); break; }
+    run(1.5); app.setSend(3, 0, 0.f); app.setSend(3, 1, 0.f);
+    for (int t = 0; t < 16; t++) if (t != 3) app.setVolume(t, 0.f);
+    auto level = [&]() { all.clear(); app.playNote(45, true); run(0.8); app.playNote(45, false); double e = 0; for (size_t i = 2 * 4800; i < all.size(); i++) e += (double)all[i] * all[i]; run(0.6); return std::sqrt(e / (double)(all.size() ? all.size() : 1)); };
+    const double dry = level();
+    FxParams p; p.phone = 1.f; s.setTrackFx(3, p); run(0.3);
+    const double both = level();
+    app.gotoPage(SamplerApp::P_PRINT); { auto k = app.knobs(); k[2].set(1.f); } run(0.3);
+    const double only = level();
+    CHECK(dry > 0.01 && both < dry * 0.85, "a track effect (phone filter) treats the live sound (%.4f -> %.4f)", dry, both);
+    CHECK(only > dry * 0.9, "TAPE ONLY: the live sound goes past the effect (%.4f, dry %.4f)", only, dry);
+}
+
+// each instrument keeps its own key mode (scale, root, octave, note / chord): changing it on one does not touch the others
+static void testTrackScale() {
+    const int sr = SAMPLERATE; system("rm -rf /tmp/fm1sampler_ts; mkdir -p /tmp/fm1sampler_ts");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_ts"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
+    std::vector<float> buf(512), in(512, 0.f); uint32_t now = 0;
+    auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); if (i % 5 == 0) { now += 33; app.tick(now); } } };
+    run(0.5); app.selectTrack(0); app.setScale(5, 2, 1, 1);   // track 1: a scale, root D, one octave up, CHORD
+    app.selectTrack(1); const auto b = app.scale();
+    CHECK(b.scale == 3 && b.root == 0 && b.octave == 0 && b.mode == 0, "track 2 is not touched (scale %d root %d oct %d mode %d)", b.scale, b.root, b.octave, b.mode);
+    app.setScale(8, 7, -1, 0);
+    app.selectTrack(0); const auto a = app.scale();
+    CHECK(a.scale == 5 && a.root == 2 && a.octave == 1 && a.mode == 1, "track 1 keeps its own (scale %d root %d oct %d mode %d)", a.scale, a.root, a.octave, a.mode);
+    app.selectTrack(1); const auto c = app.scale();
+    CHECK(c.scale == 8 && c.root == 7 && c.octave == -1 && c.mode == 0, "...and track 2 keeps its own (scale %d root %d oct %d mode %d)", c.scale, c.root, c.octave, c.mode);
+    CHECK(app.saveProject("Scale Test"), "a project with a key mode per track saves");
+    for (int i = 0; i < 20; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.selectTrack(0); app.setScale(0, 0, 0, 0); app.selectTrack(1); app.setScale(0, 0, 0, 0);   // both back to something else
+    app.loadProject("Scale Test"); for (int i = 0; i < 60; i++) { run(0.05); std::this_thread::sleep_for(std::chrono::milliseconds(50)); }
+    app.selectTrack(0); const auto d0 = app.scale(); app.selectTrack(1); const auto d1 = app.scale();
+    CHECK(d0.scale == 5 && d0.mode == 1 && d1.scale == 8 && d1.root == 7, "the project keeps one key mode per track (%d/%d, %d/%d)", d0.scale, d0.mode, d1.scale, d1.root);
+}
+
 static void testRollZoom() {
     const int sr = SAMPLERATE; Session s(sr); s.setDataDir("/tmp/fm1sampler_t4"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
     SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app); SamplerUI ui(app); ui.setSize(860, 400, 0, 0);
@@ -1207,6 +1282,10 @@ int main() {
     testSwing();
     testRollZoom();
     testTapeSeek();
+    testEmptyTape();
+    testResetSound();
+    testTapeOnly();
+    testTrackScale();
     testLibrary();
     testPaul();
     testGrid();
