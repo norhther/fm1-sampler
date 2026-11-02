@@ -182,7 +182,10 @@ void SamplerUI::topBar(Rect r) {
       text(ts.x + ts.w / 2, cy, 10.5f, on ? ON_ACCENT : TEXT, "TAPE STOP", 1, true);
       hit(ts, [this](float, float) { app_.tapeStopHold(true); }, nullptr, [this] { app_.tapeStopHold(false); });
       // in between: how long the first take is, then what the loop is doing
-      const float right = ts.x - 8; float mx = x;
+      const Rect sa{ts.x - 8 - 62, 6, 62, bh};   // STOP ALL: every sound off at once, tails too
+      rrect(sa, R_CONTROL, SURFACE); stroke(sa, R_CONTROL, DANGER, 2); text(sa.x + sa.w / 2, cy, 9.5f, DANGER, "STOP ALL", 1, true);
+      tap(sa, [this] { app_.stopAll(); });
+      const float right = sa.x - 8; float mx = x;
       if (!app_.loopExists() && !st_.freeRecording && !armed) {   // it ends by itself after that many bars (FREE: when you press REC again)
           button({mx, 6, 78, bh}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
           mx += 86;

@@ -18,6 +18,7 @@ public:
     }
     // size 0..1: the length of the tail
     void setSize(float size) { feedback_ = 0.70f + 0.28f * clampf(size, 0.f, 1.f); }
+    void clear() { for (auto& s : comb_) for (auto& c : s) { std::fill(c.buf.begin(), c.buf.end(), 0.f); c.lp = 0.f; } for (auto& s : ap_) for (auto& a : s) std::fill(a.buf.begin(), a.buf.end(), 0.f); }   // tail gone at once
     void process(const float* in /*stereo*/, float* out /*stereo, overwritten*/, int n) {
         for (int i = 0; i < n; i++) {
             const float x = (in[2 * i] + in[2 * i + 1]) * 0.015f;

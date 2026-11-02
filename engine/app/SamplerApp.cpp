@@ -330,6 +330,12 @@ void SamplerApp::applySeq(int) {   // loop speed and tape colour are global: eve
     for (int i = 0; i < kTracks; i++)
         s_.setTape(i, exciter_, 1.f - 0.4f * lofi_, wobble_, 0.25f * lofi_, cl(std::max(exciter_ * 3.f, std::max(wobble_, lofi_))), 1.f - 0.6f * lofi_);
 }
+void SamplerApp::stopAll() {
+    s_.silence();
+    for (int& h : heldNote_) h = -1;
+    for (auto& r : heldCnt_) for (int& h : r) h = 0;
+    say("ALL SOUNDS STOPPED");
+}
 void SamplerApp::applyMix(int t) {
     const TrackState& x = ts_[t];
     const bool audible = !x.mute && (!anySolo() || x.solo);

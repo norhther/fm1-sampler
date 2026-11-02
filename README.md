@@ -137,6 +137,11 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.50
+
+- **New**: STOP ALL button in the top bar (left of TAPE STOP). One tap stops the transport, releases every voice and held note on every track, and clears the reverb and delay tails, so nothing keeps ringing. The metronome click is a separate toggle and is not touched.
+- Host-tested (test_app, test_features green, and a check that a held chord with both sends up goes to exactly zero). Not run on a phone or an FM-1.
+
 ## v0.49
 
 - **Fixes (notes that kept ringing)**: CHORD7, MAJ7, DOM7 and MIN7 have four notes but a key had room for three, so the fourth overwrote the next key's first note and that note never got its release. Pads, MIDI in and the keys shared one slot per note, so letting go of one could skip the release of another. The same note held on two tracks only released the last one. Keys held when the cable is pulled now let go.

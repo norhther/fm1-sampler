@@ -13,6 +13,7 @@ public:
     }
     void setTime(float sec) { target_ = clampf(sec, 0.02f, 3.0f) * sr_; }
     void setFeedback(float fb) { fb_ = clampf(fb, 0.f, 0.95f); }
+    void clear() { for (auto& b : buf_) std::fill(b.begin(), b.end(), 0.f); }   // echoes gone at once
     void process(const float* in, float* out, int n) {
         for (int i = 0; i < n; i++) {
             time_ += (target_ - time_) * 0.0004f;   // glide

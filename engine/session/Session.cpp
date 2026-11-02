@@ -993,6 +993,7 @@ void Session::play(bool on) {
         if (!on) for (auto& t : d->tracks) d->releaseAll(*t);
     });
 }
+void Session::silence() { play(false); d->post([this] { d->reverb.clear(); d->delay.clear(); }); }
 void Session::noteOn(int t, int note, int vel) { if (t >= 0 && t < kTracks) d->post([=] { d->liveNote(t, note, std::max(1, vel)); }); }
 void Session::noteOff(int t, int note) { if (t >= 0 && t < kTracks) d->post([=] { d->liveNote(t, note, 0); }); }
 

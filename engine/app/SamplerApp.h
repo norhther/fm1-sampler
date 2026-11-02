@@ -244,6 +244,7 @@ public:
     static int scaleSteps(int scale, int* out12);              // semitone steps of a scale (0 for OFF), returns their count
     static int snapNote(int note, int scale, int root);        // nearest note of the scale (ties down)
     void playNote(int note, bool down, int vel = 100, int track = -1);
+    void stopAll();   // panic button: silences everything, sounding or ringing out
     void keyEvent(int rawNote, bool down);        // FM-1 key: chromatic note from the firmware
     bool linkSeen() const { return linkSeen_; }
     std::vector<float> peaks(int t, int bins);    // waveform of a track's sample, cached
