@@ -389,6 +389,7 @@ private:
     uint64_t lastLed_ = ~0ull;
     int knobMsb_ = 0;
     int heldNote_[128];
+    int heldCnt_[128];
     int keyNotes_[128][3] = {}; int keyCount_[128] = {};
     bool fwDirty_ = true; uint32_t lenAt_ = 0;
     uint32_t held_ = 0;

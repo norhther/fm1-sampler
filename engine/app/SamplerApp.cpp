@@ -148,6 +148,7 @@ SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
     cells_.resize(320); rects_.assign(320, ~0ull);
     applyFmPalette();
     for (int& h : heldNote_) h = -1;
+    for (int& h : heldCnt_) h = 0;
     for (int i = 0; i < kTracks; i++) { ts_[i].vol = 0.8f; }
     refreshLibrary();
     applyFx();
@@ -954,8 +955,9 @@ void SamplerApp::keyEvent(int raw, bool down) {   // a key of the FM-1 (chromati
 }
 void SamplerApp::playNote(int note, bool down) {
     if (note < 0 || note > 127) return;
-    if (down) { heldNote_[note] = track_; s_.noteOn(track_, note, 100); if (page_ == P_TOMB) s_.tombolaAdd(track_, note); }
-    else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
+    // chords on neighbouring keys share notes: count the keys holding a note, so letting go of the first chord does not cut the second one's copy
+    if (down) { if (heldNote_[note] < 0) heldCnt_[note] = 0; heldNote_[note] = track_; heldCnt_[note]++; s_.noteOn(track_, note, 100); if (page_ == P_TOMB) s_.tombolaAdd(track_, note); }
+    else if (heldNote_[note] >= 0 && --heldCnt_[note] <= 0) { heldCnt_[note] = 0; s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
 }
 std::vector<float> SamplerApp::peaks(int t, int bins) {
     const std::string lab = s_.trackLabel(t);

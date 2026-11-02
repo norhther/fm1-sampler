@@ -137,6 +137,10 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.48
+
+- **Fixes**: fast chord changes lost notes. Neighbouring chords share notes, and letting go of the first key released those notes in the second chord too (a note off cuts every voice of that note). A note is now released only when the last key holding it is up. Most audible on the hurdy-gurdy, whose drone masks what is left.
+
 ## v0.47
 
 - **Chords on the keys** (SCALE page, MODE knob; after Tessera's harmony): CHORD (the scale's triad on the key), CHORD7, OPEN (spread 1-5-3), the shapes MAJ MIN DOM7 MAJ7 MIN7 SUS4 POW on any key, and progressions. POP, 50S, 2-5-1, CIRCLE, TWO and WALK change chord every bar (4 beats of the transport): in POP / 50S / ... every key snaps to the chord playing now (any key sounds right), in POP CH / 50S CH / ... every key plays the whole chord of the bar with its own note lowest, so neighbouring keys repeat the same chord in other inversions. A new CHORDS pattern generator writes a progression into the pattern.
