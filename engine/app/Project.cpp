@@ -336,7 +336,7 @@ void SamplerApp::midiExternal(const uint8_t* b, size_t n, uint64_t nowNs) {
             if (i + 2 >= n) break;
             const int note = b[i + 1] & 0x7f, vel = b[i + 2] & 0x7f; i += 3;
             const bool on = (st & 0xf0) == 0x90 && vel > 0;
-            if (on) { heldNote_[note] = track_; s_.noteOn(track_, note, vel); if (page_ == P_TOMB) s_.tombolaAdd(track_, note); } else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
+            playNote(note, on, vel);
             continue;
         }
         i++;   // anything else is ignored (a damaged message, active sensing, controllers)

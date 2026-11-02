@@ -260,6 +260,10 @@ static void testHarmony() {
     const int want[7][4] = {{60, 64, 67, 0}, {60, 63, 67, 0}, {60, 64, 67, 70}, {60, 64, 67, 71}, {60, 63, 67, 70}, {60, 65, 67, 0}, {60, 67, 72, 0}};
     int shapeBad = 0; for (int m = 11; m <= 17; m++) { a.setScale(2, 0, 0, m); const auto v = notes(60); const int c = want[m - 11][3] ? 4 : 3; if ((int)v.size() != c || !std::equal(v.begin(), v.end(), want[m - 11])) shapeBad++; a.keyEvent(60, false); }
     CHECK(shapeBad == 0, "chord shapes MAJ MIN DOM7 MAJ7 MIN7 SUS4 POW on a key (%d wrong)", shapeBad);
+    a.setScale(2, 0, 0, 9);   // CHORD7 has four notes a key: the fourth must not spill into the next key's row (its release would then miss a note and leave it ringing)
+    { const auto k60 = notes(60), k61 = notes(61); const auto k62 = notes(62); (void)k60; (void)k61;
+      CHECK(a.keyNotesOf(61).size() == 4 && a.keyNotesOf(61)[0] == 60 && a.keyNotesOf(62).size() == 4 && a.keyNotesOf(62)[0] == 62, "CHORD7: four notes on a key do not overwrite the next key's notes");
+      for (int raw : {60, 61, 62}) a.keyEvent(raw, false); }
     a.setScale(2, 0, 0, 18);  // POP CH: the chord of bar 1 (C major), every key plays it with its own note lowest
     int prog = 0, inChord = 0; for (int raw = 53; raw < 53 + 24; raw++) { a.keyEvent(raw, true); const auto v = a.keyNotesOf(raw); prog++; bool ok = v.size() == 3; for (int n : v) ok &= (n % 12 == 0 || n % 12 == 4 || n % 12 == 7); inChord += ok; a.keyEvent(raw, false); }
     CHECK(inChord == prog, "POP CH: every key plays the chord of the bar (%d of %d)", inChord, prog);

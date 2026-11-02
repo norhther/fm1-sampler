@@ -148,7 +148,7 @@ SamplerApp::SamplerApp(Session& s, Send send) : s_(s), send_(std::move(send)) {
     cells_.resize(320); rects_.assign(320, ~0ull);
     applyFmPalette();
     for (int& h : heldNote_) h = -1;
-    for (int& h : heldCnt_) h = 0;
+    for (auto& r : heldCnt_) for (int& h : r) h = 0;
     for (int i = 0; i < kTracks; i++) { ts_[i].vol = 0.8f; }
     refreshLibrary();
     applyFx();
@@ -946,18 +946,22 @@ void SamplerApp::keyEvent(int raw, bool down) {   // a key of the FM-1 (chromati
             int ss[12]; const int n = scaleSteps(scale_.scale, ss); int pcs[4]; const int c = harmony::tones(ss, n, chordDegree(), false, pcs);
             int got = 1; for (int step = 1; step <= 12 && got < c; step++) { const int pc = (((keyNotes_[raw][0] + step - scale_.root) % 12) + 12) % 12; for (int k = 0; k < c; k++) if (pcs[k] == pc) { add(keyNotes_[raw][0] + step); got++; break; } }
         }
-        keyCount_[raw] = cnt;
+        keyCount_[raw] = cnt; keyTrack_[raw] = track_;
         for (int j = 0; j < cnt; j++) playNote(keyNotes_[raw][j], true);
     } else {
-        for (int j = 0; j < keyCount_[raw]; j++) playNote(keyNotes_[raw][j], false);
+        for (int j = 0; j < keyCount_[raw]; j++) playNote(keyNotes_[raw][j], false, 100, keyTrack_[raw]);
         keyCount_[raw] = 0;
     }
 }
-void SamplerApp::playNote(int note, bool down) {
+void SamplerApp::playNote(int note, bool down, int vel, int track) {
     if (note < 0 || note > 127) return;
-    // chords on neighbouring keys share notes: count the keys holding a note, so letting go of the first chord does not cut the second one's copy
-    if (down) { if (heldNote_[note] < 0) heldCnt_[note] = 0; heldNote_[note] = track_; heldCnt_[note]++; s_.noteOn(track_, note, 100); if (page_ == P_TOMB) s_.tombolaAdd(track_, note); }
-    else if (heldNote_[note] >= 0 && --heldCnt_[note] <= 0) { heldCnt_[note] = 0; s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
+    // chords on neighbouring keys share notes, and the same note can be held on two tracks: count the holders of (track, note) and send the
+    // note off only when the last one lets go, to the track that took it
+    if (down) { const int t = track_; heldCnt_[t][note]++; heldNote_[note] = t; s_.noteOn(t, note, vel); if (page_ == P_TOMB) s_.tombolaAdd(t, note); return; }
+    const int t = track >= 0 ? track : heldNote_[note];
+    if (t < 0 || t >= kTracks || heldCnt_[t][note] <= 0) return;
+    if (--heldCnt_[t][note] > 0) return;
+    s_.noteOff(t, note); if (heldNote_[note] == t) heldNote_[note] = -1;
 }
 std::vector<float> SamplerApp::peaks(int t, int bins) {
     const std::string lab = s_.trackLabel(t);
@@ -1216,6 +1220,7 @@ void SamplerApp::tick(uint32_t now) {
     if (fwDirty_) { fwDirty_ = false; sysex(6, {7, (uint8_t)scale_.root, (uint8_t)(scale_.octave + 3), (uint8_t)(scale_.mode == 1)}, true); }
     if (repaintAt_ && now >= repaintAt_) { repaintAt_ = repaintAt_ + 2500 < now + 2500 && repaintCount_++ < 1 ? now + 2500 : 0; needClear_ = true; }
     st_ = s_.status();
+    if (lastPongAt_ && nowMs_ - lastPongAt_ > 2500) for (int k = 0; k < 128; k++) if (keyCount_[k]) keyEvent(k, false);   // cable out: a key that never came up must not ring on
     if (held_ && lastPongAt_ && nowMs_ - lastPongAt_ > 2500) { held_ = 0; modUsed_ = 0; fxBrowsed_ = false; }   // the FM-1 went quiet (cable out): a button that never came up must not stay held
     for (int t = 0; t < kTracks; t++) if (st_.seqBars[t] > 0 && nowMs_ - barsLocalAt_[t] > 250) ts_[t].seqBars = std::min(15, st_.seqBars[t] - 1);   // the engine is the truth for the length (a bank can have another one)
     projectTick();

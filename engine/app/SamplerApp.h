@@ -153,7 +153,7 @@ public:
     bool isKit(int t) const { return ts_[t].algo == 3; }
     void padHit(int pad, int vel, bool down) {   // a pad of the PADS page: the key 60 + pad with a velocity (records into a pattern that is recording)
         const int note = padNote(pad);
-        if (down) { heldNote_[note] = track_; s_.noteOn(track_, note, std::min(127, std::max(1, vel))); } else if (heldNote_[note] >= 0) { s_.noteOff(heldNote_[note], note); heldNote_[note] = -1; }
+        playNote(note, down, std::min(127, std::max(1, vel)));
     }
     void selectPad(int pad) { ts_[track_].selPad = std::min(15, std::max(0, pad)); }
     void resampleNow();                                   // the sound you hear (bars of the loop or of the pattern) becomes a sample on this track
@@ -243,7 +243,7 @@ public:
     uint32_t progSeed_ = 7;
     static int scaleSteps(int scale, int* out12);              // semitone steps of a scale (0 for OFF), returns their count
     static int snapNote(int note, int scale, int root);        // nearest note of the scale (ties down)
-    void playNote(int note, bool down);
+    void playNote(int note, bool down, int vel = 100, int track = -1);
     void keyEvent(int rawNote, bool down);        // FM-1 key: chromatic note from the firmware
     bool linkSeen() const { return linkSeen_; }
     std::vector<float> peaks(int t, int bins);    // waveform of a track's sample, cached
@@ -389,8 +389,9 @@ private:
     uint64_t lastLed_ = ~0ull;
     int knobMsb_ = 0;
     int heldNote_[128];
-    int heldCnt_[128];
-    int keyNotes_[128][3] = {}; int keyCount_[128] = {};
+    int heldCnt_[kTracks][128];
+    int keyTrack_[128] = {};
+    int keyNotes_[128][8] = {}; int keyCount_[128] = {};
     bool fwDirty_ = true; uint32_t lenAt_ = 0;
     uint32_t held_ = 0;
     // FM-1 gestures
