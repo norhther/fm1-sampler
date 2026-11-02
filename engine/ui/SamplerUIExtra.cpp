@@ -172,6 +172,11 @@ void SamplerUI::flowStrip(Rect r) {
         const Rect c{r.x + i * (w + gap), r.y, w, r.h};
         const bool link = blk[i].page >= 0;
         rrect(c, R_CONTROL, link ? RAISED : SURFACE); stroke(c, R_CONTROL, link ? ACCENT : OUTLINE, 1);
+        if (std::string(blk[i].name) == "OUT") {   // the master out as a scope: highest and lowest sample of every 256 frames, newest on the right
+            float hi[Session::kScope], lo[Session::kScope]; app_.session().scope(hi, lo);
+            const float cy = c.y + c.h / 2, half = c.h / 2 - 2, bw = (c.w - 4) / Session::kScope;
+            for (int k = 0; k < Session::kScope; k++) { const float a = clamp01(hi[k]) * half, b = clamp01(-lo[k]) * half; rrect({c.x + 2 + k * bw, cy - a, std::max(1.f, bw), std::max(1.f, a + b)}, 0, st_.clip ? DANGER : TEXT); }
+        } else
         text(c.x + c.w / 2, c.y + c.h / 2, 8.f, link ? TEXT : DIM, fit(blk[i].name, c.w - 4, 8.f), 1, true);
         if (link) { const int pg = blk[i].page; tap(c, [this, pg] { app_.gotoPage((SamplerApp::Page)pg); }); }
         if (i + 1 < n) tri(c.x + c.w + 2, c.y + c.h / 2 - 4, c.x + c.w + 2, c.y + c.h / 2 + 4, c.x + c.w + gap - 2, c.y + c.h / 2, DIM);
@@ -204,6 +209,7 @@ void SamplerUI::mixerView(Rect r) {
         hit(fhit, setV, setV);
         rrect(mt, 0, BG); stroke(mt, 0, OUTLINE, 1);
         { const float lv = std::min(1.f, st_.track_peak[t] * 1.5f); rrect({mt.x + 1, mt.y + mt.h - 1 - (mt.h - 2) * lv, mt.w - 2, std::max(1.f, (mt.h - 2) * lv)}, 0, audible ? TEXT : DIM); }
+        if (st_.track_peak[t] > 0.98f) rrect({mt.x, mt.y - 3, mt.w, 3}, 0, DANGER);   // clip LED above the meter
         const Rect p{c.x + 4, c.y + c.h - 20, bw, 14};   // pan: the mark away from the middle
         rrect(p, 0, BG); stroke(p, 0, OUTLINE, 1);
         line(p.x + p.w / 2, p.y, p.x + p.w / 2, p.y + p.h, OUTLINE, 1);
@@ -240,4 +246,67 @@ void SamplerUI::tourSheet() {
     const bool last = tourStep_ == n - 1;
     button({card.x + card.w - 110, card.y + card.h - 40, 100, 32}, last ? "DONE" : "NEXT", true, [this, last] { if (last) { tourOpen_ = false; app_.setTourDone(true); } else tourStep_++; }, 11);
     button({card.x + 12, card.y + card.h - 40, 100, 32}, "SKIP TOUR", false, [this] { tourOpen_ = false; app_.setTourDone(true); }, 10);
+}
+
+// ---- synth tracks: what the patch is doing, drawn from the ENV and SYNTH pages (ponytail: shapes only, no per-voice phase) ----
+void SamplerUI::synthViz(Rect w) {
+    const int t = app_.track(); const auto ts = app_.state(t);
+    const float lv = clamp01(st_.track_peak[t] * 1.5f);
+    const float cw = (w.w - 2 * 6) / 3, pad = 10;
+    auto cell = [&](int i) { return Rect{w.x + i * (cw + 6), w.y, cw, w.h}; };
+    const auto pg = app_.page(); const int hot = pg == SamplerApp::P_ENV ? 0 : pg == SamplerApp::P_SYN1 || pg == SamplerApp::P_LFO ? 1 : pg == SamplerApp::P_SYN2 ? 2 : -1;   // the cell of the page you are editing
+    auto frameCell = [&](Rect c, int i) { rrect(c, R_CARD, SURFACE); stroke(c, R_CARD, i == hot ? ACCENT : OUTLINE, i == hot ? 2 : 1); };
+    auto glow = [&](Rect c) { rrect({c.x, c.y + c.h - 3, c.w * lv, 3}, 0, ACCENT); };   // level bar under each cell
+    auto poly = [&](Rect c, const std::vector<std::pair<float, float>>& pts, bool fill) {   // points in 0..1, y up
+        const float x0 = c.x + pad, y0 = c.y + c.h - 22, pw = c.w - 2 * pad, ph = c.h - 40;
+        for (size_t i = 1; i < pts.size(); i++) {
+            const float ax = x0 + pts[i - 1].first * pw, ay = y0 - pts[i - 1].second * ph, bx = x0 + pts[i].first * pw, by = y0 - pts[i].second * ph;
+            if (fill) for (float x = ax; x < bx; x += 2) { const float y = ay + (by - ay) * (x - ax) / std::max(1e-3f, bx - ax); rrect({x, y, 2, y0 - y}, 0, withAlpha(ACCENT, 40 + (int)(lv * 90))); }   // strips under the line
+            line(ax, ay, bx, by, lv > 0.05f ? ACCENT : TEXT, 1.6f);
+        }
+    };
+    auto ghost = [&](Rect c, const std::vector<std::pair<float, float>>& pts) {   // a faint line, same box as poly
+        const float x0 = c.x + pad, y0 = c.y + c.h - 22, pw = c.w - 2 * pad, ph = c.h - 40;
+        for (size_t i = 1; i < pts.size(); i++) line(x0 + pts[i - 1].first * pw, y0 - pts[i - 1].second * ph, x0 + pts[i].first * pw, y0 - pts[i].second * ph, withAlpha(TEXT, 60), 1.f);
+    };
+    // ENV: attack / decay / sustain / release, each a quarter of the width
+    { Rect c = cell(0); frameCell(c, 0); text(c.x + pad, c.y + 12, 9, DIM, "ENVELOPE", 0, true);
+      const float a = 0.05f + ts.a * 0.2f, d = 0.05f + ts.d * 0.2f, r = 0.05f + ts.r * 0.2f, sus = 0.3f;
+      std::vector<std::pair<float, float>> p{{0, 0}, {a, 1}, {a + d, ts.s}, {a + d + sus, ts.s}, {std::min(1.f, a + d + sus + r), 0}};
+      for (auto& q : p) q.first /= p.back().first;
+      poly(c, p, true); glow(c); }
+    // OSC: one cycle of the wave (PATCH = a blend of saw and sine, since the patch brings its own)
+    if (pg == SamplerApp::P_LFO) {   // LFO page: the wave scrolls at its real rate (1 s window), its height is the depth
+      Rect c = cell(1); frameCell(c, 1); static const char* sh[] = {"SINE", "TRIANGLE", "SQUARE", "RANDOM"};
+      const float hz = 0.1f * std::pow(200.f, ts.lfoRate), ph0 = std::fmod(now_ * 0.001f * hz, 1.f);
+      char hzs[24]; std::snprintf(hzs, sizeof hzs, "%.1f HZ", hz);
+      text(c.x + pad, c.y + 12, 9, DIM, std::string("LFO  ") + sh[std::min(3, std::max(0, ts.lfoShape))] + "  " + hzs, 0, true);
+      std::vector<std::pair<float, float>> p, gh; const float pi = 3.14159265f;
+      for (int i = 0; i <= 96; i++) { const float x = (float)i / 96, ph = std::fmod(x * hz + ph0, 1.f); float v;
+          switch (ts.lfoShape) { case 1: v = ph < 0.5f ? 4 * ph - 1 : 3 - 4 * ph; break; case 2: v = ph < 0.5f ? 1.f : -1.f; break;
+              case 3: v = std::sin((std::floor(x * hz + ph0)) * 12.9898f) ; break; default: v = std::sin(2 * pi * ph); }
+          p.push_back({x, clamp01(0.5f + 0.5f * v * ts.lfoDepth)}); gh.push_back({x, clamp01(0.5f + 0.5f * v)}); }
+      ghost(c, gh); poly(c, p, false); glow(c);   // the faint line is the shape at full depth
+    } else
+    { Rect c = cell(1); frameCell(c, 1);
+      static const char* nm[] = {"PATCH", "SINE", "SAW", "SQUARE", "TRIANGLE"}; text(c.x + pad, c.y + 12, 9, DIM, std::string("OSC  ") + nm[std::min(4, std::max(0, ts.edW1))], 0, true);
+      std::vector<std::pair<float, float>> p; const int N = 48; const float pi = 3.14159265f;
+      const int uni = ts.edUni == 2 ? 3 : ts.edUni == 3 ? 5 : 1; const float det = std::fabs(ts.edDet2 - 0.5f) * 0.25f + 0.02f;   // unison: the detuned copies drift apart as faint lines
+      auto wave = [&](float x) { x -= std::floor(x); float y;
+          switch (ts.edW1) { case 2: y = x; break; case 3: y = x < 0.5f ? 1.f : 0.f; break; case 4: y = x < 0.5f ? 2 * x : 2 - 2 * x; break;
+              case 0: y = 0.5f + 0.5f * (0.5f * std::sin(2 * pi * x) - 0.5f * (x - 0.5f) * 2); break; default: y = 0.5f + 0.5f * std::sin(2 * pi * x); }
+          return clamp01(y); };
+      for (int i = 0; i <= N; i++) p.push_back({(float)i / N, wave((float)i / N)});
+      for (int u = 1; u < uni; u++) { std::vector<std::pair<float, float>> g; const float off = det * ((u + 1) / 2) * (u % 2 ? 1 : -1); for (int i = 0; i <= N; i++) g.push_back({(float)i / N, wave((float)i / N + off)}); ghost(c, g); }
+      poly(c, p, false); glow(c); }
+    // FILTER: response around the cutoff (the edit is +-3 octaves from the patch; the patch's own cutoff is the middle)
+    { Rect c = cell(2); frameCell(c, 2);
+      static const char* nm[] = {"LOW-PASS", "HIGH-PASS", "BAND-PASS"}; text(c.x + pad, c.y + 12, 9, DIM, std::string("FILTER  ") + nm[std::min(2, std::max(0, ts.edType))], 0, true);
+      const float fc = 0.5f + (ts.edCut - 0.5f) * 6.f / 8.f, q = 0.15f + ts.edRes * 0.6f;
+      std::vector<std::pair<float, float>> p;
+      for (int i = 0; i <= 48; i++) { const float x = (float)i / 48, u = (x - fc) * 8.f;   // octaves from the cutoff
+          float y = ts.edType == 1 ? (u > 0 ? 1.f : std::pow(2.f, u * 2)) : ts.edType == 2 ? std::pow(2.f, -std::fabs(u) * 1.5f) : (u < 0 ? 1.f : std::pow(2.f, -u * 2));
+          y = std::min(1.f, y * 0.75f + q * std::exp(-u * u * 8.f));
+          p.push_back({x, clamp01(y)}); }
+      poly(c, p, true); glow(c); }
 }

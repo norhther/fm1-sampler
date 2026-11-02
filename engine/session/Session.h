@@ -198,6 +198,8 @@ public:
     void recorderDismiss();               // the pending sample was taken over
     std::string lastSamplePath() const;
     int livePeaks(float* out, int maxBins) const;   // one peak per 50 ms of the take in progress
+    static constexpr int kScope = 128;
+    void scope(float* hi, float* lo) const;   // the master out as a scope: kScope bins of 256 frames (about 0.75 s), oldest first, highest and lowest sample of each
 
     // ---- library on disk ----
     void setDataDir(const std::string& dir);

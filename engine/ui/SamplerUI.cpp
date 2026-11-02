@@ -166,7 +166,7 @@ void SamplerUI::topBar(Rect r) {
     rTempo_ = {x, 6, 74, bh};
     rrect(rTempo_, R_CONTROL, SURFACE);
     text(rTempo_.x + rTempo_.w / 2, cy - 4, 15, TEXT, num("%.0f", app_.tempoNow()), 1, true);
-    text(rTempo_.x + rTempo_.w / 2, cy + 11, 8, locked ? ACCENT : DIM, locked ? "STRETCHES TAPE" : "BPM  DRAG", 1, false);
+    text(rTempo_.x + rTempo_.w / 2, cy + 11, 8, locked ? ACCENT : DIM, locked ? "TAPE LOCK" : "BPM  DRAG", 1, false);
     hit(rTempo_, [this](float px, float) { tempoDragX_ = px; }, [this](float px, float) { const int d = (int)((px - tempoDragX_) / 5.f); if (d) { app_.tempoStep(d); tempoDragX_ += d * 5.f; } });
     x += 77;
     button({x, 6, 30, bh}, "+", false, [this] { app_.tempoStep(1); }, 14); x += 34;
@@ -193,9 +193,10 @@ void SamplerUI::topBar(Rect r) {
           button({mx, 6, 78, bh}, app_.takeBars() ? "TAKE " + std::to_string(app_.takeBars()) + (app_.takeBars() == 1 ? " BAR" : " BARS") : std::string("TAKE FREE"), app_.takeBars() > 0, [this] { app_.cycleTakeBars(); }, 9.5f);
           mx += 86;
       }
+      if (right - mx >= 40) {   // no room between the tempo and STOP ALL on narrow screens: draw nothing rather than over the button
       text(mx, cy - 6, 11, st_.freeRecording || recOn || armed ? ACCENT : TEXT, fit(app_.loopExists() ? std::to_string(std::max(1, st_.loopBars)) + (st_.loopBars == 1 ? " BAR" : " BARS") : app_.loopText(), right - mx, 11), 0, true);
       text(mx, cy + 11, 9, DIM, fit(std::string("SRC: ") + (app_.knobs(SamplerApp::P_SAVE)[1].value), right - mx, 9), 0, false);
-      tap({mx - 4, 0, std::max(60.f, right - mx), r.h}, [this] { auto k = app_.knobs(SamplerApp::P_SAVE); k[1].step(k[1].norm > 0.5f ? -1 : 1); }); }
+      tap({mx - 4, 0, right - mx + 4, r.h}, [this] { auto k = app_.knobs(SamplerApp::P_SAVE); k[1].step(k[1].norm > 0.5f ? -1 : 1); }); } }
 }
 
 void SamplerUI::trackList(Rect r) {   // eight rows; the tracks from 9 on make a second column. ADD TRACK opens the next one
@@ -315,7 +316,7 @@ void SamplerUI::sampleArea(Rect r) {
         button(c, a == 5 ? "PAUL" : SamplerApp::algoName(a), ts.algo == a, [this, a] { app_.setAlgo(a); }, 9.5f);
     }
     // waveform with the playback window
-    Rect w{r.x, r.y + 66, r.w, 118};
+    Rect w{r.x, r.y + 66, r.w, std::min(118.f, std::max(56.f, r.h - 216))};   // the waveform gives way on short screens so the rows under it stay on screen
     rrect(w, R_CARD, SURFACE); stroke(w, R_CARD, OUTLINE, 1);
     const int bins = std::max(20, (int)(w.w / 3));
     if (app_.micState() == 1 || app_.micState() == 2) {   // microphone: input level + trigger threshold while waiting, the growing take while recording
@@ -342,12 +343,12 @@ void SamplerUI::sampleArea(Rect r) {
         goto after_wave;
     }
     {
-    waveDraw(w);
+    if (app_.isSynth(t)) synthViz(w); else waveDraw(w);
     }
     after_wave:
     if (ts.algo == 3 && !app_.isSynth(t) && app_.micState() == 0 && app_.page() != SamplerApp::P_SQ) chopEdit(w);   // KIT: tap the waveform to cut a new pad there, tap a mark to remove it, drag a mark to move it
     // start / end handles (not while the microphone take is shown)
-    for (int h = 0; h < (app_.micState() == 1 || app_.micState() == 2 ? 0 : 2); h++) {   // (SQ page returned earlier)
+    for (int h = 0; h < (app_.micState() == 1 || app_.micState() == 2 || app_.isSynth(t) ? 0 : 2); h++) {   // (SQ page returned earlier)
         const float v = h ? ts.end : ts.start, hx = w.x + 2 + v * (w.w - 4);
         line(hx, w.y + 4, hx, w.y + w.h - 4, ACCENT, 2);
         rrect({hx - (h ? 10 : 0), w.y + 4, 10, 14}, 1, ACCENT);
@@ -965,7 +966,7 @@ void SamplerUI::projectSheet() {
     if (cur != "autosave") b("SAVE AS NEW", false, [this] { app_.saveProject(app_.newProjectName()); });
     b(haveSel ? "LOAD  " + projList_[(size_t)projSel_] : "LOAD (PICK ONE)", false, [this, haveSel] { if (haveSel) { app_.loadProject(projList_[(size_t)projSel_]); projOpen_ = false; } });
     dangerButton({bx, by, bw, bh}, "DELETE PROJECT", [this, haveSel] { if (!haveSel) return; const std::string nm = projList_[(size_t)projSel_]; askConfirm("DELETE THE PROJECT " + nm + "?", "ITS PATTERNS AND ITS TAPE ARE DELETED.", "YES, DELETE", [this, nm] { app_.deleteProject(nm); projSel_ = -1; }); }, 10.5f); by += bh + gap;
-    b("EXPORT MIDI (PATTERNS)", false, [this] { app_.exportMidi(); });
+    b("EXPORT MIDI", false, [this] { app_.exportMidi(); });
     b("EXPORT MIX (WAV)", false, [this] { app_.exportMix(); });
     b("IMPORT MIDI FILE", false, [this] { app_.requestMidi(); });
     const std::string t = app_.toast();

@@ -93,7 +93,8 @@ private:
     int rollFitTrack_ = -1, auditionNote_ = -1; float keyDownY_ = 0, keyStartBase_ = 0; bool keyMoved_ = false;
     int clearAsk_ = 0; float tempoDragX_ = 0;   // the tape clear dialog: 0 closed, 1 the whole tape, 2 + n track n
     void tapeView(Rect r);
-    void waveDraw(Rect w); void chopEdit(Rect w); void chopFullScreen(); bool chopScreen_ = false, chopEven_ = false;   // the sample waveform, its chop marks, and the chop editor on the whole screen
+    void waveDraw(Rect w); void synthViz(Rect w);   // synth tracks: envelope, oscillator shape and filter curve, glowing with the level
+     void chopEdit(Rect w); void chopFullScreen(); bool chopScreen_ = false, chopEven_ = false;   // the sample waveform, its chop marks, and the chop editor on the whole screen
     void tapeFullScreen(); bool tapeFull_ = false;   // the tape on the whole screen
     void seqFullScreen(); bool seqFull_ = false;   // the pattern editor on the whole screen
     void newLoopSheet(); bool newLoopOpen_ = false, nlSeq_ = false, nlEmpty_ = false; int nlBars_ = 2;   // NEW LOOP: tape or sequencer, how many bars

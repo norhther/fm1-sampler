@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
     auto run = [&](double sec) { for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(200)); if (i % 5 == 0) { now += 33; app.tick(now); } } };
     auto tapAt = [&](float x, float y) { ui.touch(0, x, y, now); ui.touch(2, x, y, now); run(0.05); };
     run(2.5);
-    for (size_t i = 0; i < app.library().size(); i++) if (app.library()[i].label == "Boom Bap Kit") app.loadEntry((int)i);   // a project starts empty
+    for (size_t i = 0; i < app.library().size(); i++) if (app.library()[i].label == (getenv("UI_LOAD") ? getenv("UI_LOAD") : "Boom Bap Kit")) app.loadEntry((int)i);   // a project starts empty
     run(1.5);
     for (int i = 0; i < 4; i++) { app.playNote(60 + i * 4, true); run(0.3); app.playNote(60 + i * 4, false); run(0.1); }
     // a loop on two tracks: the first take on track 1, an overdub of notes on track 2

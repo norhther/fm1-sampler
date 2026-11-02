@@ -137,6 +137,13 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.56
+
+- **Synth panel**: on a synth track the SOUND page shows the ENVELOPE (ADSR), the oscillator wave (with the detuned unison copies as faint lines) and the filter curve, drawn from the ENV, OSC and FILTER pages. The cell of the page you edit has an amber outline; a level bar under each cell follows the track. The LFO page turns the middle cell into the LFO wave, scrolling at its real rate, with a faint line for the shape at full depth.
+- **Master scope**: the OUT block of the mixer's signal flow shows the master output as a scope (new `Session::scope`, about 0.75 s). Mixer strips get a red clip mark above the meter.
+- **Fits short screens**: the waveform panel shrinks on screens under about 400 dp tall so the RECORD / LOAD FILE / RESAMPLE row stays visible; the top bar status text is skipped when there is no room (it was drawn over STOP ALL). Shorter labels: EXPORT MIDI, TAPE LOCK.
+- Host-rendered only, not run on a phone.
+
 ## v0.55
 
 - **Reset effects**: tap a track, RESET ITS EFFECTS puts that track's effects and sends back to off (volume, pan and key mode stay). RESET MASTER EFFECTS puts every master effect, the reverb and the delay back to defaults. RESET SOUND TO DEFAULTS (v0.54) is the one for the instrument.

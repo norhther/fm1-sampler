@@ -127,6 +127,7 @@ struct Session::Impl {
     // status mirror (the audio thread writes)
     std::atomic<double> a_pos{0};
     std::atomic<bool> a_playing{false}, a_free{false}, a_freeArmed{false}, a_pending{false};
+    std::atomic<float> a_scHi[Session::kScope], a_scLo[Session::kScope]; std::atomic<int> a_scIdx{0}; float scHi = 0.f, scLo = 0.f; int scN = 0;   // scope ring (the audio thread writes)
     std::atomic<float> a_master{0.f}, a_freeSec{0.f}, a_sampleSec{0.f}, a_inPeak{0.f}, a_bpm{120.f};
     std::atomic<uint32_t> a_cpu{0}, a_cpuPeak{0}, a_clip_mask{0}, a_cliprec_mask{0};
     std::atomic<int> a_bars{4}, a_sampleState{0}, a_sampleTrack{0}, a_sampleVersion{0}, a_sampleFails{0};
@@ -976,6 +977,10 @@ struct Session::Impl {
         { float pre = 0.f; for (int i = 0; i < n * 2; i++) pre = std::max(pre, std::fabs(out[i]) * masterVol); if (pre > 1.1f) a_clip.store(40); else if (a_clip.load() > 0) a_clip.store(a_clip.load() - 1); }
         for (int i = 0; i < n * 2; i++) { const float v = std::tanh(out[i] * masterVol); out[i] = v; mp = std::max(mp, std::fabs(v)); }
         a_master.store(std::max(mp, a_master.load() * 0.92f));
+        for (int i = 0; i < n; i++) {   // scope: the highest and lowest of the left channel per 256 frames
+            const float v = out[2 * i]; scHi = std::max(scHi, v); scLo = std::min(scLo, v);
+            if (++scN >= 256) { const int k = a_scIdx.load(std::memory_order_relaxed); a_scHi[k % kScope].store(scHi, std::memory_order_relaxed); a_scLo[k % kScope].store(scLo, std::memory_order_relaxed); a_scIdx.store(k + 1, std::memory_order_release); scN = 0; scHi = scLo = 0.f; }
+        }
         if (resampling) {   // RESAMPLE: what you hear becomes a sample
             const int64_t take = std::min<int64_t>(n, resLeft);
             resBuf.insert(resBuf.end(), out, out + take * 2); resLeft -= take;
@@ -1566,6 +1571,11 @@ void Session::recorderStop() {
 }
 void Session::recorderDismiss() { std::lock_guard<std::mutex> l(d->sampleMtx); d->pending = false; d->a_pending = false; }
 std::string Session::lastSamplePath() const { std::lock_guard<std::mutex> l(d->sampleMtx); return d->samplePath; }
+void Session::scope(float* hi, float* lo) const {
+    const int e = d->a_scIdx.load(std::memory_order_acquire);
+    for (int i = 0; i < kScope; i++) { const int k = ((e + i) % kScope + kScope) % kScope; hi[i] = d->a_scHi[k].load(std::memory_order_relaxed); lo[i] = d->a_scLo[k].load(std::memory_order_relaxed); }
+}
+
 int Session::livePeaks(float* out, int maxBins) const {
     const int n = std::min(maxBins, d->liveN.load());
     for (int i = 0; i < n; i++) out[i] = d->livePk[i].load();
