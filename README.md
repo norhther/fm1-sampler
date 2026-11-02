@@ -137,6 +137,12 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.51
+
+- **Effects follow the instrument**: each instrument keeps the track effects and the reverb/delay sends you set on it, and gets them back when you load it again. An instrument you have not touched starts clean. The memory is saved with the project (`ifx.N` lines). Before, the effects belonged to the track and stayed the same whatever you loaded.
+- **Own reverb and delay per track**: new TRACK SPACE page in the MIX group (K1 SHARED / OWN, K2 size, K3 delay time, K4 feedback). OWN gives the track its own reverb and delay; its REVERB SEND and DELAY SEND are its level. SHARED uses the common ones of the FX page. Costs CPU on the phone only while a track is on OWN.
+- Host-tested (test_app, test_features green). Not run on a phone or an FM-1; the new page and the STOP ALL button were not looked at on a screen.
+
 ## v0.50
 
 - **New**: STOP ALL button in the top bar (left of TAPE STOP). One tap stops the transport, releases every voice and held note on every track, and clears the reverb and delay tails, so nothing keeps ringing. The metronome click is a separate toggle and is not touched.

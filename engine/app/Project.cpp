@@ -87,6 +87,7 @@ std::string SamplerApp::stateText() {
         io.f(k + "fineN", x.fineN); io.f(k + "levelN", x.levelN);
         io.f(k + "tfEqLow", x.tfEqLow); io.f(k + "tfEqMid", x.tfEqMid); io.f(k + "tfEqHigh", x.tfEqHigh); io.f(k + "tfComp", x.tfComp); io.f(k + "duckAmt", x.duckAmt);
         io.i(k + "edW1", x.edW1, 0, 4); io.i(k + "edW2", x.edW2, 0, 4); io.i(k + "edType", x.edType, 0, 2); io.i(k + "edUni", x.edUni, 0, 3); io.i(k + "edVoice", x.edVoice, 0, 3); io.f(k + "edDet2", x.edDet2); io.f(k + "edCut", x.edCut); io.f(k + "edRes", x.edRes);
+        io.i(k + "spaceOwn", x.spaceOwn, 0, 1); io.f(k + "spSize", x.spSize); io.f(k + "spTime", x.spTime); io.f(k + "spFb", x.spFb);
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8); io.i(k + "printFx", x.printFx, 0, 1);
         io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
         io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.f(k + "tfFold", x.tfFold); io.f(k + "tfAutopan", x.tfAutopan); io.f(k + "tfVinyl", x.tfVinyl); io.f(k + "tfVowel", x.tfVowel); io.f(k + "tfComb", x.tfComb); io.f(k + "tfCombTune", x.tfCombTune); io.f(k + "tfOctave", x.tfOctave); io.f(k + "tfFshift", x.tfFshift); io.f(k + "tfScratch", x.tfScratch); io.f(k + "tfScratchNoise", x.tfScratchNoise); io.i(k + "tfScratchRate", x.tfScratchRate, 0, 4); io.i(k + "tfScratchStyle", x.tfScratchStyle, 0, 3); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
@@ -100,6 +101,9 @@ std::string SamplerApp::stateText() {
             if (n > 0) { io.out << k << "s" << q << ".notes="; for (int i = 0; i < n; i++) io.out << (i ? ";" : "") << v[i].tick << ',' << v[i].len << ',' << v[i].note << ',' << v[i].vel << ',' << v[i].prob << ',' << v[i].ratchet << ',' << v[i].nudge << ',' << v[i].cut; io.out << '\n'; }
         }
     }
+    // what each instrument remembers of the track effects: the ones on the tracks now first, then one line per instrument (path|numbers)
+    for (int t = 0; t < kTracks; t++) { TrackState& x = ts_[t]; if (x.entry >= 0 && x.entry < (int)lib_.size()) { std::vector<float> v, c; instFx(x, v, false); TrackState clean; instFx(clean, c, false); if (v == c) instFxMem_.erase(lib_[(size_t)x.entry].path); else instFxMem_[lib_[(size_t)x.entry].path] = v; } }
+    { int n = 0; for (const auto& m : instFxMem_) { io.out << "ifx." << n++ << '=' << m.first << '|'; for (size_t i = 0; i < m.second.size(); i++) { char b[40]; snprintf(b, sizeof b, "%.6g", m.second[i]); io.out << (i ? "," : "") << b; } io.out << '\n'; } }
     return io.out.str();
 }
 
@@ -128,6 +132,7 @@ void SamplerApp::applyStateText(const std::string& text) {
         io.f(k + "vol", x.vol); io.f(k + "pan", x.pan); io.f(k + "sendR", x.sendR); io.f(k + "sendD", x.sendD);
         io.f(k + "rootN", x.rootN); io.f(k + "synTone", x.synTone); io.f(k + "synBody", x.synBody); io.f(k + "synMotion", x.synMotion); io.f(k + "synGrit", x.synGrit); io.f(k + "sliceSens", x.sliceSens); io.i(k + "sliceCount", x.sliceCount, 0, 5);
         for (int q = 0; q < 16; q++) { const std::string pk = k + "pad" + std::to_string(q) + "."; io.f(pk + "v", x.padVol[q]); io.f(pk + "p", x.padPitch[q]); io.f(pk + "d", x.padDecay[q]); io.i(pk + "g", x.padGroup[q], 0, 4); }
+        io.i(k + "spaceOwn", x.spaceOwn, 0, 1); io.f(k + "spSize", x.spSize); io.f(k + "spTime", x.spTime); io.f(k + "spFb", x.spFb);
         io.f(k + "tfDj", x.tfDj); io.f(k + "tfChorus", x.tfChorus); io.f(k + "tfCrush", x.tfCrush); io.i(k + "tfGate", x.tfGate, 0, 8); io.i(k + "printFx", x.printFx, 0, 1);
         io.f(k + "tfDrive", x.tfDrive); io.f(k + "tfFlanger", x.tfFlanger); io.f(k + "tfPhaser", x.tfPhaser); io.f(k + "tfTremolo", x.tfTremolo); io.f(k + "tfWah", x.tfWah); io.f(k + "tfRing", x.tfRing); io.f(k + "tfWidth", x.tfWidth);
         io.f(k + "tfSpring", x.tfSpring); io.f(k + "tfPhone", x.tfPhone); io.f(k + "tfPunch", x.tfPunch); io.f(k + "tfFold", x.tfFold); io.f(k + "tfAutopan", x.tfAutopan); io.f(k + "tfVinyl", x.tfVinyl); io.f(k + "tfVowel", x.tfVowel); io.f(k + "tfComb", x.tfComb); io.f(k + "tfCombTune", x.tfCombTune); io.f(k + "tfOctave", x.tfOctave); io.f(k + "tfFshift", x.tfFshift); io.f(k + "tfScratch", x.tfScratch); io.f(k + "tfScratchNoise", x.tfScratchNoise); io.i(k + "tfScratchRate", x.tfScratchRate, 0, 4); io.i(k + "tfScratchStyle", x.tfScratchStyle, 0, 3); io.i(k + "tfRepeat", x.tfRepeat, 0, 4); io.i(k + "tfFreeze", x.tfFreeze, 0, 1);
@@ -170,6 +175,14 @@ void SamplerApp::applyStateText(const std::string& text) {
 
     }
     songChain_.clear(); { const auto sg = kv.find("song"); if (sg != kv.end()) { std::istringstream ss(sg->second); std::string item; while (std::getline(ss, item, ',') && songChain_.size() < 64) if (!item.empty()) songChain_.push_back(std::min(7, std::max(0, std::atoi(item.c_str())))); } int on = 0; Io io3{false, &kv, {}}; io3.i("songOn", on, 0, 1); songOn_ = on && !songChain_.empty(); applySong(); }
+    instFxMem_.clear();
+    for (const auto& kvp : kv) {
+        if (kvp.first.rfind("ifx.", 0) != 0) continue;
+        const size_t bar = kvp.second.rfind('|'); if (bar == std::string::npos || bar == 0) continue;
+        std::vector<float> v; std::istringstream ss(kvp.second.substr(bar + 1)); std::string num;
+        while (std::getline(ss, num, ',') && v.size() < 64) { const float f = std::strtof(num.c_str(), nullptr); v.push_back(std::isfinite(f) ? f : 0.f); }
+        instFxMem_[kvp.second.substr(0, bar)] = v;
+    }
     applyFx(); applyMasterFx(); applySeq(0); applyTomb(); applyTempo(); applyMaster(); s_.setLoopSource(loopSrc_);
     setScale(scale_.scale, scale_.root, scale_.octave, scale_.mode);
     track_ = track;

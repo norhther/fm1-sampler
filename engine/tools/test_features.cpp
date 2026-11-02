@@ -1808,6 +1808,66 @@ int main() {
         aT.setTheme(5); settle(); CHECK(clearCol == rgb565(22, 12, 38), "SYNTHWAVE theme: deep purple (%d)", clearCol);
         aT.setTheme(0);
     }
+    {   // each instrument keeps its own track effects and sends; OWN SPACE gives a track its own reverb and delay
+        system("rm -rf /tmp/fm1sampler_t7; mkdir -p /tmp/fm1sampler_t7");
+        Session sF(sr); sF.setDataDir("/tmp/fm1sampler_t7"); sF.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+        SamplerApp aF(sF, [](const uint8_t*, size_t) {}); aF.setTourDone(true); demoSounds(aF);
+        auto entryOf = [&](const char* nm) { for (int i = 0; i < (int)aF.library().size(); i++) if (aF.library()[(size_t)i].label == nm) return i; return -1; };
+        const int bell = entryOf("FM Bell"), gurdy = entryOf("Hurdy Gurdy");
+        CHECK(bell >= 0 && gurdy >= 0, "the two instruments for the effects memory exist");
+        aF.selectTrack(4); aF.loadEntry(bell);
+        { auto k = aF.knobs(SamplerApp::P_TFX); for (int i = 0; i < 25; i++) k[1].step(1); }   // CHORUS up
+        aF.setSend(4, 0, 0.6f);
+        const float chBell = aF.state(4).tfChorus; CHECK(chBell > 0.3f, "chorus is up on the bell (%.2f)", chBell);
+        aF.loadEntry(gurdy);
+        CHECK(aF.state(4).tfChorus == 0.f && aF.state(4).sendR == 0.f, "a new instrument starts clean (chorus %.2f, reverb send %.2f)", aF.state(4).tfChorus, aF.state(4).sendR);
+        { auto k = aF.knobs(SamplerApp::P_TFX); for (int i = 0; i < 25; i++) k[3].step(1); }   // CRUSH up on the gurdy
+        const float crG = aF.state(4).tfCrush; CHECK(crG > 0.3f, "crush is up on the gurdy (%.2f)", crG);
+        aF.loadEntry(bell);
+        CHECK(aF.state(4).tfChorus == chBell && aF.state(4).sendR == 0.6f && aF.state(4).tfCrush == 0.f, "the bell comes back with its own effects (chorus %.2f, send %.2f, crush %.2f)", aF.state(4).tfChorus, aF.state(4).sendR, aF.state(4).tfCrush);
+        aF.loadEntry(gurdy);
+        CHECK(aF.state(4).tfCrush == crG && aF.state(4).tfChorus == 0.f, "the gurdy comes back with its own (crush %.2f, chorus %.2f)", aF.state(4).tfCrush, aF.state(4).tfChorus);
+        aF.loadEntry(bell); aF.loadEntry(gurdy);   // the bell is now remembered, then it goes to disk with the project
+        CHECK(aF.saveProject("fxmem"), "project with remembered effects saved");
+        aF.loadEntry(bell); { auto k = aF.knobs(SamplerApp::P_TFX); for (int i = 0; i < 25; i++) k[1].step(-1); }   // wipe the bell's chorus, then load the project back
+        CHECK(aF.loadProject("fxmem"), "project loaded");
+        aF.selectTrack(4); aF.loadEntry(bell);
+        CHECK(std::fabs(aF.state(4).tfChorus - chBell) < 0.01f, "the effects of an instrument survive a project save and load (chorus %.2f vs %.2f)", aF.state(4).tfChorus, chBell);
+
+        {   // a damaged line (short, absurd number) cannot leave the last instrument's effects on or push a value out of range
+            const std::string pf = "/tmp/fm1sampler_t7/projects/fxmem/project.txt";
+            { std::ofstream f(pf, std::ios::app); f << "ifx.99=" << aF.library()[(size_t)bell].path << "|9e30,0.5\n"; }
+            CHECK(aF.loadProject("fxmem"), "project with a damaged effects line loads");
+            aF.selectTrack(4); aF.loadEntry(gurdy); { auto k = aF.knobs(SamplerApp::P_TFX); for (int i = 0; i < 25; i++) k[3].step(1); }   // crush up on the gurdy
+            aF.loadEntry(bell);
+            const auto& st = aF.state(4);
+            CHECK(st.tfDj <= 1.f && st.tfDj >= 0.f && st.tfCrush == 0.f && st.sendR == 0.f, "short damaged line: values clamped (dj %.2f), the rest clean (crush %.2f, send %.2f)", st.tfDj, st.tfCrush, st.sendR);
+        }
+        // own reverb / delay: the shared return is shut, so any tail comes from the track's own effects
+        auto tail = [&](bool own) {
+            Session s2(sr); s2.setDataDir("/tmp/fm1sampler_t7");
+            int idx = 0; for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == "Hurdy Gurdy") idx = i;
+            s2.loadSamplePath("synth:" + std::to_string(idx), false, 0);
+            std::vector<float> b(512), in(512, 0.f); double e = 0;
+            auto run = [&](int n, bool acc) { for (int i = 0; i < n; i++) { std::fill(b.begin(), b.end(), 0.f); s2.process(b.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (acc) for (float v : b) e += (double)v * v; } };
+            run(200, false);
+            s2.setVolume(0, 0.8f); s2.setSend(0, 0, 1.f); s2.setSend(0, 1, 1.f); s2.setRetLevel(0, 0.f); s2.setRetLevel(1, 0.f);
+            s2.setTrackSpace(0, own, 0.8f, 0.3f, 0.5f);
+            run(50, false); s2.noteOn(0, 48, 100); run(100, false); s2.noteOff(0, 48); run(10, false); run(150, true);
+            return e; };
+        {   // the tail of an OWN track keeps ringing when its sample is unloaded
+            Session s3(sr); s3.setDataDir("/tmp/fm1sampler_t7");
+            int idx = 0; for (int i = 0; i < kSynthCount; i++) if (std::string(kSynths[i].name) == "FM Bell") idx = i;
+            s3.loadSamplePath("synth:" + std::to_string(idx), false, 0);
+            std::vector<float> b(512), in(512, 0.f); double e = 0;
+            auto run = [&](int n, bool acc) { for (int i = 0; i < n; i++) { std::fill(b.begin(), b.end(), 0.f); s3.process(b.data(), in.data(), 256); std::this_thread::sleep_for(std::chrono::microseconds(150)); if (acc) for (float v : b) e += (double)v * v; } };
+            run(200, false); s3.setSend(0, 0, 1.f); s3.setRetLevel(0, 0.f); s3.setTrackSpace(0, true, 0.9f, 0.3f, 0.5f);
+            run(50, false); s3.noteOn(0, 60, 100); run(20, false); s3.noteOff(0, 60); run(5, false); s3.unloadSample(0); run(10, false); run(100, true);
+            CHECK(e > 1e-3, "an OWN track's tail rings on after its sample is unloaded (%.2e)", e);
+        }
+        const double eShared = tail(false), eOwn = tail(true);
+        CHECK(eOwn > 50 * (eShared + 1e-9), "OWN SPACE rings on its own with the shared returns shut (%.2e vs %.2e)", eOwn, eShared);
+    }
     printf("%s (%d failures)\n", fails ? "FAILED" : "ALL OK", fails);
     return fails ? 1 : 0;
 }

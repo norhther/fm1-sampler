@@ -68,6 +68,7 @@ public:
 
     // ---- transport and notes ----
     void play(bool on);
+    void setTrackSpace(int track, bool own, float size /*0..1*/, float sec, float fb);   // OWN SPACE: this track gets its own reverb and delay
     void silence();                       // STOP ALL: transport off, every voice and held note released, reverb and delay tails cleared
     void noteOn(int track, int note, int vel);
     void noteOff(int track, int note);

@@ -68,6 +68,7 @@ struct Session::Impl {
         static constexpr int kDelayMax = 32;
         Delayed delayed[kDelayMax]; int nDelayed = 0; int lastDelay[128] = {}, lastShift[128] = {};
         std::unique_ptr<MasterFx> fx;   // per track effects (DJ filter, chorus, gate, crush ...)
+        std::shared_ptr<Reverb> rev; std::shared_ptr<TapeDelay> dly; bool own = false;   // OWN SPACE: this track's own reverb and delay instead of the shared ones (built on first use)
         int idx = 0;   // which track this is (the global undo log tells tracks apart)
         explicit Track(int sr, int i = 0) : idx(i), tape(sr), fx(new MasterFx(sr, 1.f)) {}
     };
@@ -137,11 +138,11 @@ struct Session::Impl {
     std::atomic<int> a_seqFlags[kTracks], a_seqTrans[kTracks], a_seqPos[kTracks];   // a_seqFlags: run | start pending << 1 | key trigger << 2; a_seqPos: tick inside the pattern that is playing, -1 when it is not
     std::atomic<int> a_voiceN[kTracks]; std::atomic<float> a_voicePos[kTracks][kVoiceMax];
 
-    std::vector<float> bus, tmp, sendBus[2], wet;
+    std::vector<float> bus, tmp, sendBus[2], tsend[2], wet; bool spaceBuilt[kTracks] = {};   // spaceBuilt: only the caller's thread touches it
 
     explicit Impl(int rate) : sr(rate), reverb(rate), delay(rate), mfx(rate) {
         for (int i = 0; i < kTracks; i++) tracks.emplace_back(new Track(rate, i));
-        bus.resize(kBlock * 2); tmp.resize(kBlock * 2); wet.resize(kBlock * 2); sendBus[0].resize(kBlock * 2); sendBus[1].resize(kBlock * 2);
+        bus.resize(kBlock * 2); tmp.resize(kBlock * 2); wet.resize(kBlock * 2); sendBus[0].resize(kBlock * 2); sendBus[1].resize(kBlock * 2); tsend[0].resize(kBlock * 2); tsend[1].resize(kBlock * 2);
         for (auto& a : a_lpk) a = 0.f;
         for (auto& r : a_tpk) for (auto& a : r) a = 0.f;
         for (auto& a : a_lfo) a = 0.f;
@@ -781,9 +782,19 @@ struct Session::Impl {
         if (playing) for (auto& h : hits) if (h.tick % (kPpq / 24) == 0) a_clockPulses.fetch_add(1);
         if (playing != clkWas) { a_clockEv.fetch_or(playing ? 1 : 2); clkWas = playing; }
         const float duckEnv0 = duckEnv; duckTrig = false;
+        auto ownRun = [&](Track& t) {   // the track's own reverb and delay: every block while OWN, also with nothing sent, so the tails ring out
+            t.rev->process(tsend[0].data(), wet.data(), n);
+            for (int i = 0; i < n * 2; i++) out[i] += wet[(size_t)i] * 0.35f;   // fixed levels (the shared ones at their defaults): the send is the track's own level
+            t.dly->process(tsend[1].data(), wet.data(), n);
+            for (int i = 0; i < n * 2; i++) out[i] += wet[(size_t)i] * 0.7f;
+        };
         for (int ti = 0; ti < kTracks; ti++) {
             Track& t = *tracks[(size_t)ti];
-            if (!t.sampler && !t.clipHas && !t.clipRec && t.pending.empty() && t.nDelayed == 0) { t.peak.store(t.peak.load() * 0.9f); a_voiceN[ti].store(0); continue; }
+            if (!t.sampler && !t.clipHas && !t.clipRec && t.pending.empty() && t.nDelayed == 0) {
+                t.peak.store(t.peak.load() * 0.9f); a_voiceN[ti].store(0);
+                if (t.own && t.rev && t.dly) { for (auto& s : tsend) std::fill(s.begin(), s.begin() + n * 2, 0.f); ownRun(t); }
+                continue;
+            }
             std::fill(bus.begin(), bus.begin() + n * 2, 0.f);
             // LFO: one value per block (about 170 Hz)
             float lfoGain = 1.f, lfoPan = 0.f, bend = 0.f; bool filterOn = false;
@@ -891,13 +902,17 @@ struct Session::Impl {
             const float ang = (clampf(t.pan + lfoPan, -1.f, 1.f) * 0.5f + 0.5f) * 1.5707963f;
             const float gl = g * std::cos(ang) * 1.4142f, gr = g * std::sin(ang) * 1.4142f;
             float pk = 0.f;
+            const bool ownSp = t.own && t.rev && t.dly;   // OWN SPACE: this track's sends go to its own reverb and delay
+            auto& SB = ownSp ? tsend : sendBus;
+            if (ownSp) for (auto& s : tsend) std::fill(s.begin(), s.begin() + n * 2, 0.f);
             for (int i = 0; i < n; i++) {
                 const float dg = da > 0.f ? 1.f - da * de : 1.f; de *= dkR;
                 const float l = bus[2 * i] * gl * dg, r = bus[2 * i + 1] * gr * dg;
                 out[2 * i] += l; out[2 * i + 1] += r;
-                for (int sd = 0; sd < 2; sd++) if (t.send[sd] > 0.f) { sendBus[sd][2 * i] += l * t.send[sd]; sendBus[sd][2 * i + 1] += r * t.send[sd]; }
+                for (int sd = 0; sd < 2; sd++) if (t.send[sd] > 0.f) { SB[sd][2 * i] += l * t.send[sd]; SB[sd][2 * i + 1] += r * t.send[sd]; }
                 pk = std::max(pk, std::max(std::fabs(l), std::fabs(r)));
             }
+            if (ownSp) ownRun(t);
             t.peak.store(std::max(pk, t.peak.load() * 0.92f));
         }
         if (songBase >= 0) songTick += (int)hits.size();
@@ -993,7 +1008,24 @@ void Session::play(bool on) {
         if (!on) for (auto& t : d->tracks) d->releaseAll(*t);
     });
 }
-void Session::silence() { play(false); d->post([this] { d->reverb.clear(); d->delay.clear(); }); }
+void Session::silence() {
+    play(false);
+    d->post([this] { d->reverb.clear(); d->delay.clear(); for (auto& t : d->tracks) { if (t->rev) t->rev->clear(); if (t->dly) t->dly->clear(); } });
+}
+// OWN SPACE: the track's own reverb (size 0..1) and delay (seconds, feedback). They are built on the first use, here on the caller's thread, not in the audio callback.
+void Session::setTrackSpace(int t, bool own, float size, float sec, float fb) {
+    if (t < 0 || t >= kTracks) return;
+    std::shared_ptr<Reverb> r; std::shared_ptr<TapeDelay> dl;
+    if (own && !d->spaceBuilt[t]) { d->spaceBuilt[t] = true; r = std::make_shared<Reverb>(d->sr); dl = std::make_shared<TapeDelay>(d->sr); }
+    d->post([=] {
+        Impl::Track& tr = *d->tracks[(size_t)t];
+        if (r) { tr.rev = r; tr.dly = dl; }
+        if (tr.own && !own) { if (tr.rev) tr.rev->clear(); if (tr.dly) tr.dly->clear(); }   // back to SHARED: no old tail replays later
+        tr.own = own;
+        if (tr.rev) tr.rev->setSize(size);
+        if (tr.dly) { tr.dly->setTime(sec); tr.dly->setFeedback(fb); }
+    });
+}
 void Session::noteOn(int t, int note, int vel) { if (t >= 0 && t < kTracks) d->post([=] { d->liveNote(t, note, std::max(1, vel)); }); }
 void Session::noteOff(int t, int note) { if (t >= 0 && t < kTracks) d->post([=] { d->liveNote(t, note, 0); }); }
 

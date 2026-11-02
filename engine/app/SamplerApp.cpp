@@ -19,7 +19,7 @@ constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 |
 // The palette of the FM-1 screen: the colours of the phone's theme (SamplerApp::applyFmPalette sets them whenever the theme changes). The names are the dark theme's:
 // BLACK is the background of whatever theme it is, PAPER the text, ONACC the text on an ACCENT fill, BAR the empty track of a bar.
 uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38), ONACC = 0;
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5", "CHOP", "PRINT FX", "FX 5", "TRACK FX 6", "FX 6", "TRACK FX 7"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5", "CHOP", "PRINT FX", "FX 5", "TRACK FX 6", "FX 6", "TRACK FX 7", "TRACK SPACE"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM", "NEAPM", "NEAPJ", "PERSN", "HUNGJ", "LYDDM", "ALTRD", "LYDAG", "DOR#4", "SPAN8", "INSEN", "IWATO", "YO", "EGYPT", "MAJBL", "PROMT", "ENIGM", "OCTWH", "LOCR2", "MAJ6P", "MIN6P"};
 // 0 KEY, 1 CHORD (the triad of the scale on the key), 2 SNAP, 3..8 the keys snap to the chord of that progression playing now (QNT CHRD),
@@ -121,6 +121,7 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "Track effects, part 6: comb filter, octaver, frequency shifter. Only this track.",   // TFX6
     "A turntable scratch on the whole mix: the sound is pushed and pulled like a record under a DJ's hand, in time with the beat.",   // FX6
     "A turntable scratch on this track only: pick a style and a speed, turn SCRATCH up.",   // TFX7
+    "Reverb and delay of this track alone. OWN: its sends go to its own reverb and delay with their own size, time and feedback. SHARED: the common ones of the FX page.",   // TSPACE
 };
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }
@@ -128,11 +129,11 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX", "TAPE"}; return n[m % kModes]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][11] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2, P_CHOP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_FX5, P_FX6, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_TFX6, P_TFX7, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN, P_PRINT}};
+    static const Page p[kModes][12] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2, P_CHOP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_FX5, P_FX6, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_TFX6, P_TFX7, P_TSPACE, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN, P_PRINT}};
     return p[m % kModes];
 }
 static_assert(sizeof(kPage) / sizeof(kPage[0]) == (size_t)SamplerApp::kPages && sizeof(kHelp) / sizeof(kHelp[0]) == (size_t)SamplerApp::kPages, "one name and one help line per page, in the order of the Page enum");
-int SamplerApp::modePageCount(int m) { static const int n[kModes] = {9, 11, 6, 11, 5}; return n[m % kModes]; }
+int SamplerApp::modePageCount(int m) { static const int n[kModes] = {9, 11, 6, 12, 5}; return n[m % kModes]; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -196,6 +197,7 @@ void SamplerApp::loadEntry(int i, bool preview) {
     libCursor_ = i; auditionAt_ = 0;
     const Entry& e = lib_[(size_t)i];
     TrackState& t = ts_[track_];
+    instFxSwap(track_, i);   // the effects of the instrument that leaves are kept, the new one gets its own (clean the first time)
     t.entry = i; t.start = 0.f; t.end = 1.f; t.rootN = 0.5f; t.sliceCount = 3; t.sliceSens = 0.5f; t.synTone = t.synBody = t.synMotion = t.synGrit = 0.5f; t.edW1 = t.edW2 = t.edType = t.edUni = t.edVoice = 0; t.edDet2 = t.edCut = 0.5f; t.edRes = 0.f;
     if (e.kit) t.algo = 3; else if (t.algo == 3) t.algo = 0;
     if (e.path.rfind("patch:", 0) == 0) {   // a saved patch: the synth, then every setting that was saved with it
@@ -216,6 +218,28 @@ void SamplerApp::loadEntry(int i, bool preview) {
     }
     previewAfterLoad_ = preview;
     s_.loadSamplePath(e.path, e.kit, track_);
+}
+void SamplerApp::instFx(TrackState& x, std::vector<float>& v, bool set) {
+    size_t n = 0;
+    // restoring clamps like the project loader does (a damaged line cannot push a value out of range or make a bad int cast)
+    auto one = [&](auto& f, float lo = 0.f, float hi = 1.f) { if (set) { if (n < v.size()) f = (std::remove_reference_t<decltype(f)>)std::min(hi, std::max(lo, std::isfinite(v[n]) ? v[n] : lo)); } else v.push_back((float)f); n++; };
+    one(x.tfDj); one(x.tfChorus); one(x.tfCrush); one(x.tfGate, 0, 8); one(x.tfDrive); one(x.tfFlanger); one(x.tfPhaser); one(x.tfTremolo); one(x.tfWah); one(x.tfRing); one(x.tfWidth);
+    one(x.tfSpring); one(x.tfPhone); one(x.tfPunch); one(x.tfFold); one(x.tfAutopan); one(x.tfVinyl); one(x.tfVowel); one(x.tfComb); one(x.tfCombTune); one(x.tfOctave); one(x.tfFshift);
+    one(x.tfScratch); one(x.tfScratchNoise); one(x.tfScratchRate, 0, 4); one(x.tfScratchStyle, 0, 3); one(x.tfRepeat, 0, 8); one(x.tfFreeze, 0, 1); one(x.tfEqLow); one(x.tfEqMid); one(x.tfEqHigh); one(x.tfComp);
+    one(x.sendR); one(x.sendD); one(x.spaceOwn, 0, 1); one(x.spSize); one(x.spTime); one(x.spFb);
+}
+void SamplerApp::instFxSwap(int t, int ne) {
+    TrackState& x = ts_[t];
+    if (ne < 0 || ne >= (int)lib_.size() || x.entry == ne) return;
+    const bool had = x.entry >= 0 && x.entry < (int)lib_.size();
+    std::vector<float> v;
+    std::vector<float> cleanV; { TrackState clean; instFx(clean, cleanV, false); }
+    if (had) { instFx(x, v, false); if (v == cleanV) instFxMem_.erase(lib_[(size_t)x.entry].path); else instFxMem_[lib_[(size_t)x.entry].path] = v; }   // untouched instruments are not stored
+    const auto it = instFxMem_.find(lib_[(size_t)ne].path);
+    if (it != instFxMem_.end()) { v = cleanV; std::copy_n(it->second.begin(), std::min(v.size(), it->second.size()), v.begin()); instFx(x, v, true); }   // a short line keeps the clean values for the rest
+    else if (had) { v = cleanV; instFx(x, v, true); }
+    else return;   // nothing was loaded and nothing is remembered: what the track has stays
+    applyMix(t); applyTrackFx(t); applyTrackSpace(t);
 }
 std::string SamplerApp::resolvePath(int entry) const {
     if (entry < 0 || entry >= (int)lib_.size()) return "";
@@ -243,7 +267,7 @@ void SamplerApp::importFile(const std::string& wav) {
 
 // ---- parameters ----
 void SamplerApp::applyAll(int t) {
-    applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t); applyPads(t); applyEdit(t); applySynthEdit(t);
+    applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t); applyPads(t); applyEdit(t); applySynthEdit(t); applyTrackSpace(t);
     s_.setPrintFx(t, ts_[t].printFx != 0, false);   // the switch only: a saved tape is already printed (or not)
 }
 void SamplerApp::applyShape(int t, bool reslice) {
@@ -370,6 +394,7 @@ FxParams SamplerApp::trackParams(int t) const {
     return p;
 }
 void SamplerApp::applyTrackFx(int t) { s_.setTrackFx(t, trackParams(t)); }
+void SamplerApp::applyTrackSpace(int t) { const TrackState& x = ts_[t]; s_.setTrackSpace(t, x.spaceOwn != 0, x.spSize, 0.05f + x.spTime * 1.45f, x.spFb * 0.95f); }
 void SamplerApp::applyPattern(int t) { s_.seqSetBars(t, ts_[t].seqBars + 1); s_.seqSetState(t, ts_[t].seqState); }
 void SamplerApp::queueCommit(int t) { commitAt_ = nowMs_ + 350; commitTrack_ = t; }   // the offline stretch / pitch runs once the knob rests
 void SamplerApp::setAlgo(int a) { chTrack_ = -1; ts_[track_].algo = ((a % 6) + 6) % 6; applyAlgo(track_); }
@@ -630,6 +655,12 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
         k[1] = cont("COMB NOTE", &x.tfCombTune, [](float v) { const int n = (int)std::lround(69.0 + 12.0 * std::log2(60.0 * std::pow(2.0, v * 5.0) / 440.0)); return std::string(noteName(n)) + std::to_string(n / 12 - 1); }, [=] { applyTrackFx(t); }, 1.f / 60.f);
         k[2] = cont("OCTAVE", &x.tfOctave, [](float v) { return std::fabs(v - 0.5f) < 0.02f ? std::string("OFF") : fmt(v < 0.5f ? "-1 OCT %.0f%%" : "+1 OCT %.0f%%", std::fabs(v - 0.5f) * 200); }, [=] { applyTrackFx(t); });
         k[3] = cont("FREQ SHIFT", &x.tfFshift, [](float v) { const float u = (v - 0.5f) * 2.f; return std::fabs(u) < 0.04f ? std::string("OFF") : fmt("%+.0f HZ", std::copysign(u * u * 800.f, u)); }, [=] { applyTrackFx(t); });
+        break;
+    case P_TSPACE:
+        k[0] = choice("REVERB + DELAY", &x.spaceOwn, {"SHARED", "OWN"}, [=] { applyTrackSpace(t); }, true);
+        k[1] = cont("OWN REVERB SIZE", &x.spSize, [](float v) { return pct(v); }, [=] { applyTrackSpace(t); });
+        k[2] = cont("OWN DELAY TIME", &x.spTime, [](float v) { return fmt("%.2fS", 0.05 + v * 1.45); }, [=] { applyTrackSpace(t); });
+        k[3] = cont("OWN DELAY FEEDBACK", &x.spFb, [](float v) { return pct(v); }, [=] { applyTrackSpace(t); });
         break;
     case P_TFX7:
         k[0] = cont("SCRATCH", &x.tfScratch, [](float v) { return v < 0.005f ? std::string("OFF") : pct(v); }, [=] { applyTrackFx(t); });
@@ -1127,7 +1158,7 @@ const char* SamplerApp::fmHint(Page p) {
     switch (p) {
     case P_CHOP: return "K1 chop  K2 start  K3 end  K4 step.  REC splits the chop, GLO deletes it, the keys play the pads.";
     case P_SQ: return "Keys 1-16 light the steps of the bar that plays; the step under the playhead flips.";
-    case P_MIX: case P_TEQ: case P_DUCK: case P_TFX: case P_TFX2: case P_TFX3: case P_TFX4: case P_TFX5: case P_TFX6: case P_TFX7:
+    case P_MIX: case P_TEQ: case P_DUCK: case P_TFX: case P_TFX2: case P_TFX3: case P_TFX4: case P_TFX5: case P_TFX6: case P_TFX7: case P_TSPACE:
         return "Hold EDIT + key 1-8: mute that track (add SEL: solo it).  Hold HOME + key: go to that track.  Hold FX + PRESETS: browse effects.";
     case P_FX: case P_FX2: case P_FX3: case P_FX4: case P_FX5: case P_FX6: case P_TONE: case P_MOD: case P_LIVE: case P_LIVE2: case P_TSTOP:
         return "Hold FX + turn PRESETS to browse the effects, let go of FX to open one.  Hold FX + turn ALGORITHM: whole mix / this track.";
