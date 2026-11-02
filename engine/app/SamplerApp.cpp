@@ -280,6 +280,24 @@ void SamplerApp::resetSound(int t) {
     applyAll(t);
     say("SOUND RESET TO DEFAULTS");
 }
+void SamplerApp::resetTrackFx(int t) {
+    if (t < 0 || t >= kTracks) return;
+    TrackState& x = ts_[t]; const ScaleState keep = x.scale;
+    TrackState d; std::vector<float> v; instFx(d, v, false); instFx(x, v, true);
+    x.scale = keep;
+    applyMix(t); applyTrackFx(t); applyTrackSpace(t);
+    say("TRACK EFFECTS RESET");
+}
+void SamplerApp::resetMasterFx() {
+    reverbSize_ = 0.7f; reverbDw_ = 0.35f; delayTime_ = 0.4f; delayFb_ = 0.45f;
+    chorus_ = phaser_ = flanger_ = drive_ = tremolo_ = wah_ = ringmod_ = tapeStop_ = comp_ = crush_ = 0.f;
+    width_ = djFilter_ = eqLow_ = eqMid_ = eqHigh_ = 0.5f;
+    spring_ = phone_ = punch_ = fold_ = autopan_ = vinyl_ = vowel_ = comb_ = scratch_ = 0.f;
+    springDamp_ = combTune_ = octave_ = fshift_ = scratchNoise_ = 0.5f; scratchRate_ = 2; scratchStyle_ = 0;
+    repeat_ = gate_ = reverse_ = freeze_ = 0; tapeStopHeld_ = false;
+    applyFx(); applyMasterFx();
+    say("MASTER EFFECTS RESET");
+}
 void SamplerApp::applyAll(int t) {
     applyAlgo(t); applyEnv(t); applyLfo(t); applyHome(t); applyArp(t); applySeq(t); applyMix(t); applyShape(t); applyPads(t); applyEdit(t); applySynthEdit(t); applyTrackSpace(t);
     s_.setTapeOnly(t, ts_[t].tapeOnly != 0);

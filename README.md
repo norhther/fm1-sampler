@@ -137,6 +137,12 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.55
+
+- **Reset effects**: tap a track, RESET ITS EFFECTS puts that track's effects and sends back to off (volume, pan and key mode stay). RESET MASTER EFFECTS puts every master effect, the reverb and the delay back to defaults. RESET SOUND TO DEFAULTS (v0.54) is the one for the instrument.
+- The track menu rows shrink to fit the sheet.
+- Host-tested (test_features green with a new check for both resets); the track menu was checked in the host render; not run on a phone or an FM-1.
+
 ## v0.54
 
 - **Empty tape**: NEW LOOP has a third choice, EMPTY TAPE: a silent tape of 1 to 64 bars at the current tempo, with nothing recorded. Move the head and use REC FROM x.y (with COUNT-IN bars of metronome) to record anywhere on it. OVERDUB works on it too.

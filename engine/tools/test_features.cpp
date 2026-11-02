@@ -1126,6 +1126,19 @@ static void testResetSound() {
     CHECK(std::fabs(after.sendR - 0.6f) < 0.01f && after.entry == edited.entry, "...the sends and the instrument stay (send %.2f)", after.sendR);
 }
 
+static void testResetFx() {
+    const int sr = SAMPLERATE; system("rm -rf /tmp/fm1sampler_rf; mkdir -p /tmp/fm1sampler_rf");
+    Session s(sr); s.setDataDir("/tmp/fm1sampler_rf"); s.setSampleDir(std::string(getenv("HOME")) + "/fm1-sampler/samples");
+    SamplerApp app(s, [](const uint8_t*, size_t) {}); app.setTourDone(true); demoSounds(app);
+    app.selectTrack(2); app.setSend(2, 0, 0.7f); app.gotoPage(SamplerApp::P_TFX2); { auto k = app.knobs(); k[0].set(0.9f); }
+    app.gotoPage(SamplerApp::P_FX2); { auto k = app.knobs(); k[0].set(0.9f); }
+    const auto m0 = app.masterParams(); const auto t0 = app.state(2);
+    app.resetTrackFx(2); app.resetMasterFx();
+    const auto t1 = app.state(2); const auto m1 = app.masterParams(); const FxParams clean;
+    CHECK(t1.sendR == 0.f && t1.tfDrive == 0.f && t1.vol == t0.vol, "RESET ITS EFFECTS: sends and effects off, volume stays");
+    CHECK(m1.chorus == clean.chorus && m1.drive == clean.drive && m1.flanger == clean.flanger, "RESET MASTER EFFECTS: master back to clean (%.2f -> %.2f)", m0.flanger + m0.chorus + m0.drive, m1.flanger + m1.chorus + m1.drive);
+}
+
 // TAPE ONLY: a track effect treats the tape, the live sound stays dry
 static void testTapeOnly() {
     const int sr = SAMPLERATE; system("rm -rf /tmp/fm1sampler_to; mkdir -p /tmp/fm1sampler_to");
@@ -1284,6 +1297,7 @@ int main() {
     testTapeSeek();
     testEmptyTape();
     testResetSound();
+    testResetFx();
     testTapeOnly();
     testTrackScale();
     testLibrary();

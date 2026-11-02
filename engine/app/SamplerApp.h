@@ -329,6 +329,8 @@ private:
     // ---- parameters ----
     void applyAll(int t);
 public:
+    void resetTrackFx(int t);   // every effect and send of the track back to off (its key mode stays)
+    void resetMasterFx();       // every master effect, the reverb and the delay back to defaults
     void resetSound(int t);   // the sound of the track's instrument back to its defaults: envelope, LFO, arp, play window, speed, pitch, tuning, synth macros and edits, chops. Effects, mix and tape stay
 private:
     Knob quantKnob(); Knob tripletKnob();

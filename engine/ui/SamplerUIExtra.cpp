@@ -148,16 +148,18 @@ void SamplerUI::trackMenuSheet() {
     const std::string lab = app_.sampleLabel(t);
     text(box.x + 14, box.y + 20, T_TITLE, TEXT, "TRACK " + std::to_string(t + 1), 0, true);
     text(box.x + 14, box.y + 40, T_CAPTION, DIM, fit(lab.empty() ? "EMPTY" : lab, box.w - 28, T_CAPTION), 0, false);
-    float y = box.y + 54; const float bw = box.w - 24, bh = 32;
-    auto b = [&](const std::string& s, bool on, std::function<void()> f) { button({box.x + 12, y, bw, bh}, s, on, std::move(f), 10.5f); y += bh + 6; };
+    float y = box.y + 54; const float bw = box.w - 24, bh = std::min(32.f, (box.h - 54.f - 10.f) / 10.f - 5.f);   // ten rows at most, they always fit the sheet
+    auto b = [&](const std::string& s, bool on, std::function<void()> f) { button({box.x + 12, y, bw, bh}, s, on, std::move(f), 10.5f); y += bh + 5; };
     b("OPEN ITS SOUND", false, [this] { trackMenu_ = -1; app_.gotoMode(0); });
     b(app_.state(t).mute ? "UNMUTE" : "MUTE", app_.state(t).mute, [this, t] { app_.toggleMute(t); });
     b("SOLO", app_.state(t).solo, [this, t] { app_.toggleSolo(t); });
     b("RESET SOUND TO DEFAULTS", false, [this, t] { app_.resetSound(t); trackMenu_ = -1; });
+    b("RESET ITS EFFECTS", false, [this, t] { app_.resetTrackFx(t); trackMenu_ = -1; });
+    b("RESET MASTER EFFECTS", false, [this] { app_.resetMasterFx(); trackMenu_ = -1; });
     b("CLEAR ITS PATTERN", false, [this, t] { app_.seqClear(); showUndo("PATTERN OF TRACK " + std::to_string(t + 1) + " CLEARED"); trackMenu_ = -1; });
-    if (st_.track_has_clip[t]) { dangerButton({box.x + 12, y, bw, bh}, "ERASE ITS TAPE", [this, t] { trackMenu_ = -1; askTapeClear(t); }, 10.5f); y += bh + 6; }
+    if (st_.track_has_clip[t]) { dangerButton({box.x + 12, y, bw, bh}, "ERASE ITS TAPE", [this, t] { trackMenu_ = -1; askTapeClear(t); }, 10.5f); y += bh + 5; }
     { const bool last = t == app_.trackCount() - 1 && app_.trackCount() > SamplerApp::kFmTracks;
-      dangerButton({box.x + 12, y, bw, bh}, last ? "REMOVE TRACK" : "EMPTY THIS TRACK", [this, t] { trackMenu_ = -1; app_.removeTrack(t); }, 10.5f); y += bh + 6; }
+      dangerButton({box.x + 12, y, bw, bh}, last ? "REMOVE TRACK" : "EMPTY THIS TRACK", [this, t] { trackMenu_ = -1; app_.removeTrack(t); }, 10.5f); y += bh + 5; }
     b("CLOSE", false, [this] { trackMenu_ = -1; });
 }
 
