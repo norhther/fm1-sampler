@@ -34,6 +34,7 @@ public:
     void openSongSheet() { songOpen_ = true; }
     bool projectSheetOpen() const { return projOpen_; }
     void openChopEditor() { chopScreen_ = true; }
+    void openTapeFull(bool on = true) { tapeFull_ = on; }
     void openProjectSheet() { projOpen_ = true; projSel_ = -1; }
     float rollZoom() const { return rollZoom_; }       // for the tests: time zoom of the piano roll (1 = the whole pattern) and the pitch rows shown
     float rollRows() const { return rollRowsF_; }
@@ -92,6 +93,7 @@ private:
     int clearAsk_ = 0; float tempoDragX_ = 0;   // the tape clear dialog: 0 closed, 1 the whole tape, 2 + n track n
     void tapeView(Rect r);
     void waveDraw(Rect w); void chopEdit(Rect w); void chopFullScreen(); bool chopScreen_ = false, chopEven_ = false;   // the sample waveform, its chop marks, and the chop editor on the whole screen
+    void tapeFullScreen(); bool tapeFull_ = false;   // the tape on the whole screen
     void seqFullScreen(); bool seqFull_ = false;   // the pattern editor on the whole screen
     void newLoopSheet(); bool newLoopOpen_ = false, nlSeq_ = false; int nlBars_ = 2;   // NEW LOOP: tape or sequencer, how many bars
     // one dialog for what cannot be undone, the menu, the first-run tour, the mixer, the long-press menu of a track

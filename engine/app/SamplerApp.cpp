@@ -19,7 +19,7 @@ constexpr uint16_t rgb(int r, int g, int b) { return (uint16_t)((r >> 3) << 11 |
 // The palette of the FM-1 screen: the colours of the phone's theme (SamplerApp::applyFmPalette sets them whenever the theme changes). The names are the dark theme's:
 // BLACK is the background of whatever theme it is, PAPER the text, ONACC the text on an ACCENT fill, BAR the empty track of a bar.
 uint16_t BLACK = 0, PAPER = rgb(237, 235, 228), DIM = rgb(120, 126, 140), ACCENT = rgb(232, 163, 61), BAR = rgb(46, 54, 72), PANEL = rgb(22, 27, 38), ONACC = 0;
-const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5", "CHOP", "PRINT FX", "FX 5", "TRACK FX 6", "FX 6", "TRACK FX 7", "TRACK SPACE"};
+const char* kPage[] = {"SAMPLE", "FX", "ENVELOPE", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "FX 2", "LIVE FX", "SEQUENCER", "TEMPO", "TRACK FX", "TIMING", "TONE", "MODULATE", "LIVE FX 2", "TOMBOLA", "OP-1 FX", "SOUND SHAPE", "PADS", "SAMPLE EDIT", "TRACK EQ", "DUCK AND LIMIT", "SYNTH OSC", "SYNTH FILTER", "TAPE VIEW", "TRACK FX 2", "TRACK FX 3", "TRACK FX 4", "TAPE STOP", "TRIGGER", "OP-1 FX 2", "TRACK FX 5", "CHOP", "PRINT FX", "FX 5", "TRACK FX 6", "FX 6", "TRACK FX 7", "TRACK SPACE", "TAPE HEAD"};
 const char* kAlgo[] = {"MELODIC", "ONE-SHOT", "LOOPED", "KIT/SLICE", "GRANULAR", "PAULSTRETCH"};
 const char* kScaleName[] = {"CHROM", "MIX", "MAJ", "MIN", "HMIN", "PHRYG", "MIN+", "OFF", "DORIAN", "LYDIAN", "LOCR", "PENT+", "PENT-", "BLUES", "WHOLE", "DIM", "PHRDOM", "HMAJ", "MELMIN", "HUNG", "HIRA", "DHARM", "NEAPM", "NEAPJ", "PERSN", "HUNGJ", "LYDDM", "ALTRD", "LYDAG", "DOR#4", "SPAN8", "INSEN", "IWATO", "YO", "EGYPT", "MAJBL", "PROMT", "ENIGM", "OCTWH", "LOCR2", "MAJ6P", "MIN6P"};
 // 0 KEY, 1 CHORD (the triad of the scale on the key), 2 SNAP, 3..8 the keys snap to the chord of that progression playing now (QNT CHRD),
@@ -122,6 +122,7 @@ const char* kHelp[] = {   // by Page: what the page is for, in plain words
     "A turntable scratch on the whole mix: the sound is pushed and pulled like a record under a DJ's hand, in time with the beat.",   // FX6
     "A turntable scratch on this track only: pick a style and a speed, turn SCRATCH up.",   // TFX7
     "Reverb and delay of this track alone. OWN: its sends go to its own reverb and delay with their own size, time and feedback. SHARED: the common ones of the FX page.",   // TSPACE
+    "K1 moves the tape head, K2 snaps it to bars, K3 listen, K4 stop a record.",   // HEAD
 };
 const char* SamplerApp::pageName(Page p) { return kPage[p]; }
 const char* SamplerApp::pageHelp(Page p) { return kHelp[p]; }
@@ -129,11 +130,11 @@ const char* SamplerApp::algoName(int i) { return kAlgo[std::min(5, std::max(0, i
 const char* SamplerApp::scaleName(int i) { return kScaleName[std::min(kScaleCount - 1, std::max(0, i))]; }
 const char* SamplerApp::modeName(int m) { static const char* n[] = {"SOUND", "FX", "SEQ", "MIX", "TAPE"}; return n[m % kModes]; }
 const SamplerApp::Page* SamplerApp::modePages(int m) {
-    static const Page p[kModes][12] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2, P_CHOP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_FX5, P_FX6, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_TFX6, P_TFX7, P_TSPACE, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN, P_PRINT}};
+    static const Page p[kModes][12] = {{P_HOME, P_ENV, P_LFO, P_ARP, P_SHAPE, P_SMPED, P_SYN1, P_SYN2, P_CHOP}, {P_FX, P_FX2, P_TONE, P_MOD, P_LIVE, P_LIVE2, P_FX3, P_FX4, P_FX5, P_FX6, P_TSTOP}, {P_SQ, P_TEMPO, P_TIMING, P_TOMB, P_PADS, P_TRIG}, {P_MIX, P_TEQ, P_TFX, P_TFX2, P_TFX3, P_TFX4, P_TFX5, P_TFX6, P_TFX7, P_TSPACE, P_DUCK, P_KEY}, {P_TAPEV, P_SEQ, P_SAVE, P_LEN, P_PRINT, P_HEAD}};
     return p[m % kModes];
 }
 static_assert(sizeof(kPage) / sizeof(kPage[0]) == (size_t)SamplerApp::kPages && sizeof(kHelp) / sizeof(kHelp[0]) == (size_t)SamplerApp::kPages, "one name and one help line per page, in the order of the Page enum");
-int SamplerApp::modePageCount(int m) { static const int n[kModes] = {9, 11, 6, 12, 5}; return n[m % kModes]; }
+int SamplerApp::modePageCount(int m) { static const int n[kModes] = {9, 11, 6, 12, 6}; return n[m % kModes]; }
 int SamplerApp::modeOf(Page pg) { for (int m = 0; m < kModes; m++) for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return m; return 0; }
 int SamplerApp::pageSlot(Page pg) { const int m = modeOf(pg); for (int i = 0; i < modePageCount(m); i++) if (modePages(m)[i] == pg) return i; return 0; }
 int SamplerApp::scaleSteps(int scale, int* out) {
@@ -702,6 +703,18 @@ SamplerApp::Knobs SamplerApp::knobs(Page p) {
                   [this](float v) { chopStep_ = (int)std::lround(cl(v) * 2); });
         break;
     }
+    case P_HEAD: {   // the tape head: where it is, snapped to bars or free, heard while it moves, and when a record ends by itself
+        const int nb = std::max(1, st_.loopBars); const bool tape = st_.loopSamples > 0;
+        Knob h; h.name = "HEAD"; h.valid = true; h.isChoice = false; h.norm = tape ? cl((float)(headBars() / nb)) : 0.f;
+        h.value = !tape ? "NO TAPE" : align_ ? "BAR " + std::to_string((int)(headBars() + 1e-3) + 1) : "BAR.BEAT " + headText();
+        h.step = [this](int d) { moveHead((align_ ? std::floor(headBars() + 1e-3) : headBars()) + (d > 0 ? 1 : -1) * (align_ ? 1.0 : 0.25), true); };
+        h.set = [this, nb](float v) { moveHead(v * nb, true); };
+        k[0] = h;
+        k[1] = choice("ALIGN", &align_, {"FREE", "TO BARS"}, [] {}, true);
+        k[2] = choice("LISTEN", &listen_, {"OFF", "ON"}, [] {}, true);
+        k[3] = choice("STOP AFTER", &punchLen_, {"OPEN", "1 BAR", "2 BARS", "4 BARS", "8 BARS", "TAPE END"}, [=] { applyPunch(); });
+        break;
+    }
     case P_PRINT: {   // the effects of this track on its tape
         k[0] = choice("PRINT FX", &x.printFx, {"OFF", "ON"}, [=] { setPrintFx(t, ts_[t].printFx != 0); }, true);
         Knob q; q.name = "TAPE OF THIS TRACK"; q.valid = true; q.isChoice = true; q.norm = x.printFx ? 1.f : 0.f;
@@ -838,13 +851,24 @@ void SamplerApp::setTempo(float bpm) {
 void SamplerApp::transportPlay() { s_.play(!st_.playing); }
 void SamplerApp::transportStop() {
     if (st_.track_clip_rec[track_]) s_.clipRecord(track_, false);
-    s_.play(false); s_.seek(0); seekBar_ = 0;
+    s_.play(false); s_.seekPos(0);
 }
-void SamplerApp::seekBar(int bar) { seekBar_ = std::max(0, std::min(bar, std::max(1, st_.loopBars) - 1)); s_.seek(seekBar_); }
+static const double kPunch[6] = {0, 1, 2, 4, 8, -1};
+void SamplerApp::applyPunch() { s_.setPunchLen(kPunch[punchLen_ % 6]); }
+std::string SamplerApp::punchLenText() const { static const char* n[6] = {"OPEN", "1 BAR", "2 BARS", "4 BARS", "8 BARS", "TAPE END"}; return n[punchLen_ % 6]; }
+double SamplerApp::headBars() const { return st_.loopSamples > 0 ? st_.pos * std::max(1, st_.loopBars) / st_.loopSamples : 0.0; }
+std::string SamplerApp::headText() const { const double b = headBars(); return std::to_string((int)b + 1) + "." + std::to_string(std::min(3, (int)((b - (int)b) * 4)) + 1); }
+void SamplerApp::moveHead(double bars, bool drag) {
+    if (st_.loopSamples <= 0) return;
+    const int nb = std::max(1, st_.loopBars); const double bs = st_.loopSamples / (double)nb;
+    bars = std::min(std::max(0.0, bars), nb - 1e-6);
+    if (align_) bars = std::floor(bars + 1e-3);
+    if (drag) s_.moveTo(bars * bs, listen_ != 0); else s_.seekPos(bars * bs);
+}
 void SamplerApp::recordOver() {
     if (st_.track_clip_rec[track_] || st_.countBeats > 0) { transportStop(); say("RECORD OVER OFF"); return; }
     if (!loopAny_) { say("RECORD A FIRST TAKE"); return; }
-    s_.recordFrom(track_, seekBar_, punchCount_);
+    s_.recordFrom(track_, punchCount_);
     say(punchCount_ ? "COUNT-IN, THEN RECORDING" : "RECORDING OVER THE TAPE");
 }
 void SamplerApp::loopRecord() {
@@ -1173,6 +1197,7 @@ const char* SamplerApp::fmHint(Page p) {
         return "Hold EDIT + key 1-8: mute that track (add SEL: solo it).  Hold HOME + key: go to that track.  Hold FX + PRESETS: browse effects.";
     case P_FX: case P_FX2: case P_FX3: case P_FX4: case P_FX5: case P_FX6: case P_TONE: case P_MOD: case P_LIVE: case P_LIVE2: case P_TSTOP:
         return "Hold FX + turn PRESETS to browse the effects, let go of FX to open one.  Hold FX + turn ALGORITHM: whole mix / this track.";
+    case P_HEAD: return "K1 turns the tape head (hear the tape go by when K3 is on), K2 snaps it to bars, K4 ends a record or overdub by itself.";
     case P_PRINT: return "PRINT FX ON: the effects you play while you record or overdub this track go onto its tape (K1 turns it on).";
     case P_KEY: return "Hold GLO + turn PRESETS: what the analog knob moves (master volume, track volume, DJ filter, last turned knob).";
     case P_HOME: case P_SHAPE: case P_PADS: return "Hold HOME + key 1-8: go to that track.  The CHOP page (press HOME again) edits chops with K1-K4.";

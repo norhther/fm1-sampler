@@ -25,7 +25,7 @@ public:
     static constexpr int kTracks = 16;   // the most; a session starts with 8 and ADD TRACK opens the next ones
     static constexpr int kFmTracks = 8;  // the FM-1 screen and keys only show the first eight
     enum Button { OCT_DOWN, OCT_UP, FX, SEL, ENV, LFO, EDIT, GLO, HOME, SAVE, ARP, SEQ, PLAY, REC };
-    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, P_FX4, P_TFX5, P_CHOP, P_PRINT, P_FX5, P_TFX6, P_FX6, P_TFX7, P_TSPACE, kPages };
+    enum Page { P_HOME, P_FX, P_ENV, P_LFO, P_ARP, P_SEQ, P_MIX, P_KEY, P_SAVE, P_LEN, P_FX2, P_LIVE, P_SQ, P_TEMPO, P_TFX, P_TIMING, P_TONE, P_MOD, P_LIVE2, P_TOMB, P_FX3, P_SHAPE, P_PADS, P_SMPED, P_TEQ, P_DUCK, P_SYN1, P_SYN2, P_TAPEV, P_TFX2, P_TFX3, P_TFX4, P_TSTOP, P_TRIG, P_FX4, P_TFX5, P_CHOP, P_PRINT, P_FX5, P_TFX6, P_FX6, P_TFX7, P_TSPACE, P_HEAD, kPages };
     struct Knob {
         std::string name, value;
         float norm = 0;
@@ -100,11 +100,19 @@ public:
     // looper and recorder
     void transportPlay();
     void transportStop();                  // STOP: the tape stops and goes back to the start (an overdub ends)
-    void seekBar(int bar);                 // tape head to a bar (0-based); RECORD FROM uses it
+    void moveHead(double bars, bool drag); // the tape head to a place (bars from the start, 0-based); drag: it glides like a tape and is heard when LISTEN is on; ALIGN snaps to the bar
+    double headBars() const;               // where the head is, in bars from the start
+    std::string headText() const;          // "3.2" = bar 3, beat 2
+    bool alignBars() const { return align_ != 0; }
+    void toggleAlign() { align_ = !align_; }
+    bool listenOn() const { return listen_ != 0; }
+    void toggleListen() { listen_ = !listen_; }
+    std::string punchLenText() const;      // when a record or overdub ends: OPEN (when you stop it), 1..8 BARS, TAPE END
+    void cyclePunchLen() { punchLen_ = (punchLen_ + 1) % 6; applyPunch(); }
     void recordOver();                     // record over the tape from that bar after COUNT bars of metronome; again to cancel
-    int seekBarNow() const { return seekBar_; }
     int punchCount() const { return punchCount_; }
-    void cyclePunchCount() { punchCount_ = (punchCount_ + 1) % 5; }   // 0..4 bars of click
+    void cyclePunchCount() { punchCount_ = (punchCount_ + 1) % 5; }
+    void applyPunch();   // 0..4 bars of click
     void loopRecord();                            // REC: arm / end the first take, or toggle overdub once a loop exists
     // sequencer (also used by the phone's piano roll)
     // ---- the global strip: undo / redo over every track, the tempo, the tape ----
@@ -368,7 +376,7 @@ private:
     int reverse_ = 0, freeze_ = 0; bool tapeStopHeld_ = false;
     float spring_ = 0.f, springDamp_ = 0.5f, phone_ = 0.f, punch_ = 0.f, fold_ = 0.f, autopan_ = 0.f, vinyl_ = 0.f, vowel_ = 0.f, comb_ = 0.f, combTune_ = 0.5f, octave_ = 0.5f, fshift_ = 0.5f, scratch_ = 0.f, scratchNoise_ = 0.5f; int scratchRate_ = 2, scratchStyle_ = 0;   // OP-1 FX page, FX 4 page, FX 5 page, FX 6 page
     int trackCount_ = kFmTracks; std::string defaultState_;
-    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, takeBars_ = 0, seqGrid_ = 0, liveGrid_ = 0, countIn_ = 0, seekBar_ = 0, punchCount_ = 1;
+    int repeat_ = 0, gate_ = 0, metro_ = 0, takeQuant_ = 0, takeBars_ = 0, seqGrid_ = 0, liveGrid_ = 0, countIn_ = 0, align_ = 1, listen_ = 1, punchLen_ = 0, punchCount_ = 1;
     float swing_ = 0.f, tSpin_ = 0.557f, tGrav_ = 0.55f, tMass_ = 0.72f, tShape_ = 0.6f;   // swing 0..1 = 50..75 %, tombola knobs   // the pattern plays on a 1/16 grid unless told otherwise
     float metroVol_ = 0.6f, tempo_ = 120.f; double lastLoopSamples_ = 0;
     float exciter_ = 0.f, lofi_ = 0.f, wobble_ = 0.f, loopSpeed_ = 2.f / 3.f, micThr_ = 0.452f;   // loop speed is global

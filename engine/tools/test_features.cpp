@@ -1065,16 +1065,34 @@ static void testTapeSeek() {
     s.setTempo(120.f); s.setTakeBars(2); s.setLoopSource(0); s.freeRecord(0, true); run(6.0);
     auto st = s.status(); CHECK(st.loopSamples > 0 && st.loopBars == 2, "a 2 bar tape exists (%d bars)", st.loopBars);
     s.play(true); run(0.7);
-    s.play(false); s.seek(0); run(0.1); st = s.status();
+    s.play(false); s.seekPos(0); run(0.1); st = s.status();
     CHECK(!st.playing && st.pos == 0, "STOP rewinds to the start (pos %.0f)", st.pos);
-    s.seek(1); run(0.1); st = s.status();
-    CHECK(std::fabs(st.pos - st.loopSamples / 2.0) < 1.0, "seek to bar 2 puts the head half way (%.0f of %.0f)", st.pos, st.loopSamples);
-    s.recordFrom(0, 1, 1); run(0.5); st = s.status();
+    s.seekPos(st.loopSamples * 0.375); run(0.1); st = s.status();
+    CHECK(std::fabs(st.pos - st.loopSamples * 0.375) < 1.0, "seek puts the head at an exact place (%.0f of %.0f)", st.pos, st.loopSamples);
+    {   // moving the tape by hand: the head glides to the target at tape speed, and it is heard while it goes (LISTEN), not when it jumps
+        const double L = st.loopSamples; s.seekPos(0); run(0.1);
+        auto energy = [&](double sec) { double e = 0; for (long i = 0; i < (long)(sec * sr) / 256; i++) { std::fill(buf.begin(), buf.end(), 0.f); s.process(buf.data(), loud.data(), 256); for (float v : buf) e += std::fabs(v); } return e; };
+        s.moveTo(L * 0.5, true); const double heard = energy(0.2); st = s.status();
+        CHECK(heard > 1.0 && st.pos > 0 && st.pos < L * 0.5, "moving the head is heard and takes a while (energy %.1f, head %.0f of %.0f)", heard, st.pos, L * 0.5);
+        run(2.0); st = s.status(); CHECK(std::fabs(st.pos - L * 0.5) < 1.0, "...and it arrives (%.0f)", st.pos);
+        s.moveTo(L * 0.25, true); run(0.05); const double back = s.status().pos; CHECK(back < L * 0.5, "it runs backwards too (%.0f)", back); run(2.0);
+        s.moveTo(0, false); const double quiet = energy(0.2); st = s.status(); CHECK(quiet < 1.0 && st.pos < 300, "LISTEN off: the head jumps, silent (energy %.1f, head %.0f)", quiet, st.pos);
+    }
+    s.seekPos(st.loopSamples / 2.0); run(0.1);
+    s.recordFrom(0, 1); run(0.5); st = s.status();
     CHECK(st.countBeats > 0 && !st.playing && !st.track_clip_rec[0], "1 bar of clicks first: not playing, not recording (%d beats left)", st.countBeats);
     run(2.0); st = s.status();
-    CHECK(st.playing && st.track_clip_rec[0] && st.pos > st.loopSamples / 2.0 - 1, "after the clicks it records from bar 2 (pos %.0f)", st.pos);
-    s.play(false); run(0.1); s.recordFrom(0, 0, 0); run(0.1); st = s.status();
+    CHECK(st.playing && st.track_clip_rec[0] && st.pos > st.loopSamples / 2.0 - 1, "after the clicks it records from the head (pos %.0f)", st.pos);
+    s.play(false); run(0.1); s.seekPos(0); s.recordFrom(0, 0); run(0.1); st = s.status();
     CHECK(st.playing && st.track_clip_rec[0], "count-in 0 records at once");
+    {   // a record that ends by itself: after 1 bar (2 s at 120 bpm), and at the end of the tape
+        s.clipRecord(0, false); s.play(false); s.setPunchLen(1); s.seekPos(0); s.recordFrom(0, 0); run(1.8); st = s.status();
+        const bool still = st.track_clip_rec[0]; run(0.4); st = s.status();
+        CHECK(still && !st.track_clip_rec[0] && st.playing, "STOP AFTER 1 BAR: recording until the bar is full, then it stops and the tape plays on");
+        s.setPunchLen(-1); s.seekPos(st.loopSamples * 0.75); s.recordFrom(0, 0); run(0.9); st = s.status(); const bool mid = st.track_clip_rec[0]; run(0.8); st = s.status();
+        CHECK(mid && !st.track_clip_rec[0], "TAPE END: a quarter of the tape left, it stops there, without wrapping");
+        s.setPunchLen(0); s.seekPos(0); s.recordFrom(0, 0); run(5.0); st = s.status(); CHECK(st.track_clip_rec[0], "OPEN: it goes on until you stop it"); s.clipRecord(0, false);
+    }
 }
 
 static void testRollZoom() {
@@ -1249,6 +1267,7 @@ int main() {
         btn(SamplerApp::GLO); CHECK(app.page() == SamplerApp::P_KEY, "GLO: shortcut to the key");
         btn(SamplerApp::SEL); CHECK(app.page() == SamplerApp::P_LEN, "SEL: shortcut to the length");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PRINT, "SEQ from the loop length steps on to the print page");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_HEAD, "SEQ on from the print page: the tape head page");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ tap: sequencer mode, pattern page");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TEMPO, "SEQ again: tempo");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_TIMING, "SEQ again: timing");
@@ -1260,6 +1279,7 @@ int main() {
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SAVE, "SEQ again: loop source");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_LEN, "SEQ again: loop length");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_PRINT, "SEQ again: print fx");
+        btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_HEAD, "SEQ again: tape head");
         btn(SamplerApp::SEQ); CHECK(app.page() == SamplerApp::P_SQ, "SEQ again: back to the pattern");
         app.gotoPage(SamplerApp::P_FX);
     }

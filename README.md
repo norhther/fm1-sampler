@@ -137,6 +137,14 @@ At start (and after NEW PROJECT): every track is empty, no sound is loaded. Pick
 ## Status
 Host-tested only (test_app all green, screenshots of both screens checked). **Not run on a phone or an FM-1.** Open questions: MediaCodec import on a real phone, offline stretch time on the phone CPU, Paulstretch / granular CPU on the phone, arp is free running (not locked to the loop), loop clips are not saved with a project (no project save/load).
 
+## v0.53
+
+- **Move the tape like a tape**: drag the bar numbers above the lanes and the head follows your finger (up to 6x speed, backwards too) and you hear the tape go by. A tap puts the head there at once. New page **HEAD** in the TAPE tab: K1 moves the head (knob or encoder), K2 ALIGN (FREE, or snapped to whole bars), K3 LISTEN (hear the tape while it moves, on or off), K4 STOP AFTER.
+- **REC FROM x.y** (tape view) records over the tape from exactly where the head is (bar.beat), after COUNT-IN bars of metronome (off, 1 to 4). It replaced "REC FROM BAR n" of v0.52.
+- **STOP AFTER** ends a record or overdub by itself: OPEN (when you stop it), 1, 2, 4 or 8 bars, or TAPE END (a record that starts mid-tape stops at the end, without wrapping). It also applies to the normal OVERDUB button. The punch-out is sample accurate; the tape plays on afterwards.
+- **Full screen tape**: FULL SCREEN button in the tape view. A row on top has EXIT, STOP, PLAY, METRO, ALIGN, LISTEN, STOP and < BAR / BAR >; the lanes get all the room.
+- Host-tested (test_app, test_features green; new checks for the glide with sound, backwards, silent jump, 1 bar and tape end punch-outs). Phone screens checked in the host render; not run on a phone or an FM-1. The FM-1 has the HEAD page (K1..K4) but no extra buttons for it.
+
 ## v0.52
 
 - **STOP button** in the top bar (next to play/pause): stops the tape and goes back to the start. It also ends a record-over.

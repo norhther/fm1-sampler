@@ -69,8 +69,10 @@ public:
     // ---- transport and notes ----
     void play(bool on);
     void setTrackSpace(int track, bool own, float size /*0..1*/, float sec, float fb);   // OWN SPACE: this track gets its own reverb and delay
-    void seek(int bar);                   // tape head to the start of a bar (0 = the start of the tape)
-    void recordFrom(int track, int bar, int countBars);   // record over the tape from a bar, after countBars bars of metronome (0 = at once)
+    void seekPos(double samples);          // tape head to an exact place (samples from the start of the tape; 0 = the start)
+    void moveTo(double samples, bool listen);   // the head goes there like a tape (fast, heard when `listen`, backwards too); while the transport plays it jumps
+    void setPunchLen(double bars);         // a record or overdub that ends by itself: 0 = when told to, n = after n bars, -1 = at the end of the tape
+    void recordFrom(int track, int countBars);   // record over the tape from the head, after countBars bars of metronome (0 = at once)
     void silence();                       // STOP ALL: transport off, every voice and held note released, reverb and delay tails cleared
     void noteOn(int track, int note, int vel);
     void noteOff(int track, int note);

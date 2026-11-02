@@ -10,7 +10,7 @@ using namespace theme;
 namespace {
 float clamp01(float v) { return std::min(1.f, std::max(0.f, v)); }
 std::string num(const char* f, double v) { char b[48]; snprintf(b, sizeof b, f, v); return b; }
-const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD", "CHOP", "PRINT", "COMB", "TRK COMB", "SCRATCH", "TRK SCR", "SPACE"};   // by Page
+const char* kPageTab[] = {"SAMPLE", "SENDS", "ENV", "LFO", "ARP", "TAPE FX", "MIXER", "KEY", "LOOP", "LENGTH", "INSERT", "LIVE", "PATTERN", "TEMPO", "TRK FX", "TIMING", "TONE", "MOD", "LIVE 2", "TOMBOLA", "OP-1", "SHAPE", "PADS", "EDIT", "TRK EQ", "DUCK", "OSC", "FILTER", "TAPE", "DRIVE", "WARP", "OP-1 FX", "STOP", "TRIGGER", "FOLD", "TRK FOLD", "CHOP", "PRINT", "COMB", "TRK COMB", "SCRATCH", "TRK SCR", "SPACE", "HEAD"};   // by Page
 static_assert(sizeof(kPageTab) / sizeof(*kPageTab) == SamplerApp::kPages, "one tab label for every page");
 }  // namespace
 
@@ -109,7 +109,8 @@ void SamplerUI::frame(uint32_t now) {
     if (app_.takeClearAsk() && app_.loopExists()) askTapeClear(-1);   // the FM-1 SAVE hold asks the same question
     rrect({0, 0, W_, H_}, 0, BG);
     const float tb = 44, left = 176, right = 252, y0 = tb + MARGIN, h = H_ - tb - 2 * MARGIN;
-    if (seqFull_ && app_.page() == SamplerApp::P_SQ) { seqFullScreen(); }
+    if (tapeFull_ && (app_.page() == SamplerApp::P_TAPEV || app_.page() == SamplerApp::P_HEAD)) { tapeFullScreen(); }
+    else if (seqFull_ && app_.page() == SamplerApp::P_SQ) { seqFullScreen(); }
     else if (chopScreen_) { chopFullScreen(); }
     else {
     topBar({0, 0, W_, tb});
@@ -295,13 +296,13 @@ void SamplerUI::sampleArea(Rect r) {
     const int t = app_.track();
     const auto ts = app_.state(t);
     const std::string lab = app_.sampleLabel(t);
-    text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - (app_.page() == SamplerApp::P_TAPEV ? 150 : 120), T_TITLE), 0, true);
-    if (app_.page() != SamplerApp::P_TAPEV) text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);   // (the tape page has its own lanes and a NEW LOOP button in that corner)
+    text(r.x, r.y + 12, T_TITLE, lab.empty() ? DIM : TEXT, fit(lab.empty() ? "EMPTY TRACK: PICK A SAMPLE" : lab, r.w - (app_.page() == SamplerApp::P_TAPEV || app_.page() == SamplerApp::P_HEAD ? 270 : 120), T_TITLE), 0, true);
+    if (app_.page() != SamplerApp::P_TAPEV && app_.page() != SamplerApp::P_HEAD) text(r.x + r.w, r.y + 12, T_CAPTION, DIM, "TRACK " + std::to_string(t + 1), 2, true);   // (the tape page has its own lanes and a NEW LOOP button in that corner)
     if (app_.page() == SamplerApp::P_SQ) button({r.x + r.w - 214, r.y, 130, 26}, "FULL SCREEN", false, [this] { seqFull_ = true; }, 10.5f);
     if (app_.page() == SamplerApp::P_PADS) button({r.x + r.w - 214, r.y, 214, 26}, "QUANTIZE: " + app_.quantText(), app_.quantDiv() > 0, [this] { app_.cycleQuant(); }, 10.5f);   // the pads snap to the beat too
     if (app_.page() == SamplerApp::P_TEMPO) { button({r.x + r.w - 210, r.y, 110, 26}, "TAP TEMPO", false, [this] { app_.tapTempo(); }, 10.5f, true); }
     if (app_.page() == SamplerApp::P_MIX) { mixerView({r.x, r.y + 28, r.w, r.h - 28}); return; }
-    if (app_.page() == SamplerApp::P_TAPEV) { button({r.x + r.w - 130, r.y, 130, 26}, "NEW LOOP", false, [this] { newLoopOpen_ = true; }, 10.5f, true); tapeView({r.x, r.y + 28, r.w, r.h - 28}); return; }
+    if (app_.page() == SamplerApp::P_TAPEV || app_.page() == SamplerApp::P_HEAD) { button({r.x + r.w - 130 - 4 - 110, r.y, 110, 26}, "FULL SCREEN", false, [this] { tapeFull_ = true; }, 10.5f); button({r.x + r.w - 130, r.y, 130, 26}, "NEW LOOP", false, [this] { newLoopOpen_ = true; }, 10.5f, true); tapeView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_PADS) { padsView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_TOMB) { tombolaView({r.x, r.y + 28, r.w, r.h - 28}); return; }
     if (app_.page() == SamplerApp::P_SQ) { sequencerView({r.x, r.y + 28, r.w, r.h - 28}); return; }   // the sequencer page shows the pattern instead of the waveform, with all the room there is
@@ -426,12 +427,13 @@ void SamplerUI::tapeView(Rect r) {   // like the OP-1 tape: two reels and the he
     const int nT = app_.trackCount(), vis = std::min(nT, 8);
     const float labW = 34, ruler = 16, top = r.y + 48 + ruler, xW = 38, sbW = nT > vis ? 14.f : 0.f, laneH = (r.y + r.h - top) / vis, wx = r.x + labW + 4, ww = r.w - labW - 4 - xW - sbW;   // xW: a gutter on the right for each lane's X, so it never covers the waveform
     if (has) for (int b = 0; b < bars; b += std::max(1, bars / 16)) text(wx + ww * b / bars + 3, top - ruler / 2 - 1, 8, DIM, std::to_string(b + 1), 0, false);   // the ruler: where each bar starts
-    if (has) {   // tap or drag the ruler: the head goes to that bar; RECORD FROM starts there
+    if (has) {   // the ruler is the tape head: a tap puts it there, drag and the tape runs by under it (you hear it when LISTEN is on); ALIGN snaps it to the bars
         const Rect rr{wx, top - ruler, ww, ruler};
-        auto go = [this, rr, bars](float px, float) { app_.seekBar((int)std::floor((px - rr.x) / rr.w * bars)); };
-        hit(rr, go, go);
-        const float mx = wx + ww * app_.seekBarNow() / bars; line(mx, top - ruler, mx, top + 4, ACCENT, 2);
-        button({r.x + r.w - 76 - 4 - 92, r.y + 30, 92, 16}, st_.track_clip_rec[app_.track()] || st_.countBeats > 0 ? "STOP RECORDING" : "REC FROM BAR " + std::to_string(app_.seekBarNow() + 1), st_.track_clip_rec[app_.track()] || st_.countBeats > 0, [this] { app_.recordOver(); }, 8.5f);
+        auto at = [rr, bars](float px) { return (double)std::min(1.f, std::max(0.f, (px - rr.x) / rr.w)) * bars; };
+        hit(rr, [this, at](float px, float) { app_.moveHead(at(px), false); }, [this, at](float px, float) { app_.moveHead(at(px), true); });
+        const float mx = wx + ww * (float)(app_.headBars() / bars); line(mx, top - ruler, mx, top + 4, ACCENT, 2);
+        const bool busy = st_.track_clip_rec[app_.track()] || st_.countBeats > 0;
+        button({r.x + r.w - 76 - 4 - 92, r.y + 30, 92, 16}, busy ? "STOP RECORDING" : "REC FROM " + app_.headText(), busy, [this] { app_.recordOver(); }, 8.5f);
         button({r.x + r.w - 76, r.y + 30, 76, 16}, app_.punchCount() ? "COUNT " + std::to_string(app_.punchCount()) + (app_.punchCount() == 1 ? " BAR" : " BARS") : std::string("COUNT OFF"), false, [this] { app_.cyclePunchCount(); }, 8.5f);
     }
     if (tapeSeen_ != app_.track()) { tapeSeen_ = app_.track(); tapeTop_ = std::min(tapeTop_, app_.track()); tapeTop_ = std::max(tapeTop_, app_.track() - vis + 1); }   // a track picked elsewhere scrolls into view
@@ -692,6 +694,26 @@ void SamplerUI::seqFullScreen() {
     text(W_ - m, m + h + 12, T_CAPTION, run ? ACCENT : DIM, std::string("PATTERN ") + (run ? (st_.seqRun[t] ? "PLAYING" : "WAITING FOR THE ") + std::string(st_.seqRun[t] ? "" : "BEAT") : "STOPPED") + (st_.seqTrans[t] ? num("  %+.0f ST", st_.seqTrans[t]) : ""), 2, true);
     text(m, m + h + 12, T_CAPTION, DIM, "< BEAT / BEAT > SLIDE THE WHOLE PATTERN: LINE UP THE FIRST BEAT WITH THE METRONOME", 0, false);
     sequencerView({m, m + h + 22, W_ - 2 * m, H_ - 2 * m - h - 22});
+}
+
+// ---- the tape on the whole screen: the tape view with the head controls on a row above it ----
+void SamplerUI::tapeFullScreen() {
+    const float m = MARGIN, h = 34, gap = 4;
+    if (app_.page() != SamplerApp::P_TAPEV && app_.page() != SamplerApp::P_HEAD) { tapeFull_ = false; return; }
+    std::vector<std::pair<std::string, std::function<void()>>> items; std::vector<bool> on;
+    auto add = [&](const std::string& l, bool o, std::function<void()> f) { items.push_back({l, std::move(f)}); on.push_back(o); };
+    add("EXIT", false, [this] { tapeFull_ = false; });
+    add("STOP", false, [this] { app_.transportStop(); });
+    add(st_.playing ? "PAUSE" : "PLAY", st_.playing, [this] { app_.transportPlay(); });
+    add("METRO", app_.metronome(), [this] { app_.toggleMetro(); });
+    add(app_.alignBars() ? "ALIGN: BARS" : "ALIGN: FREE", app_.alignBars(), [this] { app_.toggleAlign(); });
+    add(app_.listenOn() ? "LISTEN: ON" : "LISTEN: OFF", app_.listenOn(), [this] { app_.toggleListen(); });
+    add("STOP: " + app_.punchLenText(), false, [this] { app_.cyclePunchLen(); });
+    add("< BAR", false, [this] { app_.moveHead((app_.alignBars() ? std::floor(app_.headBars() + 1e-3) : app_.headBars()) - 1, true); });
+    add("BAR >", false, [this] { app_.moveHead((app_.alignBars() ? std::floor(app_.headBars() + 1e-3) : app_.headBars()) + 1, true); });
+    const float w = (W_ - 2 * m - gap * (items.size() - 1)) / items.size();
+    for (size_t i = 0; i < items.size(); i++) button({m + i * (w + gap), m, w, h}, items[i].first, on[i], items[i].second, 9.f, i == 0);
+    tapeView({m, m + h + 6, W_ - 2 * m, H_ - 2 * m - h - 6});
 }
 
 // ---- the chop editor on the whole screen: the waveform with its marks (drag to move, tap to add or remove), AUTO / EVEN chops, and one button per chop to hear it ----

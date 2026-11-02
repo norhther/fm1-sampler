@@ -97,6 +97,10 @@ struct Session::Impl {
     int bounceTrack = -1, bounceSrc = 1, bounceBar = 0; int64_t bounceLeft = 0, bounceLen = 0; double bounceAt = 0; bool bounceArmed = false, bounceNew = false;   // bounceBar: 0 = the whole loop from its start, n = one pass of the pattern from bar n of the tape
     std::vector<TickHit> hits;
     double pos = 0; int32_t loopSamples = 0;
+    // the tape head moved by hand: it glides to the target at tape speed (and is heard while it goes, when glideListen)
+    bool glide = false, glideListen = false; double glideTarget = 0, glideStart = 0, glideStep = 0;
+    // record / overdub that ends by itself: punchBars 0 = when told to, > 0 that many bars, < 0 at the end of the tape
+    double punchBars = 0; int64_t punchLeft = -1; int punchTrack = -1;
     std::atomic<float> tapeSpeed{1.f}; double tapePos = 0;   // ONE tape pointer for every loop clip, so they never drift apart
 
     // free take
@@ -565,7 +569,11 @@ struct Session::Impl {
         else t.pending.push_back({note, vel});
     }
     int countTrack = -1;   // kind 3 (record over the tape from a bar): the track that records when the clicks end
-    void clipRecOn(int t) { auto& tr = *tracks[(size_t)t]; if (!tr.clipRec) { tapeCheckpoint(t); tr.recWrote = false; } tr.clipRec = true; }
+    void clipRecOn(int t) {
+        auto& tr = *tracks[(size_t)t]; if (!tr.clipRec) { tapeCheckpoint(t); tr.recWrote = false; } tr.clipRec = true;
+        punchTrack = -1; punchLeft = -1;
+        if (punchBars != 0 && loopSamples > 0) { punchTrack = t; punchLeft = punchBars > 0 ? (int64_t)std::llround(punchBars * loopSamples / (double)std::max(1, loopBars)) : std::max<int64_t>(1, (int64_t)(loopSamples - pos)); }
+    }
     void startCount(int kind, int bars = -1) {
         counting = true; countKind = kind; countLeft = (bars < 0 ? countIn : bars) * 4.0 * samplesPerBeat(); freeBeat = 0; playing = false; clickEnv = 0;
     }
@@ -779,6 +787,8 @@ struct Session::Impl {
         const bool locked = std::fabs(spd - 1.0) < 0.01;
         const double tb = loopSamples > 0 ? (locked ? (double)(p0 % loopSamples) : tapePos) : 0.0;
         if (loopSamples > 0) tapePos = !tl ? (double)(p0 % loopSamples) : locked ? (double)((p0 + n) % loopSamples) : std::fmod(tb + n * spd, (double)loopSamples);
+        const bool gl = glide && !playing && loopSamples > 0;   // the head is on its way to glideTarget
+        if (gl) { const double mx = 6.0 * n, dl = std::min(mx, std::max(-mx, glideTarget - pos)); glideStart = pos; glideStep = dl / n; } else glideStep = 0;
         bool anyEvents;
         std::vector<Arp::Ev> evs;
         songAdvance();
@@ -862,7 +872,7 @@ struct Session::Impl {
                             bus[2 * i] += c[(size_t)2 * k] + (c[(size_t)2 * k1] - c[(size_t)2 * k]) * fr; bus[2 * i + 1] += c[(size_t)2 * k + 1] + (c[(size_t)2 * k1 + 1] - c[(size_t)2 * k + 1]) * fr;
                         }
                     }
-                    if (t.clipRec) {
+                    if (t.clipRec && !(ti == punchTrack && punchLeft >= 0 && i >= punchLeft)) {   // the punch-out: nothing is written past it
                         if (t.clip.size() != (size_t)loopSamples * 2) t.clip.assign((size_t)loopSamples * 2, 0.f);
                         auto& c = t.clip;
                         // recording works at any tape speed, as the head of a tape machine: the input lands on the moving tape position.
@@ -889,6 +899,12 @@ struct Session::Impl {
                         t.clipHas = true;
                         if (bounceTrack == ti && bounceLeft > 0 && --bounceLeft == 0) bounceFinish();
                     } else t.recPrevOk = false;
+                }
+            } else if (gl && glideListen && t.clipHas && glideStep != 0 && t.clip.size() == (size_t)loopSamples * 2) {   // moving the tape by hand: you hear it, backwards too
+                for (int i = 0; i < n; i++) {
+                    const double cp = std::min((double)loopSamples - 1.001, std::max(0.0, glideStart + i * glideStep));
+                    const size_t k = (size_t)cp, k1 = k + 1; const float fr = (float)(cp - (double)k); auto& c = t.clip;
+                    bus[2 * i] += c[2 * k] + (c[2 * k1] - c[2 * k]) * fr; bus[2 * i + 1] += c[2 * k + 1] + (c[2 * k1 + 1] - c[2 * k + 1]) * fr;
                 }
             }
             };
@@ -956,6 +972,11 @@ struct Session::Impl {
             resBuf.insert(resBuf.end(), out, out + take * 2); resLeft -= take;
             if (resLeft <= 0) { resampling = false; a_sampleState = 2; auto b = std::make_shared<std::vector<float>>(std::move(resBuf)); resBuf = {}; job([this, b] { finishSample(std::move(*b)); }); }
         }
+        if (punchLeft >= 0 && tl) {   // a record that ends by itself
+            punchLeft -= n;
+            if (punchLeft <= 0) { Track& pt = *tracks[(size_t)punchTrack]; if (pt.clipRec) { if (!pt.recWrote) dropTapeCheckpoint(punchTrack); pt.clipRec = false; pt.recPrevOk = false; } punchLeft = -1; punchTrack = -1; }
+        }
+        if (gl) { pos += glideStep * n; tapePos = pos; if (std::fabs(glideTarget - pos) < 0.5) { pos = glideTarget; tapePos = pos; glide = false; } }
         if (playing) {
             const double pos0 = pos;
             pos += n;
@@ -1011,19 +1032,26 @@ void Session::play(bool on) {
         if (!on) for (auto& t : d->tracks) d->releaseAll(*t);
     });
 }
-void Session::seek(int bar) {   // the tape head goes to the start of a bar (0 = the start); tapes of every speed follow
-    d->post([this, bar] {
+void Session::seekPos(double samples) {   // the tape head jumps to an exact place (samples from the start of the tape)
+    d->post([this, samples] {
         if (d->loopSamples <= 0) return;
-        const int bars = std::max(1, d->loopBars);
-        const double p = (double)d->loopSamples * std::min(std::max(bar, 0), bars - 1) / bars;
-        d->pos = p; d->tapePos = p;
+        d->glide = false; d->pos = std::min(std::max(0.0, samples), (double)d->loopSamples - 1); d->tapePos = d->pos;
     });
 }
-void Session::recordFrom(int track, int bar, int countBars) {   // record over the tape from a bar, after countBars bars of clicks (0 = at once)
+void Session::moveTo(double samples, bool listen) {   // the head goes there like a tape: fast, and you hear it when listen; while the transport plays it jumps
+    d->post([this, samples, listen] {
+        if (d->loopSamples <= 0) return;
+        const double t = std::min(std::max(0.0, samples), (double)d->loopSamples - 1);
+        if (d->playing || !listen) { d->glide = false; d->pos = t; d->tapePos = t; return; }
+        d->glide = true; d->glideListen = true; d->glideTarget = t;
+    });
+}
+void Session::setPunchLen(double bars) { d->post([this, bars] { d->punchBars = bars; }); }   // 0: a record ends when told to, n > 0: after n bars, < 0: at the end of the tape
+void Session::recordFrom(int track, int countBars) {   // record over the tape from where the head is, after countBars bars of clicks (0 = at once)
     if (track < 0 || track >= kTracks) return;
-    seek(bar);
     d->post([this, track, countBars] {
         if (d->loopSamples <= 0) return;
+        d->glide = false;
         for (auto& t : d->tracks) d->releaseAll(*t);
         d->countTrack = track;
         if (countBars > 0) d->startCount(3, std::min(countBars, 8));
@@ -1267,7 +1295,7 @@ void Session::setMasterFx(const FxParams& p) { d->post([=] { d->mfx.set(p); }); 
 
 // ---- looper ----
 void Session::freeRecord(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { if (on) d->freeStart(t); else d->freeStop(); }); }
-void Session::clipRecord(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; if (on && !tr.clipRec) { d->tapeCheckpoint(t); tr.recWrote = false; } else if (!on && tr.clipRec && !tr.recWrote) d->dropTapeCheckpoint(t); tr.clipRec = on; }); }
+void Session::clipRecord(int t, bool on) { if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; if (on) d->clipRecOn(t); else { if (tr.clipRec && !tr.recWrote) d->dropTapeCheckpoint(t); tr.clipRec = false; if (d->punchTrack == t) { d->punchLeft = -1; d->punchTrack = -1; } } }); }
 void Session::clipClear(int t) {
     if (t >= 0 && t < kTracks) d->post([=] { auto& tr = *d->tracks[(size_t)t]; if (tr.clipHas) d->tapeCheckpoint(t); tr.clipRec = false; tr.clip.clear(); tr.clipHas = false; d->clearIfEmpty(); });
 }
